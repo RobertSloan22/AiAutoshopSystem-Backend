@@ -1,0 +1,38 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "type": "module",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@langchain/community": "^0.3.34",
+    "@langchain/core": "^0.3.37",
+    "@langchain/langgraph": "^0.2.54",
+    "@langchain/openai": "^0.4.4",
+    "@supabase/supabase-js": "^2.49.1",
+    "@types/jsdom": "^21.1.7",
+    "cheerio": "^1.0.0",
+    "chromadb": "^1.10.4",
+    "cookieparser": "^0.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsdom": "^26.0.0",
+    "langchain": "^0.3.19",
+    "mongoose": "^8.9.4",
+    "node-fetch": "^2.7.0",
+    "nodemon": "^3.1.9",
+    "openai": "^4.84.0",
+    "p-queue": "^7.4.1",
+    "path": "^0.12.7"
+  }
+}
