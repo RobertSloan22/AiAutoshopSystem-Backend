@@ -1,10 +1,12 @@
 import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/cheerio";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { Chroma } from "@langchain/community/vectorstores/chroma";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { Embeddings } from "@langchain/core/embeddings";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { ChromaClient } from "chromadb";
+import path from "path";
 
 // Define the chat prompt template
 const chatPrompt = ChatPromptTemplate.fromMessages([
@@ -215,54 +217,98 @@ export class Retriever {
 
             const config = siteConfig ? { ...defaultConfig, ...siteConfig } : defaultConfig;
 
-            // Initialize loader with site-specific configuration
-            const loader = new CheerioWebBaseLoader(url, {
-                selector: config.selectors.postContainer,
-                headers: config.headers,
-                transformElement: (element) => {
-                    // Extract information using site-specific selectors
-                    const postContent = element.find(config.selectors.postContent).text();
-                    const threadTitle = element.find(config.selectors.threadTitle).text();
-                    const dtcCode = element.find(config.selectors.dtcCode).text();
-                    const postDate = element.find(config.selectors.postDate).text();
-                    
-                    // Extract structured information
-                    const vehicleInfo = extractVehicleInfo(threadTitle + ' ' + postContent);
-                    const dtcInfo = extractDTCInfo(postContent, dtcCode);
-                    const repairInfo = extractRepairInfo(postContent);
-                    const symptomInfo = extractSymptomInfo(postContent);
-
-                    return {
-                        title: threadTitle,
-                        content: postContent,
-                        dtcCode: dtcCode,
-                        date: postDate,
-                        vehicleInfo: vehicleInfo,
-                        dtcInfo: dtcInfo,
-                        repairInfo: repairInfo,
-                        symptomInfo: symptomInfo
-                    };
-                }
+            // Create ChromaDB client and ensure the collection exists
+            const client = new ChromaClient({
+                path: process.env.CHROMA_URL || "http://localhost:8000"
             });
-
-            // Load and process documents
-            const docs = await loader.load();
+            const collectionName = "bmw_dtc_data";
             
-            // Split documents with more context preservation
-            const textSplitter = new RecursiveCharacterTextSplitter({
-                chunkSize: 500, // Increased for better context
-                chunkOverlap: 50,
-            });
-            const docSplits = await textSplitter.splitDocuments(docs);
+            // Get or create collection
+            let collection;
+            try {
+                collection = await client.getCollection({ name: collectionName });
+                console.log('Using existing ChromaDB collection');
+            } catch {
+                collection = await client.createCollection({ 
+                    name: collectionName,
+                    metadata: {
+                        "description": "BMW DTC (Diagnostic Trouble Code) data collection",
+                        "created_at": new Date().toISOString()
+                    }
+                });
+                console.log('Created new ChromaDB collection');
+            }
 
-            // Create vector store with local embeddings
-            const vectorStore = await MemoryVectorStore.fromDocuments(
-                docSplits,
-                new LocalEmbeddings(),
-                {
-                    metadataFields: ["dtcCode", "date", "title", "vehicleInfo", "dtcInfo", "repairInfo", "symptomInfo"]
-                }
-            );
+            // Check if we already have documents for this URL
+            const existingDocs = await collection.get({
+                where: { source: url }
+            });
+
+            let vectorStore;
+            
+            if (existingDocs && existingDocs.length > 0) {
+                console.log('Found existing documents in ChromaDB, reusing them');
+                vectorStore = await Chroma.fromExistingCollection(
+                    new LocalEmbeddings(),
+                    { collectionName }
+                );
+            } else {
+                console.log('No existing documents found, loading from URL');
+                // Initialize loader with site-specific configuration
+                const loader = new CheerioWebBaseLoader(url, {
+                    selector: config.selectors.postContainer,
+                    headers: config.headers,
+                    transformElement: (element) => {
+                        // Extract information using site-specific selectors
+                        const postContent = element.find(config.selectors.postContent).text();
+                        const threadTitle = element.find(config.selectors.threadTitle).text();
+                        const dtcCode = element.find(config.selectors.dtcCode).text();
+                        const postDate = element.find(config.selectors.postDate).text();
+                        
+                        // Extract structured information
+                        const vehicleInfo = extractVehicleInfo(threadTitle + ' ' + postContent);
+                        const dtcInfo = extractDTCInfo(postContent, dtcCode);
+                        const repairInfo = extractRepairInfo(postContent);
+                        const symptomInfo = extractSymptomInfo(postContent);
+
+                        return {
+                            title: threadTitle,
+                            content: postContent,
+                            dtcCode: dtcCode,
+                            date: postDate,
+                            vehicleInfo: vehicleInfo,
+                            dtcInfo: dtcInfo,
+                            repairInfo: repairInfo,
+                            symptomInfo: symptomInfo
+                        };
+                    }
+                });
+
+                // Load and process documents
+                const docs = await loader.load();
+                
+                // Split documents with more context preservation
+                const textSplitter = new RecursiveCharacterTextSplitter({
+                    chunkSize: 500,
+                    chunkOverlap: 50,
+                });
+                const docSplits = await textSplitter.splitDocuments(docs);
+
+                // Create vector store with ChromaDB persistence
+                vectorStore = await Chroma.fromDocuments(
+                    docSplits,
+                    new LocalEmbeddings(),
+                    {
+                        collectionName,
+                        collectionMetadata: {
+                            source: url,
+                            timestamp: new Date().toISOString()
+                        }
+                    }
+                );
+                
+                console.log('Successfully stored documents in ChromaDB');
+            }
 
             // Create retriever instance
             const instance = new Retriever();

@@ -89,9 +89,12 @@ Provide a comprehensive analysis focusing on accurate diagnostic procedures, com
     `);
 
     const modelInstance = new ChatOpenAI({
+      modelName: 'hermes-3-llama-3.2-3b',
       temperature: 0.2,
-      modelName: 'gpt-4o-mini',
-      openAIApiKey: process.env.OPENAI_API_KEY, // Use environment variable instead of hardcoded key
+      openAIApiKey: null,
+      configuration: {
+        baseURL: 'http://192.168.56.1:1234/v1', // Use environment variable instead of hardcoded key
+      },
     });
 
     // Create a chain using RunnableSequence
@@ -148,13 +151,16 @@ Provide a comprehensive analysis focusing on accurate diagnostic procedures, com
 router.post('/embeddings', async (req, res) => {
   try {
     const model = new OpenAI({
+      modelName: 'text-embedding-nomic-embed-text-v1.5',
       temperature: 0.2,
-      modelName: 'gpt-4o-mini',
-      openAIApiKey: process.env.OPENAI_API_KEY, // Use environment variable instead of hardcoded key
+      openAIApiKey: null,
+      configuration: {
+        baseURL: 'http://192.168.56.1:1234/v1', // Use environment variable instead of hardcoded key
+      },// Use environment variable instead of hardcoded key
     });
 
     const result = await model.embeddings.create({
-      model: "text-embedding-ada-002",
+      model: "text-embedding-nomic-embed-text-v1.5",
       input: req.body.input,
     });
 
