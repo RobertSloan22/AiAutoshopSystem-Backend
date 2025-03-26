@@ -1,4 +1,5 @@
 import axios from 'axios';
+import Image from '../models/image.model.js';
 
 // Helper function to validate image URL extension
 const hasValidImageExtension = (url) => {
@@ -10,6 +11,54 @@ const hasValidImageExtension = (url) => {
     );
   } catch (error) {
     return false;
+  }
+};
+
+// Helper function to validate image URL is accessible and has correct content type
+const validateImageAccessibility = async (url) => {
+  try {
+    const response = await axios.head(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      timeout: 5000 // 5 second timeout
+    });
+
+    const contentType = response.headers['content-type'];
+    const contentLength = response.headers['content-length'];
+
+    // Check content type
+    if (!contentType || !contentType.startsWith('image/')) {
+      return false;
+    }
+
+    // Check file size (max 10MB)
+    if (contentLength && parseInt(contentLength) > 10 * 1024 * 1024) {
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
+// Helper function to save image to database
+const saveImage = async (imageData) => {
+  try {
+    const image = await Image.create({
+      title: imageData.title || 'Untitled',
+      imageUrl: imageData.imageUrl,
+      thumbnailUrl: imageData.thumbnail || imageData.imageUrl,
+      source: imageData.source || new URL(imageData.imageUrl).hostname,
+      link: imageData.link || imageData.imageUrl,
+      originalUrl: imageData.imageUrl,
+      timestamp: new Date()
+    });
+    return image;
+  } catch (error) {
+    console.error('Failed to save image:', error);
+    return null;
   }
 };
 
@@ -41,43 +90,63 @@ export const searchImages = async (req, res) => {
     });
 
     // Filter results to ensure valid image URLs and vehicle relevance
-    let filteredResults = response.data.images?.filter(image => {
-      // First check if the image URL has a valid extension
-      if (!hasValidImageExtension(image.imageUrl)) {
-        return false;
-      }
+    let filteredResults = await Promise.all(
+      (response.data.images || []).map(async (image) => {
+        // First check if the image URL has a valid extension
+        if (!hasValidImageExtension(image.imageUrl)) {
+          return null;
+        }
 
-      // Then check vehicle relevance
-      const imageText = `${image.title} ${image.link} ${image.source}`.toLowerCase();
-      const vehicleTerms = [
-        vehicleInfo.year.toString(),
-        vehicleInfo.make.toLowerCase(),
-        vehicleInfo.model.toLowerCase()
-      ];
+        // Then check vehicle relevance
+        const imageText = `${image.title} ${image.link} ${image.source}`.toLowerCase();
+        const vehicleTerms = [
+          vehicleInfo.year.toString(),
+          vehicleInfo.make.toLowerCase(),
+          vehicleInfo.model.toLowerCase()
+        ];
 
-      // Must match at least one vehicle term
-      return vehicleTerms.some(term => imageText.includes(term));
-    }) || [];
+        // Must match at least one vehicle term
+        if (!vehicleTerms.some(term => imageText.includes(term))) {
+          return null;
+        }
 
-    // Take the specified number of results
-    const finalResults = filteredResults.slice(0, num);
+        // Finally check if the image is accessible and meets OpenAI's requirements
+        const isAccessible = await validateImageAccessibility(image.imageUrl);
+        if (!isAccessible) {
+          return null;
+        }
+
+        return image;
+      })
+    );
+
+    // Remove null results and take the specified number
+    filteredResults = filteredResults.filter(Boolean).slice(0, num);
+
+    // Save each image to the database
+    const savedImages = await Promise.all(
+      filteredResults.map(async (image) => {
+        const savedImage = await saveImage(image);
+        return savedImage || image; // Return original image if save fails
+      })
+    );
 
     // Log filtering results for debugging
     console.log('Image search results:', {
       totalResults: response.data.images?.length || 0,
       filteredResults: filteredResults.length,
-      finalResults: finalResults.length,
-      validExtensions: finalResults.map(img => new URL(img.imageUrl).pathname)
+      finalResults: savedImages.length,
+      validExtensions: savedImages.map(img => new URL(img.imageUrl).pathname)
     });
 
     res.json({ 
-      images: finalResults,
+      images: savedImages,
       metadata: {
         originalQuery: query,
         refinedQuery,
         totalResults: response.data.images?.length || 0,
         filteredResults: filteredResults.length,
-        finalResults: finalResults.length
+        finalResults: savedImages.length
       }
     });
   } catch (error) {

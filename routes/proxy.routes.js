@@ -83,29 +83,6 @@ router.get('/proxy-image', async (req, res) => {
       prompt,
       timestamp: new Date().toISOString()
     });
-
-    // Check if URL is from a known blocked domain
-    const blockedDomains = [
-      'hyundai.oempartsonline.com',
-      'toyota.parts.com',
-      'honda.parts.com',
-      'nissan.parts.com',
-      'ford.parts.com',
-      'gm.parts.com'
-    ];
-
-    const urlObj = new URL(decodedUrl);
-    if (blockedDomains.some(domain => urlObj.hostname.includes(domain))) {
-      console.log('Blocked domain detected:', {
-        domain: urlObj.hostname,
-        url: decodedUrl
-      });
-      return res.status(403).json({
-        error: 'Access to this domain is blocked',
-        details: 'This website does not allow direct image access. Please try a different image source.',
-        domain: urlObj.hostname
-      });
-    }
     
     // Enhanced headers to mimic a browser request
     const headers = {
@@ -113,18 +90,14 @@ router.get('/proxy-image', async (req, res) => {
       'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
       'Accept-Encoding': 'gzip, deflate, br',
-      'Referer': urlObj.origin,
+      'Referer': new URL(decodedUrl).origin,
       'Sec-Fetch-Dest': 'image',
       'Sec-Fetch-Mode': 'no-cors',
       'Sec-Fetch-Site': 'cross-site',
       'Pragma': 'no-cache',
       'Cache-Control': 'no-cache',
-      'Origin': urlObj.origin,
-      'Connection': 'keep-alive',
-      'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="120", "Chromium";v="120"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'Upgrade-Insecure-Requests': '1'
+      'Origin': new URL(decodedUrl).origin,
+      'Connection': 'keep-alive'
     };
 
     console.log('Request headers:', headers);
@@ -140,30 +113,15 @@ router.get('/proxy-image', async (req, res) => {
         maxRedirects: 5
       });
 
-      // Check if the response is actually an image
-      const contentType = response.headers['content-type'];
-      if (!contentType || !contentType.startsWith('image/')) {
-        console.error('Invalid content type received:', {
-          contentType,
-          url: decodedUrl,
-          headers: response.headers
-        });
-        return res.status(400).json({
-          error: 'Invalid content type',
-          details: 'The URL does not point to a valid image file',
-          contentType
-        });
-      }
-
       console.log('Direct proxy response:', {
         status: response.status,
-        contentType,
+        contentType: response.headers['content-type'],
         url: response.config.url,
         finalUrl: response.request.res.responseUrl
       });
 
       // Forward the content type and other relevant headers
-      res.set('Content-Type', contentType);
+      res.set('Content-Type', response.headers['content-type']);
       res.set('Cache-Control', 'public, max-age=31536000');
       
       // If explanation is requested, get it and store in database
@@ -172,7 +130,7 @@ router.get('/proxy-image', async (req, res) => {
         console.log('Getting explanation for image:', {
           originalUrl: decodedUrl,
           finalImageUrl,
-          contentType
+          contentType: response.headers['content-type']
         });
 
         const explanation = await getImageExplanation(finalImageUrl, prompt);
@@ -213,20 +171,10 @@ router.get('/proxy-image', async (req, res) => {
       console.error('Direct proxy attempt failed:', {
         error: proxyError.message,
         url: decodedUrl,
-        status: proxyError.response?.status,
-        headers: proxyError.response?.headers
+        status: proxyError.response?.status
       });
-
-      // If we get a 403, return a more helpful error message
-      if (proxyError.response?.status === 403) {
-        return res.status(403).json({
-          error: 'Access denied',
-          details: 'This website does not allow direct image access. Please try a different image source.',
-          domain: urlObj.hostname
-        });
-      }
       
-      // For other errors, try the fallback method
+      // If the direct proxy fails, try to fetch the page first to get the actual image URL
       try {
         const pageResponse = await axios.get(decodedUrl, {
           headers: {
@@ -323,10 +271,7 @@ router.get('/proxy-image', async (req, res) => {
             url: decodedUrl,
             contentLength: html.length
           });
-          return res.status(400).json({
-            error: 'No valid images found',
-            details: 'The page does not contain any valid image URLs with supported extensions (.png, .jpg, .jpeg, .webp, .gif)'
-          });
+          throw new Error('No valid image URLs found in page content');
         }
       } catch (fallbackError) {
         console.error('Fallback proxy attempt failed:', {
@@ -339,7 +284,7 @@ router.get('/proxy-image', async (req, res) => {
           details: process.env.NODE_ENV === 'development' ? {
             directError: proxyError.message,
             fallbackError: fallbackError.message
-          } : 'Unable to access the image. The website may be blocking access or the image may not exist.'
+          } : undefined
         });
       }
     }
@@ -351,7 +296,7 @@ router.get('/proxy-image', async (req, res) => {
     });
     res.status(500).json({ 
       error: 'Failed to proxy image',
-      details: process.env.NODE_ENV === 'development' ? error.message : 'An unexpected error occurred while processing the image.'
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
