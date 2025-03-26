@@ -1,5 +1,18 @@
 import axios from 'axios';
 
+// Helper function to validate image URL extension
+const hasValidImageExtension = (url) => {
+  const validExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+  try {
+    const urlObj = new URL(url);
+    return validExtensions.some(ext => 
+      urlObj.pathname.toLowerCase().endsWith(ext)
+    );
+  } catch (error) {
+    return false;
+  }
+};
+
 export const searchImages = async (req, res) => {
   try {
     const { query, num = 5, vehicleInfo } = req.body;
@@ -27,8 +40,14 @@ export const searchImages = async (req, res) => {
       }
     });
 
-    // Basic filtering to ensure some relevance to the vehicle
+    // Filter results to ensure valid image URLs and vehicle relevance
     let filteredResults = response.data.images?.filter(image => {
+      // First check if the image URL has a valid extension
+      if (!hasValidImageExtension(image.imageUrl)) {
+        return false;
+      }
+
+      // Then check vehicle relevance
       const imageText = `${image.title} ${image.link} ${image.source}`.toLowerCase();
       const vehicleTerms = [
         vehicleInfo.year.toString(),
@@ -42,6 +61,14 @@ export const searchImages = async (req, res) => {
 
     // Take the specified number of results
     const finalResults = filteredResults.slice(0, num);
+
+    // Log filtering results for debugging
+    console.log('Image search results:', {
+      totalResults: response.data.images?.length || 0,
+      filteredResults: filteredResults.length,
+      finalResults: finalResults.length,
+      validExtensions: finalResults.map(img => new URL(img.imageUrl).pathname)
+    });
 
     res.json({ 
       images: finalResults,

@@ -82,16 +82,43 @@ router.post('/detail', async (req, res) => {
         const llmResponse = await axios.post(llmServiceEndpoint, {
             model: 'llama-3.2-1b-instruct',
             messages: [
-                { role: "system", content: "You are a highly knowledgeable automotive expert. Provide detailed diagnostics in JSON format." },
+                { role: "system", content: "You are a highly knowledgeable automotive expert. Provide detailed diagnostics in JSON format. Your response must be a valid JSON object with no additional text or formatting." },
                 { role: "user", content: `Year: ${year}\nMake: ${make}\nModel: ${model}\nVIN: ${vin}\nOriginal Problem: ${originalProblem}\nCategory: ${category}\nItem Details: ${JSON.stringify(item)}` }
             ],
             temperature: 0.2
         });
 
         const llmOutput = llmResponse.data.choices[0]?.message?.content;
-        const validatedResult = ServiceResearchSchema.parse(JSON.parse(llmOutput));
+        
+        // Clean up the response by removing markdown code block syntax if present
+        const cleanedContent = llmOutput
+            .replace(/```json\n?/g, '')
+            .replace(/```\n?/g, '')
+            .trim();
 
-        res.json({ success: true, result: validatedResult });
+        // Try to find JSON object in the response if it's not already JSON
+        let jsonStr = cleanedContent;
+        if (!jsonStr.trim().startsWith('{')) {
+            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+                throw new Error('No valid JSON found in LLM response');
+            }
+            jsonStr = jsonMatch[0];
+        }
+
+        try {
+            const parsedResult = JSON.parse(jsonStr);
+            const validatedResult = ServiceResearchSchema.parse(parsedResult);
+            res.json({ success: true, result: validatedResult });
+        } catch (error) {
+            console.error('Error parsing or validating response:', error);
+            console.error('Raw response:', jsonStr);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to parse or validate AI response',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
 
     } catch (error) {
         console.error('Detail research error:', error);

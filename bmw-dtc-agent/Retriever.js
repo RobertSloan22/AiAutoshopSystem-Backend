@@ -352,7 +352,10 @@ export class Retriever {
                     const docs = await this.vectorStore.asRetriever({
                         searchType: "similarity",
                         searchKwargs: { k: 3 },
-                        filter: (doc) => doc.metadata[category] !== null
+                        filter: (doc) => {
+                            // Only apply filter if category exists in metadata
+                            return doc.metadata && doc.metadata[category] !== undefined;
+                        }
                     }).getRelevantDocuments(query);
                     return { category, docs };
                 })

@@ -44,6 +44,10 @@ import localresearchServiceRoutes from './routes/localresearch.service.js';
 import embeddingsRoutes from './routes/embeddings.routes.js';
 import supabaseRoutes from './routes/supabase.routes.js';
 import vectorStoreRoutes from './routes/vectorStore.routes.js';
+import openaiRoutes from './routes/openai.js';
+import turnResponseRoutes from './routes/turnResponse.routes.js';
+import functionRoutes from './routes/functions.routes.js';
+import responseImageRoutes from './routes/responseImage.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -143,6 +147,10 @@ app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
 app.use('/api', supabaseRoutes);
 app.use('/api/vector-store', vectorStoreRoutes);
+app.use('/api/openai', openaiRoutes);
+app.use('/api/v1/responses', turnResponseRoutes);
+app.use('/api/functions', functionRoutes);
+app.use('/api', responseImageRoutes);
 
 // API error handling
 app.use('/api', (err, req, res, next) => {

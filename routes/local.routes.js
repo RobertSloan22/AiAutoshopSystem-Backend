@@ -6,7 +6,9 @@ import { MemorySaver } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import PQueue from 'p-queue';
-
+import express from "express";
+import dotenv from "dotenv";
+import fetch from "node-fetch";
 // Configure queue with concurrency limit
 const queue = new PQueue({
   concurrency: 2, // Process 2 requests at a time
@@ -15,9 +17,7 @@ const queue = new PQueue({
 });
 
 // localaiRoutes.js
-import express from "express";
-import dotenv from "dotenv";
-import fetch from "node-fetch";
+
 
 dotenv.config();
 

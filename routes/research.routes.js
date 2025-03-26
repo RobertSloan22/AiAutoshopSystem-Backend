@@ -4,6 +4,9 @@ import { OpenAI } from '@langchain/openai';
 import { ChatOpenAI } from '@langchain/openai';
 import { PromptTemplate } from '@langchain/core/prompts';
 import { RunnableSequence } from '@langchain/core/runnables';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const router = express.Router();
 
@@ -89,12 +92,9 @@ Provide a comprehensive analysis focusing on accurate diagnostic procedures, com
     `);
 
     const modelInstance = new ChatOpenAI({
-      modelName: 'hermes-3-llama-3.2-3b',
+      modelName: 'gpt-4-turbo-preview',
       temperature: 0.2,
-      openAIApiKey: null,
-      configuration: {
-        baseURL: 'http://192.168.56.1:1234/v1', // Use environment variable instead of hardcoded key
-      },
+      openAIApiKey: process.env.OPENAI_API_KEY,
     });
 
     // Create a chain using RunnableSequence
@@ -122,17 +122,24 @@ Provide a comprehensive analysis focusing on accurate diagnostic procedures, com
     
     // Validate that the response is proper JSON
     try {
+      // First try to parse the cleaned content directly
       const parsedResult = JSON.parse(cleanedContent);
       return res.status(200).json({ result: JSON.stringify(parsedResult) });
     } catch (parseError) {
       console.error('Error parsing AI response:', parseError);
+      console.error('Raw content:', cleanedContent);
+      
       // Attempt to extract JSON from the response if parsing fails
       const jsonMatch = typeof cleanedContent === 'string' ? cleanedContent.match(/\{[\s\S]*\}/) : null;
       if (jsonMatch) {
         try {
-          const extractedJson = JSON.parse(jsonMatch[0]);
+          // Clean up any trailing commas before closing braces
+          const cleanedJson = jsonMatch[0].replace(/,(\s*[}\]])/g, '$1');
+          const extractedJson = JSON.parse(cleanedJson);
           return res.status(200).json({ result: JSON.stringify(extractedJson) });
         } catch (extractError) {
+          console.error('Error parsing extracted JSON:', extractError);
+          console.error('Extracted content:', jsonMatch[0]);
           throw new Error('Failed to parse AI response into valid JSON');
         }
       }
@@ -151,16 +158,13 @@ Provide a comprehensive analysis focusing on accurate diagnostic procedures, com
 router.post('/embeddings', async (req, res) => {
   try {
     const model = new OpenAI({
-      modelName: 'text-embedding-nomic-embed-text-v1.5',
+      modelName: 'text-embedding-3-small',
       temperature: 0.2,
-      openAIApiKey: null,
-      configuration: {
-        baseURL: 'http://192.168.56.1:1234/v1', // Use environment variable instead of hardcoded key
-      },// Use environment variable instead of hardcoded key
+      openAIApiKey: process.env.OPENAI_API_KEY,
     });
 
     const result = await model.embeddings.create({
-      model: "text-embedding-nomic-embed-text-v1.5",
+      model: "text-embedding-3-small",
       input: req.body.input,
     });
 

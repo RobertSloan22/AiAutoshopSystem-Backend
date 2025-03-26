@@ -21,9 +21,25 @@ const imageSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    originalUrl: {
+        type: String,
+        required: true
+    },
     timestamp: {
         type: Date,
         default: Date.now
+    },
+    explanation: {
+        type: {
+            explanation: String,
+            responseId: String,
+            usage: {
+                prompt_tokens: Number,
+                completion_tokens: Number,
+                total_tokens: Number
+            }
+        },
+        required: false
     }
 });
 

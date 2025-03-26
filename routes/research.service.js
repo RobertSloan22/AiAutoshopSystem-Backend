@@ -188,11 +188,10 @@ router.post('/service', async (req, res) => {
     try {
         // Initialize LangChain components
         const chatModel = new ChatOpenAI({
-            modelName: 'hermes-3-llama-3.2-3b',
+            modelName: 'gpt-4o-mini',
             temperature: 0.2,
-            openAIApiKey: null,
+            openAIApiKey: process.env.OPENAI_API_KEY,
             configuration: {
-                baseURL: 'http://192.168.56.1:1234/v1',
                 timeout: 60000, // 60 second timeout
                 maxRetries: 3,
                 retryDelay: 1000,
@@ -461,11 +460,10 @@ router.post('/detail', async (req, res) => {
 
     try {
         const chatModel = new ChatOpenAI({
-            modelName: 'hermes-3-llama-3.2-3b',
+            modelName: 'gpt-4-turbo-preview',
             temperature: 0.2,
-            openAIApiKey: null,
+            openAIApiKey: process.env.OPENAI_API_KEY,
             configuration: {
-                baseURL: 'http://192.168.56.1:1234/v1',
                 timeout: 60000, // 60 second timeout
                 maxRetries: 3,
                 retryDelay: 1000,
@@ -664,16 +662,13 @@ Focus on providing deep, technical insights specific to this make/model while ma
 router.post('/embeddings', async (req, res) => {
     try {
         const model = new OpenAI({
-            modelName: 'text-embedding-nomic-embed-text-v1.5',
+            modelName: 'text-embedding-3-small',
             temperature: 0.2,
-            openAIApiKey: null,
-            configuration: {
-                baseURL: 'http://192.168.56.1:1234/v1',
-            },
+            openAIApiKey: process.env.OPENAI_API_KEY,
         });
 
         const result = await model.embeddings.create({
-            model: "text-embedding-nomic-embed-text-v1.5",
+            model: "text-embedding-3-small",
             input: req.body.input,
         });
 
