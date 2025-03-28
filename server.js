@@ -14,6 +14,7 @@ import lmStudioRoutes from './routes/lmStudio.routes.js';
 import authRoutes from "./routes/auth.routes.js";
 import researchRoutes from './routes/research.routes.js';
 import researchServiceRoutes from './routes/research.service.js';
+import researchO3ServiceRoutes from './routes/research.o3.service.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import agentproxyRoutes from "./routes/agentproxy.routes.js"
@@ -48,6 +49,7 @@ import openaiRoutes from './routes/openai.js';
 import turnResponseRoutes from './routes/turnResponse.routes.js';
 import functionRoutes from './routes/functions.routes.js';
 import responseImageRoutes from './routes/responseImage.routes.js';
+import vehicleQuestionsRoutes from './routes/vehicle-questions.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,6 +94,7 @@ mongoose.connect(process.env.MONGO_DB_URI)
 app.use("/api/auth", authRoutes);
 app.use("/api/research", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
+app.use("/api/research/o3", researchO3ServiceRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
@@ -125,6 +128,7 @@ app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);
 app.use('/api', responseImageRoutes);
+app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 
 // API error handling
 app.use('/api', (err, req, res, next) => {

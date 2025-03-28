@@ -84,11 +84,15 @@ router.post('/explain-image', async (req, res) => {
         model: "gpt-4o-mini",
         messages: [
           {
+            role: "system",
+            content: "You are an expert Automotive Technical Advisor with extensive knowledge in vehicle systems, diagnostics, and technical specifications. Your responses must be direct, definitive, and authoritative. Never use tentative language like 'appears to be' or 'seems to be'. Instead, state facts directly and confidently. Focus on providing precise technical information, including specific measurements, specifications, and industry-standard terminology. Maintain a professional tone while delivering clear, assertive analysis."
+          },
+          {
             role: "user",
             content: [
               { 
                 type: "text", 
-                text: prompt 
+                text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${prompt} State facts directly and include specific measurements, specifications, and relevant technical details.` 
               },
               {
                 type: "image_url",

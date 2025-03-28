@@ -178,4 +178,47 @@ router.post('/embeddings', async (req, res) => {
   }
 });
 
+// Add new route for vehicle-specific questions
+router.post('/vehicle-question', async (req, res) => {
+  const { vin, year, make, model, dtcCode, question } = req.body;
+
+  // Validate required fields
+  if (!year || !make || !model || !question) {
+    return res.status(400).json({ error: 'Missing required fields. Year, make, model, and question are required.' });
+  }
+
+  try {
+    const model = new OpenAI({
+      modelName: 'o3-mini',
+      temperature: 0.2,
+      openAIApiKey: process.env.OPENAI_API_KEY,
+    });
+
+    // Construct the prompt with vehicle information
+    const prompt = `On a ${year} ${make} ${model}${dtcCode ? ` with DTC code ${dtcCode}` : ''}, ${question}`;
+
+    const response = await model.invoke([
+      {
+        role: "system",
+        content: "You are an expert automotive technician with comprehensive knowledge of vehicle systems, diagnostics, and repair procedures. Provide detailed, accurate, and practical information."
+      },
+      {
+        role: "user",
+        content: prompt
+      }
+    ]);
+
+    return res.status(200).json({ 
+      result: response.content 
+    });
+
+  } catch (error) {
+    console.error('Error processing vehicle question:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error.',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 export default router;
