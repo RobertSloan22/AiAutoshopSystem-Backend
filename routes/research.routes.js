@@ -19,13 +19,18 @@ const router = express.Router();
  *  - make: Vehicle make
  *  - model: Vehicle model
  *  - problem: Description of the vehicle problem
+ *  - trim: Vehicle trim level (optional)
+ *  - engine: Engine type (optional)
+ *  - transmission: Transmission type (optional)
+ *  - mileage: Vehicle mileage (optional)
+ *  - dtcCodes: Array of DTC codes (optional)
  *
  * Returns:
  *  - { result: string } on success, containing the research analysis
  *  - { error: string } on failure
  */
 router.post('/', async (req, res) => {
-  const { vin, year, make, model, problem } = req.body;
+  const { vin, year, make, model, problem, trim, engine, transmission, mileage, dtcCodes } = req.body;
 
   // Validate required fields
   if (!vin || !year || !make || !model || !problem) {
@@ -35,16 +40,50 @@ router.post('/', async (req, res) => {
   try {
     // Note: Escape literal curly braces in the JSON structure by doubling them.
     const prompt = PromptTemplate.fromTemplate(`
-You are an expert automotive technician with access to comprehensive technical information.
-Analyze the following vehicle problem and provide a detailed response in JSON format with the following structure:
+You are an expert automotive technician with access to comprehensive technical information specifically for {make} {model} vehicles.
+Analyze the following vehicle problem and provide a highly detailed and specific response in JSON format.
+Include exact specifications, connector pin numbers, component locations, and test procedures specific to this exact model and year.
 
+Vehicle Details:
+VIN: {vin}
+Year: {year}
+Make: {make}
+Model: {model}
+Trim: {trim}
+Engine: {engine}
+Transmission: {transmission}
+Mileage: {mileage}
+DTC Codes: {dtcCodes}
+
+Problem Description: {problem}
+
+For each diagnostic step, include:
+- Exact component location information
+- Specific connector identification (with pin numbers)
+- Normal operating values with appropriate units
+- Detailed test procedures referencing the factory service manual
+- Required specialty tools with part numbers
+- System-specific precautions
+
+Include these additional data points:
+- Model-year specific information (even if it varies from similar models)
+- Common failure patterns specific to this exact vehicle configuration
+- Technical service bulletins (TSBs) with document numbers
+- Factory service manual references with section numbers
+- Exact OEM part numbers for recommended parts
+
+Your response MUST be in this JSON format:
 {{
   "diagnosticSteps": [
     {{
       "step": "string",
       "details": "string",
+      "componentLocation": "string",
+      "connectorInfo": "string",
       "tools": ["string"],
       "expectedReadings": "string",
+      "normalValueRanges": "string",
+      "factoryServiceManualRef": "string", 
       "notes": "string"
     }}
   ],
@@ -52,7 +91,9 @@ Analyze the following vehicle problem and provide a detailed response in JSON fo
     {{
       "cause": "string",
       "likelihood": "High|Medium|Low",
-      "explanation": "string"
+      "explanation": "string",
+      "modelSpecificNotes": "string",
+      "commonSymptomsForThisCause": ["string"]
     }}
   ],
   "recommendedFixes": [
@@ -61,40 +102,46 @@ Analyze the following vehicle problem and provide a detailed response in JSON fo
       "difficulty": "Easy|Moderate|Complex",
       "estimatedCost": "string",
       "professionalOnly": boolean,
-      "parts": ["string"]
+      "parts": ["string"],
+      "oemPartNumbers": ["string"],
+      "torqueSpecs": "string",
+      "laborHours": "string",
+      "specialTools": ["string"],
+      "procedureOverview": "string"
     }}
   ],
   "technicalNotes": {{
       "commonIssues": ["string"],
       "serviceIntervals": ["string"],
       "recalls": ["string"],
-      "tsbs": ["string"]
+      "tsbs": ["string"],
+      "manufacturerSpecificNotes": "string",
+      "knownGoodValues": "string"
   }},
   "references": [
     {{
       "source": "string",
+      "documentNumber": "string",
       "url": "string",
       "type": "TSB|Manual|Forum|Recall",
-      "relevance": "string"
+      "relevance": "string",
+      "pageNumbers": "string"
     }}
   ]
 }}
 
-Vehicle Details:
-VIN: {vin}
-Year: {year}
-Make: {make}
-Model: {model}
-
-Problem Description: {problem}
-
-Provide a comprehensive analysis focusing on accurate diagnostic procedures, common causes, and manufacturer-specific information. Include relevant TSBs, recalls, and service information where applicable.
-    `);
+Provide a comprehensive analysis focusing on EXACT information for this specific vehicle. Include precise specifications, part numbers, connector details, and accurate diagnostic values.
+`);
 
     const modelInstance = new ChatOpenAI({
-      modelName: 'gpt-4-turbo-preview',
-      temperature: 0.2,
+      modelName: 'gpt-4o',
+      temperature: 0.1,  // Lower temperature for more precise, specific outputs
       openAIApiKey: process.env.OPENAI_API_KEY,
+      configuration: {
+        timeout: 120000,  // Increased timeout to 2 minutes for more thorough research
+        maxRetries: 3,
+        retryDelay: 1000,
+      }
     });
 
     // Create a chain using RunnableSequence
@@ -107,6 +154,11 @@ Provide a comprehensive analysis focusing on accurate diagnostic procedures, com
       make,
       model,
       problem,
+      trim: trim || 'Not specified',
+      engine: engine || 'Not specified',
+      transmission: transmission || 'Not specified',
+      mileage: mileage || 'Not specified',
+      dtcCodes: dtcCodes ? dtcCodes.join(', ') : 'None reported'
     });
 
     // Get the actual content from the AI message
@@ -178,9 +230,9 @@ router.post('/embeddings', async (req, res) => {
   }
 });
 
-// Add new route for vehicle-specific questions
+// Add new vehicle-specific questions endpoint with enhanced detail
 router.post('/vehicle-question', async (req, res) => {
-  const { vin, year, make, model, dtcCode, question } = req.body;
+  const { vin, year, make, model, dtcCode, question, trim, engine, transmission, mileage } = req.body;
 
   // Validate required fields
   if (!year || !make || !model || !question) {
@@ -189,22 +241,45 @@ router.post('/vehicle-question', async (req, res) => {
 
   try {
     const model = new OpenAI({
-      modelName: 'o3-mini',
-      temperature: 0.2,
+      modelName: 'gpt-4o',  // Upgraded from o3-mini for more detailed responses
+      temperature: 0.1,     // Lower temperature for more specific answers
       openAIApiKey: process.env.OPENAI_API_KEY,
+      configuration: {
+        timeout: 60000,     // Increased timeout for more comprehensive answers
+      }
     });
 
-    // Construct the prompt with vehicle information
-    const prompt = `On a ${year} ${make} ${model}${dtcCode ? ` with DTC code ${dtcCode}` : ''}, ${question}`;
+    // Construct a detailed system prompt for more specific responses
+    const systemPrompt = `You are an expert automotive technician with comprehensive knowledge of vehicle systems, diagnostics, and repair procedures specific to ${year} ${make} ${model} vehicles.
+Provide extremely detailed, accurate, and practical information.
+
+When responding:
+1. Include exact specifications, values, and measurements with proper units
+2. Reference specific component locations on this exact vehicle
+3. Mention any model-year specific information that might differ from other years
+4. Provide precise connector pin numbers and wire colors where relevant
+5. Include factory service manual references where applicable
+6. Specify exact OEM part numbers for any recommended parts
+7. Note any technical service bulletins or recalls related to the issue
+8. Describe proper test procedures with expected values
+9. Note torque specifications for fasteners
+10. Reference specific tools required for the job
+
+Focus on giving information that is SPECIFIC to this exact vehicle configuration, not generic advice.`;
+
+    // Construct a detailed user prompt with all available vehicle information
+    const detailedPrompt = `On a ${year} ${make} ${model}${trim ? ` ${trim}` : ''}${engine ? ` with ${engine} engine` : ''}${transmission ? ` and ${transmission} transmission` : ''}${mileage ? ` at ${mileage} miles` : ''}${dtcCode ? ` with DTC code ${dtcCode}` : ''}${vin ? `, VIN: ${vin}` : ''}, ${question}
+
+Please provide specific information for this exact vehicle, including precise specifications, part numbers, connector details, and test values.`;
 
     const response = await model.invoke([
       {
         role: "system",
-        content: "You are an expert automotive technician with comprehensive knowledge of vehicle systems, diagnostics, and repair procedures. Provide detailed, accurate, and practical information."
+        content: systemPrompt
       },
       {
         role: "user",
-        content: prompt
+        content: detailedPrompt
       }
     ]);
 

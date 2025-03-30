@@ -19,38 +19,52 @@ const ServiceResearchSchema = z.object({
         testingProcedure: z.string().optional(),               // New field: detailed testing procedure
         tools: z.array(z.string()).optional(),
         expectedReadings: z.string().optional(),
+        normalRanges: z.string().optional(),                   // New field: normal value ranges
+        componentLocation: z.string().optional(),              // New field: where to find the component
         notes: z.string().optional()
     })),
     possibleCauses: z.array(z.object({
         cause: z.string(),
         likelihood: z.string(),
-        explanation: z.string()
+        explanation: z.string(),
+        modelSpecificNotes: z.string().optional(),             // New field: make/model specific information
+        commonSigns: z.array(z.string()).optional()            // New field: symptoms that indicate this cause
     })),
     recommendedFixes: z.array(z.object({
         fix: z.string(),
         difficulty: z.string(),
         estimatedCost: z.string(),
         professionalOnly: z.boolean().optional(),
-        parts: z.array(z.string()).optional()
+        parts: z.array(z.string()).optional(),
+        laborHours: z.string().optional(),                     // New field: estimated labor time
+        specialTools: z.array(z.string()).optional(),          // New field: special tools required
+        procedureSteps: z.array(z.string()).optional()         // New field: step-by-step procedure
     })),
     technicalNotes: z.object({
         commonIssues: z.array(z.string()),
         serviceIntervals: z.array(z.string()).optional(),
         recalls: z.array(z.string()).optional(),
-        tsbs: z.array(z.string()).optional()
+        tsbs: z.array(z.string()).optional(),
+        manufacturerSpecificInfo: z.string().optional(),       // New field: manufacturer-specific information
+        preventativeMaintenance: z.array(z.string()).optional() // New field: preventative maintenance tips
     }),
     references: z.array(z.object({
         source: z.string(),
         url: z.string().optional(),
         type: z.string(),
-        relevance: z.string()
+        relevance: z.string(),
+        pageReference: z.string().optional(),                  // New field: specific page or section reference
+        excerpt: z.string().optional()                         // New field: relevant excerpt from the source
     })),
     partsAvailability: z.array(z.object({
         part: z.string(),
         supplier: z.string(),
         availability: z.string(),
         cost: z.string(),
-        url: z.string().optional()
+        url: z.string().optional(),
+        oemPartNumber: z.string().optional(),                  // New field: OEM part number
+        aftermarketAlternatives: z.array(z.string()).optional(), // New field: aftermarket options
+        compatibilityNotes: z.string().optional()              // New field: compatibility information
     })).optional()
 });
 
@@ -186,13 +200,13 @@ router.post('/service', async (req, res) => {
     const { serviceRequest, vehicle, customer } = req.body;
     let parsedResults = {};  // Declare parsedResults at the top level
     try {
-        // Initialize LangChain components
+        // Initialize LangChain components with more powerful model
         const chatModel = new ChatOpenAI({
-            modelName: 'gpt-4o-mini',
-            temperature: 0.2,
+            modelName: 'gpt-4o',  // Upgraded from gpt-4o-mini for more detailed responses
+            temperature: 0.1,      // Reduced temperature for more precise outputs
             openAIApiKey: process.env.OPENAI_API_KEY,
             configuration: {
-                timeout: 60000, // 60 second timeout
+                timeout: 90000,    // Increased timeout to 90 seconds for more thorough research
                 maxRetries: 3,
                 retryDelay: 1000,
             },
@@ -211,10 +225,11 @@ router.post('/service', async (req, res) => {
             additionalNotes: serviceRequest.additionalNotes
         };
 
-        // 1. Initial Diagnostic Assessment
+        // 1. Initial Diagnostic Assessment with enhanced prompt
         const initialAssessmentPrompt = PromptTemplate.fromTemplate(`
-You are an expert automotive technician. Provide an initial assessment for this service request.
-Focus on basic problem analysis, initial diagnostic steps, and safety considerations.
+You are an expert automotive technician with extensive experience diagnosing issues on {vehicleMake} {vehicleModel} vehicles.
+Provide a comprehensive initial assessment for this service request with highly detailed and specific information.
+Focus on problem analysis, diagnostic steps, and safety considerations specific to this exact vehicle model and year.
 
 Vehicle Information:
 Year: {vehicleYear} Make: {vehicleMake} Model: {vehicleModel}
@@ -226,15 +241,22 @@ Description: {description}
 Priority: {priority}
 Additional Notes: {additionalNotes}
 
+Include make/model-specific known issues, common failure points, and technical service bulletins.
+Your assessment should incorporate manufacturer-specific diagnostic procedures and exact testing values.
+
 Provide response in JSON format with:
 {{
     "initialAssessment": {{
         "problemAnalysis": string,
+        "vehicleSpecificConsiderations": string,
+        "knownIssuesForThisModel": [string],
         "safetyConsiderations": [string],
         "initialSteps": [
             {{
                 "step": string,
                 "purpose": string,
+                "specificTestPoints": string,
+                "expectedValues": string,
                 "safetyNotes": string
             }}
         ]
@@ -242,16 +264,20 @@ Provide response in JSON format with:
 }}
 `);
 
-        // 2. Technical Analysis Prompt
+        // 2. Technical Analysis Prompt with enhanced detail requirements
         const technicalAnalysisPrompt = PromptTemplate.fromTemplate(`
-As an expert technician, provide detailed diagnostic procedures for this issue.
-Focus on specific tests, measurements, and component checks.
+As an expert {vehicleMake} technician, provide extremely detailed diagnostic procedures for this specific issue on a {vehicleYear} {vehicleMake} {vehicleModel}.
+Focus on exact tests, precise measurements, and specific component checks unique to this vehicle.
+Include manufacturer-recommended diagnostic procedures, specific harness connector identifiers, and pin-specific test points.
 
 Vehicle Information:
 Year: {vehicleYear} Make: {vehicleMake} Model: {vehicleModel}
 VIN: {vin}
 
 Issue Description: {description}
+
+Include exact connector pin numbers, specific test point locations, precise component identifiers, and actual expected measurement values.
+Reference the specific pages in the factory service manual where these procedures are documented.
 
 IMPORTANT: All arrays must contain properly formatted strings. For testingSteps, provide each step as a complete string without numbering.
 
@@ -261,29 +287,41 @@ Provide response in JSON format with:
         {{
             "procedure": string,
             "components": [string],
+            "componentLocation": string,
+            "connectorIdentifiers": string,
             "testingSteps": [string],
             "requiredTools": [string],
-            "expectedReadings": string
+            "expectedReadings": string,
+            "normalValueRange": string,
+            "serviceManualReference": string
         }}
     ]
 }}
 
 Example format for testingSteps:
 "testingSteps": [
-    "Connect the diagnostic tool to the OBD port",
-    "Start the engine and let it idle",
-    "Record the sensor readings"
+    "Connect the diagnostic tool to the OBD port J1962 under the driver-side dash",
+    "Start the engine and let it reach operating temperature (195°F-212°F)",
+    "Record the oxygen sensor voltage readings (should cycle between 0.1V and 0.9V)"
 ]
 `);
 
-        // 3. Repair Solutions Prompt
+        // 3. Repair Solutions Prompt with enhanced detail requirements
         const repairSolutionsPrompt = PromptTemplate.fromTemplate(`
-Based on the diagnostic information, provide possible causes and repair solutions.
-Focus on specific repair procedures and parts requirements.
+Based on the diagnostic information, provide extremely detailed causes and repair solutions specific to a {vehicleYear} {vehicleMake} {vehicleModel}.
+Focus on highly specific repair procedures, exact part numbers, and detailed instructions.
 
 Vehicle Information:
 Year: {vehicleYear} Make: {vehicleMake} Model: {vehicleModel}
 Issue: {description}
+
+Include:
+- Specific torque specifications for fasteners
+- Exact service manual page references
+- Required special tools with part numbers
+- Step-by-step procedures with detailed instructions
+- Model-specific information that differs from other years/trims
+- Manufacturer-recommended repair methods
 
 Provide response in JSON format with:
 {{
@@ -291,7 +329,9 @@ Provide response in JSON format with:
         {{
             "cause": string,
             "likelihood": string,
-            "explanation": string
+            "explanation": string,
+            "modelSpecificNotes": string,
+            "commonSigns": [string]
         }}
     ],
     "repairSolutions": [
@@ -299,8 +339,13 @@ Provide response in JSON format with:
             "solution": string,
             "difficulty": string,
             "parts": [string],
+            "oemPartNumbers": [string],
+            "torqueSpecifications": string,
             "estimatedCost": string,
-            "laborHours": string
+            "laborHours": string,
+            "specialTools": [string],
+            "procedureSteps": [string],
+            "serviceManualReference": string
         }}
     ]
 }}
@@ -361,7 +406,7 @@ Provide response in JSON format with:
             }
         }
 
-        // Format into final schema with fallbacks for missing data
+        // Format into final schema with enhanced fields
         const formattedResult = {
             diagnosticSteps: parsedResults.diagnosticProcedures 
                 ? parsedResults.diagnosticProcedures.map(proc => ({
@@ -370,25 +415,48 @@ Provide response in JSON format with:
                     componentsTested: proc.components || [],
                     testingProcedure: Array.isArray(proc.testingSteps) ? proc.testingSteps.join('\n') : proc.testingSteps || '',
                     tools: proc.requiredTools || [],
-                    expectedReadings: proc.expectedReadings || ''
+                    expectedReadings: proc.expectedReadings || '',
+                    normalRanges: proc.normalValueRange || '',
+                    componentLocation: proc.componentLocation || '',
+                    notes: proc.serviceManualReference || ''
                 }))
                 : [],
-            possibleCauses: parsedResults.possibleCauses || [],
+            possibleCauses: parsedResults.possibleCauses 
+                ? parsedResults.possibleCauses.map(cause => ({
+                    cause: cause.cause,
+                    likelihood: cause.likelihood,
+                    explanation: cause.explanation,
+                    modelSpecificNotes: cause.modelSpecificNotes || '',
+                    commonSigns: cause.commonSigns || []
+                }))
+                : [],
             recommendedFixes: parsedResults.repairSolutions 
                 ? parsedResults.repairSolutions.map(solution => ({
                     fix: solution.solution,
                     difficulty: solution.difficulty,
                     estimatedCost: solution.estimatedCost || 'Unknown',
                     professionalOnly: solution.difficulty === 'Complex',
-                    parts: solution.parts || []
+                    parts: solution.parts || [],
+                    laborHours: solution.laborHours || '',
+                    specialTools: solution.specialTools || [],
+                    procedureSteps: solution.procedureSteps || []
                 }))
                 : [],
-            technicalNotes: parsedResults.technicalNotes || {
-                commonIssues: [],
-                serviceIntervals: [],
-                recalls: [],
-                tsbs: []
-            },
+            technicalNotes: parsedResults.technicalNotes 
+                ? {
+                    commonIssues: parsedResults.technicalNotes.commonIssues || [],
+                    serviceIntervals: parsedResults.technicalNotes.serviceIntervals || [],
+                    recalls: parsedResults.technicalNotes.recalls || [],
+                    tsbs: parsedResults.technicalNotes.tsbs || [],
+                    manufacturerSpecificInfo: parsedResults.technicalNotes.manufacturerSpecificInfo || '',
+                    preventativeMaintenance: parsedResults.technicalNotes.preventativeMaintenance || []
+                }
+                : {
+                    commonIssues: [],
+                    serviceIntervals: [],
+                    recalls: [],
+                    tsbs: []
+                },
             references: [] // Can be populated from technical info if needed
         };
 
