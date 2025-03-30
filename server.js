@@ -11,6 +11,7 @@ import { Server } from "socket.io";
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
 import lmStudioRoutes from './routes/lmStudio.routes.js';
+import licensePlateRoutes from './routes/licensePlate.routes.js';
 import authRoutes from "./routes/auth.routes.js";
 import researchRoutes from './routes/research.routes.js';
 import researchServiceRoutes from './routes/research.service.js';
@@ -33,7 +34,6 @@ import conversationRoutes from './routes/conversation.routes.js';
 import notesRoutes from './routes/notes.routes.js';
 import connectToMongoDB from "./db/connectToMongoDB.js";
 import { app, server } from "./socket/socket.js";
-import licensePlateRoutes from './routes/licensePlate.routes.js';
 import searchRoutes from './routes/search.routes.js';
 import serperRoutes from './routes/serper.routes.js';
 import imageRoutes from './routes/image.routes.js';
@@ -56,7 +56,17 @@ const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 5000;
 
+// Connect to MongoDB first
+console.log('Connecting to MongoDB...');
+mongoose.connect(process.env.MONGO_DB_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch((error) => {
+    console.error('MongoDB connection error:', error);
+    process.exit(1); // Exit if we can't connect to the database
+  });
+
 const allowedOrigins = [
+  'https://us-license-plate-to-vin.p.rapidapi.com',
   'http://localhost:5173',
   'http://localhost:3000',
   'http://localhost:3500',
@@ -87,10 +97,6 @@ app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
 
-mongoose.connect(process.env.MONGO_DB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch((error) => console.error('MongoDB connection error:', error));
-
 app.use("/api/auth", authRoutes);
 app.use("/api/research", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
@@ -118,7 +124,6 @@ app.use('/api/search', searchRoutes);
 app.use('/api/serper', serperRoutes);
 app.use('/api', imageRoutes);
 app.use('/api', proxyRoutes);
-app.use('/api', licensePlateRoutes);
 app.use('/api/researchl', localResearchRoutes);
 app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
@@ -129,7 +134,7 @@ app.use('/api/v1/responses', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);
 app.use('/api', responseImageRoutes);
 app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
-
+app.use('/api/license-plate', licensePlateRoutes);
 // API error handling
 app.use('/api', (err, req, res, next) => {
   console.error('API error:', err);

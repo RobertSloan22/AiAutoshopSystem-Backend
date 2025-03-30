@@ -74,8 +74,9 @@ export const searchImages = async (req, res) => {
     const vehicleString = `${vehicleInfo.year} ${vehicleInfo.make} ${vehicleInfo.model}`;
     const engineInfo = vehicleInfo.engine ? ` ${vehicleInfo.engine}` : '';
     
-    // Construct final search query with minimal modifiers
-    const refinedQuery = `${vehicleString}${engineInfo} ${query} automotive`;
+    // Construct final search query with technical diagram focus
+    const technicalTerms = 'technical diagram schematic wiring diagram repair manual';
+    const refinedQuery = `${vehicleString}${engineInfo} ${query} ${technicalTerms}`;
 
     console.log('Refined search query:', refinedQuery);
 
@@ -107,6 +108,25 @@ export const searchImages = async (req, res) => {
 
         // Must match at least one vehicle term
         if (!vehicleTerms.some(term => imageText.includes(term))) {
+          return null;
+        }
+
+        // Check if the image is likely a technical diagram or schematic
+        const technicalKeywords = [
+          'diagram',
+          'schematic',
+          'wiring',
+          'technical',
+          'manual',
+          'repair diagram',
+          'service manual',
+          'circuit',
+          'blueprint',
+          'layout'
+        ];
+
+        // Require at least one technical keyword in the image metadata
+        if (!technicalKeywords.some(keyword => imageText.includes(keyword))) {
           return null;
         }
 
