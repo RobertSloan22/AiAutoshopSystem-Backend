@@ -185,12 +185,12 @@ DTC Codes: {dtcCodes}
 Problem Description: {problem}
 
 Include these critical elements in your response:
-1. EXACT component locations (e.g., "Located at the rear of cylinder head, 15cm from firewall, underneath the EGR tube")
-2. SPECIFIC connector details (e.g., "C113 connector, PIN 6 and PIN 7, Brown with Yellow stripe and Green with White stripe")
-3. PRECISE testing procedures (e.g., "Measure resistance between PIN 2 and ground with KOEO, specification is 4.5-5.5 kΩ at 20°C")
-4. ACTUAL part numbers (e.g., "OEM part #TD73-12K910-AC superseded by #TD73-12K910-AD")
-5. EXACT diagnostic values (e.g., "MAP sensor voltage should be 0.45V ± 0.05V at idle, increasing to 4.5V ± 0.2V at WOT")
-6. FACTORY SERVICE MANUAL references (e.g., "Refer to FSM section 303-14a, page 27, procedure 'Fuel Injector Circuit Testing'")
+1. EXACT component locations (e.g., "Located at the rear of cylinder head, 15cm from firewall, underneath the EGR tube, accessible after removing the upper intake plenum. Reference point: 8cm above cylinder #4 spark plug, offset 12cm towards passenger side from centerline. Requires removal of heat shield P/N TD73-1234 for access.")
+2. SPECIFIC connector details (e.g., "C113 connector (black 16-pin, P/N TD73-14489-BA), PIN 6 (BRN/YEL - sensor ground) and PIN 7 (GRN/WHT - 5V reference). Connector is indexed with primary lock tab on top side. Secondary CPA lock must be removed using special tool 310-123.")
+3. PRECISE testing procedures (e.g., "Measure resistance between PIN 2 and ground with KOEO, specification is 4.5-5.5 kΩ at 20°C with a tolerance of ±0.5 kΩ. Test conditions: ambient temperature 15-25°C, battery voltage >12.4V, key in ON position for >2 seconds. Use DMM with minimum 10MΩ impedance. Verify zero offset before testing.")
+4. ACTUAL part numbers (e.g., "OEM part #TD73-12K910-AC (2019-2020) superseded by #TD73-12K910-AD (2021+). Includes O-rings P/N: TD73-9229-A (upper) and TD73-9229-B (lower). Kit components: sensor assembly, gasket P/N TD73-9229-C, mounting bolts P/N N804192-S426.")
+5. EXACT diagnostic values (e.g., "MAP sensor voltage should be 0.45V ± 0.05V at idle (650-750 RPM, engine at operating temperature 85-95°C), increasing linearly to 4.5V ± 0.2V at WOT. Barometric pressure compensation: add 0.02V per 1000ft above sea level. Response time must be <50ms from 0.5V to 4.0V.")
+6. FACTORY SERVICE MANUAL references (e.g., "Refer to FSM section 303-14a, pages 27-32, procedure 'Fuel Injector Circuit Testing and Diagnosis'. Supplemental procedures: TSB 21-2345 'Updated Fuel Injector Testing Parameters', Workshop Manual section W12-303-14, Wiring Diagram 23456-A, Sheet 2 of 4.")
 
 Your response MUST be in this JSON format:
 {{
@@ -264,8 +264,7 @@ Never use placeholder values like "Refer to manufacturer specifications" or "Che
 `);
 
     const chatModel = new ChatOpenAI({
-      modelName: 'gpt-4o',
-      temperature: 0.1,
+      modelName: 'o3-mini',
       openAIApiKey: process.env.OPENAI_API_KEY,
       configuration: {
         timeout: 120000,  // 2 minute timeout
@@ -337,8 +336,7 @@ router.post('/technical-details', async (req, res) => {
   
   try {
     const chatModel = new ChatOpenAI({
-      modelName: 'gpt-4o',
-      temperature: 0.1,
+      modelName: 'o3-mini',
       openAIApiKey: process.env.OPENAI_API_KEY,
       configuration: {
         timeout: 60000
@@ -465,7 +463,6 @@ router.post('/embeddings', async (req, res) => {
   try {
     const model = new OpenAI({
       modelName: 'text-embedding-3-small',
-      temperature: 0.2,
       openAIApiKey: process.env.OPENAI_API_KEY,
     });
 
@@ -506,8 +503,7 @@ router.post('/vehicle-question', async (req, res) => {
                                   question.toLowerCase().includes('bulletin');
     
     const chatModel = new OpenAI({
-      modelName: 'gpt-4o',
-      temperature: 0.1,
+      modelName: 'o3-mini',
       openAIApiKey: process.env.OPENAI_API_KEY,
       configuration: {
         timeout: 60000,
@@ -541,7 +537,7 @@ Provide the most technically detailed answer possible, including exact specifica
     if (shouldIncludeWebSearch) {
       // Use the latest model with web search capability
       response = await chatModel.responses.create({
-        model: "gpt-4o",
+        model: "o3-mini",
         max_tokens: 1500,
         messages: [
           {
@@ -616,8 +612,7 @@ router.post('/service-bulletin', async (req, res) => {
   
   try {
     const chatModel = new ChatOpenAI({
-      modelName: 'gpt-4o',
-      temperature: 0.1,
+      modelName: 'o3-mini',
       openAIApiKey: process.env.OPENAI_API_KEY,
     });
     
@@ -634,7 +629,7 @@ Find the most relevant, recent, and specific TSBs that match these criteria. Inc
     
     // Invoke with web search capability
     const webResponse = await chatModel.responses.create({
-      model: "gpt-4o",
+      model: "o3-mini",
       max_tokens: 1500,
       input: await webPrompt.format({
         year,

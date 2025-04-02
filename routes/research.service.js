@@ -202,8 +202,7 @@ router.post('/service', async (req, res) => {
     try {
         // Initialize LangChain components with more powerful model
         const chatModel = new ChatOpenAI({
-            modelName: 'gpt-4o',  // Upgraded from gpt-4o-mini for more detailed responses
-            temperature: 0.1,      // Reduced temperature for more precise outputs
+            modelName: 'o3-mini',  // Upgraded from gpt-4o-mini for more detailed responses
             openAIApiKey: process.env.OPENAI_API_KEY,
             configuration: {
                 timeout: 90000,    // Increased timeout to 90 seconds for more thorough research
@@ -243,6 +242,7 @@ Additional Notes: {additionalNotes}
 
 Include make/model-specific known issues, common failure points, and technical service bulletins.
 Your assessment should incorporate manufacturer-specific diagnostic procedures and exact testing values.
+Your assessment should be helpful to the already seasoned technician so the information needs to be in depth and detailed. Not just the basics.
 
 Provide response in JSON format with:
 {{
@@ -267,7 +267,7 @@ Provide response in JSON format with:
         // 2. Technical Analysis Prompt with enhanced detail requirements
         const technicalAnalysisPrompt = PromptTemplate.fromTemplate(`
 As an expert {vehicleMake} technician, provide extremely detailed diagnostic procedures for this specific issue on a {vehicleYear} {vehicleMake} {vehicleModel}.
-Focus on exact tests, precise measurements, and specific component checks unique to this vehicle.
+Focus on exact tests, precise measurements, and specific component checks unique to this vehicle including details on the location of components for this {vehicleYear} {vehicleMake} {vehicleModel}.
 Include manufacturer-recommended diagnostic procedures, specific harness connector identifiers, and pin-specific test points.
 
 Vehicle Information:
@@ -310,6 +310,7 @@ Example format for testingSteps:
         const repairSolutionsPrompt = PromptTemplate.fromTemplate(`
 Based on the diagnostic information, provide extremely detailed causes and repair solutions specific to a {vehicleYear} {vehicleMake} {vehicleModel}.
 Focus on highly specific repair procedures, exact part numbers, and detailed instructions.
+Your assessment should be helpful to the already seasoned technician so the information needs to be in depth and detailed. Not just the basics.
 
 Vehicle Information:
 Year: {vehicleYear} Make: {vehicleMake} Model: {vehicleModel}
@@ -317,6 +318,11 @@ Issue: {description}
 
 Include:
 - Specific torque specifications for fasteners
+- Specific installation instructions for parts
+- Specific removal instructions for parts
+- Specific testing procedures for parts
+- Specific testing values for parts
+- Detailed Location of parts on the vehicle that are accurate for this vehicle
 - Exact service manual page references
 - Required special tools with part numbers
 - Step-by-step procedures with detailed instructions
@@ -345,7 +351,13 @@ Provide response in JSON format with:
             "laborHours": string,
             "specialTools": [string],
             "procedureSteps": [string],
-            "serviceManualReference": string
+            "serviceManualReference": string,
+            "partLocation": [string],
+            "installationDetails": [string],
+            "removalDetails": [string],
+            "testingDetails": [string],
+            "testingValues": [string],
+            "partNotes": [string]
         }}
     ]
 }}
@@ -528,8 +540,7 @@ router.post('/detail', async (req, res) => {
 
     try {
         const chatModel = new ChatOpenAI({
-            modelName: 'gpt-4-turbo-preview',
-            temperature: 0.2,
+            modelName: 'o3-mini',
             openAIApiKey: process.env.OPENAI_API_KEY,
             configuration: {
                 timeout: 60000, // 60 second timeout
@@ -541,6 +552,7 @@ router.post('/detail', async (req, res) => {
         const detailPrompt = PromptTemplate.fromTemplate(`
 You are an expert automotive technician providing detailed information about a specific aspect of a vehicle problem.
 Your response must be a valid JSON object matching the specified schema. Do not include markdown formatting or code blocks.
+Your assessment should be helpful to the already seasoned technician so the information needs to be in depth and detailed. Not just the basics.
 
 Vehicle Information:
 Year: {year}
@@ -563,6 +575,7 @@ Provide an in-depth analysis of this specific item. Include:
 7. Estimated time for this specific item.
 8. Required expertise level.
 9. Additional resources or references.
+10. Parts information including part numbers, any special details on installation, and any other relevant information.
 
 The response must be a valid JSON object with this exact structure:
 {{
@@ -575,11 +588,23 @@ The response must be a valid JSON object with this exact structure:
     "relatedIssues": ["string"],
     "estimatedTime": "string",
     "requiredExpertise": "string",
+    "parts": [
+        {{
+            "partNumber": "string",
+            "installationDetails": "string"
+        }}
+    ],
     "additionalResources": [
         {{
             "title": "string",
             "url": "string",
             "description": "string"
+        }}
+    ],
+    "parts": [
+        {{
+            "partNumber": "string",
+            "installationDetails": "string"
         }}
     ]
 }}
@@ -614,7 +639,8 @@ Focus on providing deep, technical insights specific to this make/model while ma
                     vin,
                     originalProblem,
                     category,
-                    itemDetails: JSON.stringify(item)
+                    itemDetails: JSON.stringify(item),
+                    parts: JSON.stringify(parts)
                 }),
                 new Promise((_, reject) => 
                     setTimeout(() => reject(new Error('LLM request timed out after 60 seconds')), 60000)
@@ -678,7 +704,8 @@ Focus on providing deep, technical insights specific to this make/model while ma
                 relatedIssues: [],
                 estimatedTime: '',
                 requiredExpertise: '',
-                additionalResources: []
+                additionalResources: [],
+                parts: []
             };
 
             // Merge parsed result with defaults
@@ -731,7 +758,6 @@ router.post('/embeddings', async (req, res) => {
     try {
         const model = new OpenAI({
             modelName: 'text-embedding-3-small',
-            temperature: 0.2,
             openAIApiKey: process.env.OPENAI_API_KEY,
         });
 

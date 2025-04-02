@@ -76,13 +76,6 @@ router.get('/proxy-image', async (req, res) => {
     }
 
     const decodedUrl = decodeURIComponent(url);
-    console.log('Proxy request details:', {
-      originalUrl: url,
-      decodedUrl,
-      explain,
-      prompt,
-      timestamp: new Date().toISOString()
-    });
     
     // Enhanced headers to mimic a browser request
     const headers = {
@@ -100,8 +93,6 @@ router.get('/proxy-image', async (req, res) => {
       'Connection': 'keep-alive'
     };
 
-    console.log('Request headers:', headers);
-
     try {
       const response = await axios({
         method: 'get',
@@ -113,13 +104,6 @@ router.get('/proxy-image', async (req, res) => {
         maxRedirects: 5
       });
 
-      console.log('Direct proxy response:', {
-        status: response.status,
-        contentType: response.headers['content-type'],
-        url: response.config.url,
-        finalUrl: response.request.res.responseUrl
-      });
-
       // Forward the content type and other relevant headers
       res.set('Content-Type', response.headers['content-type']);
       res.set('Cache-Control', 'public, max-age=31536000');
@@ -127,23 +111,15 @@ router.get('/proxy-image', async (req, res) => {
       // If explanation is requested, get it and store in database
       if (explain === 'true') {
         const finalImageUrl = response.request.res.responseUrl || decodedUrl;
-        console.log('Getting explanation for image:', {
-          originalUrl: decodedUrl,
-          finalImageUrl,
-          contentType: response.headers['content-type']
-        });
 
         const explanation = await getImageExplanation(finalImageUrl, prompt);
         
         if (!explanation) {
-          console.error('Failed to generate explanation for:', finalImageUrl);
           return res.status(500).json({ 
             error: 'Failed to generate image explanation',
             details: 'The image could not be processed for explanation'
           });
         }
-
-        console.log('Successfully generated explanation for:', finalImageUrl);
 
         // Create image record in database only if we have an explanation
         const imageData = {
@@ -157,23 +133,12 @@ router.get('/proxy-image', async (req, res) => {
           explanation: explanation
         };
 
-        const savedImage = await Image.create(imageData);
-        console.log('Saved image record:', {
-          id: savedImage._id,
-          imageUrl: savedImage.imageUrl,
-          source: savedImage.source
-        });
+        await Image.create(imageData);
       }
       
       // Pipe the image data to the response
       response.data.pipe(res);
     } catch (proxyError) {
-      console.error('Direct proxy attempt failed:', {
-        error: proxyError.message,
-        url: decodedUrl,
-        status: proxyError.response?.status
-      });
-      
       // If the direct proxy fails, try to fetch the page first to get the actual image URL
       try {
         const pageResponse = await axios.get(decodedUrl, {
@@ -183,12 +148,6 @@ router.get('/proxy-image', async (req, res) => {
           }
         });
 
-        console.log('Page fetch response:', {
-          status: pageResponse.status,
-          contentType: pageResponse.headers['content-type'],
-          url: pageResponse.config.url
-        });
-
         // Extract the actual image URL from the page content
         const html = pageResponse.data;
         const imgRegex = /<img[^>]+src="([^"]+\.(png|jpg|jpeg|webp|gif))"/gi;
@@ -196,11 +155,6 @@ router.get('/proxy-image', async (req, res) => {
         
         if (matches.length > 0) {
           const actualImageUrl = new URL(matches[0][1], decodedUrl).href;
-          console.log('Found valid image URL in page:', {
-            originalUrl: decodedUrl,
-            actualImageUrl,
-            extension: matches[0][2]
-          });
           
           // Try to fetch the actual image
           const imageResponse = await axios({
@@ -213,37 +167,21 @@ router.get('/proxy-image', async (req, res) => {
             maxRedirects: 5
           });
 
-          console.log('Actual image response:', {
-            status: imageResponse.status,
-            contentType: imageResponse.headers['content-type'],
-            url: imageResponse.config.url,
-            finalUrl: imageResponse.request.res.responseUrl
-          });
-
           res.set('Content-Type', imageResponse.headers['content-type']);
           res.set('Cache-Control', 'public, max-age=31536000');
 
           // If explanation is requested, get it and store in database
           if (explain === 'true') {
             const finalImageUrl = imageResponse.request.res.responseUrl || actualImageUrl;
-            console.log('Getting explanation for extracted image:', {
-              originalUrl: decodedUrl,
-              extractedUrl: actualImageUrl,
-              finalImageUrl,
-              contentType: imageResponse.headers['content-type']
-            });
 
             const explanation = await getImageExplanation(finalImageUrl, prompt);
             
             if (!explanation) {
-              console.error('Failed to generate explanation for extracted image:', finalImageUrl);
               return res.status(500).json({ 
                 error: 'Failed to generate image explanation',
                 details: 'The image could not be processed for explanation'
               });
             }
-
-            console.log('Successfully generated explanation for extracted image:', finalImageUrl);
 
             // Create image record in database only if we have an explanation
             const imageData = {
@@ -257,28 +195,14 @@ router.get('/proxy-image', async (req, res) => {
               explanation: explanation
             };
 
-            const savedImage = await Image.create(imageData);
-            console.log('Saved extracted image record:', {
-              id: savedImage._id,
-              imageUrl: savedImage.imageUrl,
-              source: savedImage.source
-            });
+            await Image.create(imageData);
           }
 
           imageResponse.data.pipe(res);
         } else {
-          console.error('No valid image URLs found in page:', {
-            url: decodedUrl,
-            contentLength: html.length
-          });
           throw new Error('No valid image URLs found in page content');
         }
       } catch (fallbackError) {
-        console.error('Fallback proxy attempt failed:', {
-          error: fallbackError.message,
-          url: decodedUrl,
-          status: fallbackError.response?.status
-        });
         res.status(500).json({ 
           error: 'Failed to proxy image',
           details: process.env.NODE_ENV === 'development' ? {
