@@ -50,6 +50,7 @@ import turnResponseRoutes from './routes/turnResponse.routes.js';
 import functionRoutes from './routes/functions.routes.js';
 import responseImageRoutes from './routes/responseImage.routes.js';
 import vehicleQuestionsRoutes from './routes/vehicle-questions.routes.js';
+import plateToVinRoutes from './routes/plateToVin.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -135,6 +136,7 @@ app.use('/api/functions', functionRoutes);
 app.use('/api', responseImageRoutes);
 app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 app.use('/api/license-plate', licensePlateRoutes);
+app.use('/api/plate-to-vin', plateToVinRoutes);
 // API error handling
 app.use('/api', (err, req, res, next) => {
   console.error('API error:', err);

@@ -64,7 +64,7 @@ const saveImage = async (imageData) => {
 
 export const searchImages = async (req, res) => {
   try {
-    const { query, num = 30, vehicleInfo } = req.body;
+    const { query, num = 50, vehicleInfo } = req.body;
     
     if (!vehicleInfo || !vehicleInfo.year || !vehicleInfo.make || !vehicleInfo.model) {
       return res.status(400).json({ error: 'Vehicle information is required' });
@@ -75,7 +75,7 @@ export const searchImages = async (req, res) => {
     const engineInfo = vehicleInfo.engine ? ` ${vehicleInfo.engine}` : '';
     
     // Determine if the query is for a specific part/component
-    const commonPartTerms = ['pump', 'sensor', 'belt', 'filter', 'motor', 'valve', 'relay', 'switch', 'module', 'harness'];
+    const commonPartTerms = ['pump', 'sensor', 'belt', 'module', 'routing', 'circuit', 'filter', 'motor', 'valve', 'relay', 'switch', 'module', 'harness'];
     const isPartQuery = query.toLowerCase().split(' ').some(word => commonPartTerms.includes(word));
     
     // Construct final search query based on query type

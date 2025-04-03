@@ -100,9 +100,18 @@ router.get('/proxy-image', async (req, res) => {
         responseType: 'stream',
         headers,
         timeout: 10000,
-        validateStatus: (status) => status < 400,
+        validateStatus: (status) => status < 500,
         maxRedirects: 5
       });
+      
+      // Check for 404 and other client errors
+      if (response.status >= 400) {
+        return res.status(response.status).json({
+          error: `Image not found or inaccessible`,
+          status: response.status,
+          url: decodedUrl
+        });
+      }
 
       // Forward the content type and other relevant headers
       res.set('Content-Type', response.headers['content-type']);
@@ -145,8 +154,19 @@ router.get('/proxy-image', async (req, res) => {
           headers: {
             ...headers,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
-          }
+          },
+          timeout: 10000,
+          validateStatus: (status) => status < 500
         });
+        
+        // Check for client errors when fetching the page
+        if (pageResponse.status >= 400) {
+          return res.status(pageResponse.status).json({
+            error: `Page not found or inaccessible`,
+            status: pageResponse.status,
+            url: decodedUrl
+          });
+        }
 
         // Extract the actual image URL from the page content
         const html = pageResponse.data;
@@ -163,9 +183,18 @@ router.get('/proxy-image', async (req, res) => {
             responseType: 'stream',
             headers,
             timeout: 10000,
-            validateStatus: (status) => status < 400,
+            validateStatus: (status) => status < 500,
             maxRedirects: 5
           });
+          
+          // Check for client errors when fetching the actual image
+          if (imageResponse.status >= 400) {
+            return res.status(imageResponse.status).json({
+              error: `Image not found or inaccessible`,
+              status: imageResponse.status,
+              url: actualImageUrl
+            });
+          }
 
           res.set('Content-Type', imageResponse.headers['content-type']);
           res.set('Cache-Control', 'public, max-age=31536000');
@@ -203,12 +232,13 @@ router.get('/proxy-image', async (req, res) => {
           throw new Error('No valid image URLs found in page content');
         }
       } catch (fallbackError) {
-        res.status(500).json({ 
+        res.status(404).json({ 
           error: 'Failed to proxy image',
-          details: process.env.NODE_ENV === 'development' ? {
+          details: {
+            message: 'The requested image could not be found or is inaccessible',
             directError: proxyError.message,
             fallbackError: fallbackError.message
-          } : undefined
+          }
         });
       }
     }
@@ -220,7 +250,7 @@ router.get('/proxy-image', async (req, res) => {
     });
     res.status(500).json({ 
       error: 'Failed to proxy image',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      details: `Unable to process image request: ${error.message}`
     });
   }
 });
