@@ -10,6 +10,103 @@ import PartsRetriever from '../parts.service.js';
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     ResearchService:
+ *       type: object
+ *       required:
+ *         - serviceType
+ *         - parameters
+ *       properties:
+ *         serviceType:
+ *           type: string
+ *           enum: [diagnostic, maintenance, repair]
+ *           description: Type of service research
+ *         parameters:
+ *           type: object
+ *           properties:
+ *             vehicleMake:
+ *               type: string
+ *               description: Vehicle manufacturer
+ *             vehicleModel:
+ *               type: string
+ *               description: Vehicle model
+ *             vehicleYear:
+ *               type: integer
+ *               description: Vehicle year
+ *             symptoms:
+ *               type: array
+ *               items:
+ *                 type: string
+ *               description: List of symptoms or issues
+ *         results:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               diagnosis:
+ *                 type: string
+ *                 description: Diagnostic result
+ *               recommendations:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Recommended actions
+ *               parts:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Required parts
+ */
+
+/**
+ * @swagger
+ * /api/research/service:
+ *   post:
+ *     summary: Request service research
+ *     tags: [Research Service]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - serviceType
+ *               - parameters
+ *             properties:
+ *               serviceType:
+ *                 type: string
+ *                 enum: [diagnostic, maintenance, repair]
+ *                 description: Type of service research
+ *               parameters:
+ *                 type: object
+ *                 properties:
+ *                   vehicleMake:
+ *                     type: string
+ *                   vehicleModel:
+ *                     type: string
+ *                   vehicleYear:
+ *                     type: integer
+ *                   symptoms:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *     responses:
+ *       200:
+ *         description: Service research results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ResearchService'
+ *       400:
+ *         description: Invalid input
+ */
+
 // Updated Service Research Schema with new diagnostic details and partsAvailability section
 const ServiceResearchSchema = z.object({
     diagnosticSteps: z.array(z.object({

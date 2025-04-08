@@ -10,6 +10,8 @@ import cors from "cors";
 import { Server } from "socket.io";
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
+import swaggerUi from 'swagger-ui-express';
+import { specs } from './swagger.js';
 import lmStudioRoutes from './routes/lmStudio.routes.js';
 import licensePlateRoutes from './routes/licensePlate.routes.js';
 import authRoutes from "./routes/auth.routes.js";
@@ -139,6 +141,69 @@ app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 app.use('/api/license-plate', licensePlateRoutes);
 app.use('/api/plate-to-vin', plateToVinRoutes);
 app.use('/api/serp', serpRoutes);
+
+// Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
+  customSiteTitle: "Automotive AI Platform API Documentation",
+  customfavIcon: "/favicon.ico",
+  customCss: '.swagger-ui .topbar { display: none }'
+}));
+
+// Base URL route
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Automotive AI Platform</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 100vh;
+          background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }
+        .container {
+          text-align: center;
+          padding: 2rem;
+          background: white;
+          border-radius: 10px;
+          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          max-width: 600px;
+          margin: 1rem;
+        }
+        h1 {
+          color: #2c3e50;
+          margin-bottom: 1rem;
+        }
+        p {
+          color: #34495e;
+          line-height: 1.6;
+        }
+        .logo {
+          font-size: 2.5rem;
+          margin-bottom: 1rem;
+          color: #3498db;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="logo">🚗</div>
+        <h1>Automotive AI Platform</h1>
+        <p>Welcome to the Automotive AI Platform API. This is the backend service for our automotive intelligence system.</p>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
 // API error handling
 app.use('/api', (err, req, res, next) => {
   console.error('API error:', err);
