@@ -13,6 +13,106 @@ dotenv.config();
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Research:
+ *       type: object
+ *       required:
+ *         - query
+ *         - type
+ *       properties:
+ *         query:
+ *           type: string
+ *           description: The research query or topic
+ *         type:
+ *           type: string
+ *           enum: [vehicle, part, service, general]
+ *           description: Type of research
+ *         results:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               source:
+ *                 type: string
+ *                 description: Source of the information
+ *               content:
+ *                 type: string
+ *                 description: The research content
+ *               confidence:
+ *                 type: number
+ *                 format: float
+ *                 description: Confidence score of the result
+ *         status:
+ *           type: string
+ *           enum: [pending, in-progress, completed, failed]
+ *           description: Status of the research
+ */
+
+/**
+ * @swagger
+ * /api/research:
+ *   post:
+ *     summary: Create a new research request
+ *     tags: [Research]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - query
+ *               - type
+ *             properties:
+ *               query:
+ *                 type: string
+ *                 description: The research query
+ *               type:
+ *                 type: string
+ *                 enum: [vehicle, part, service, general]
+ *                 description: Type of research
+ *     responses:
+ *       201:
+ *         description: Research request created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Research'
+ *       400:
+ *         description: Invalid input
+ */
+
+/**
+ * @swagger
+ * /api/research/{id}:
+ *   get:
+ *     summary: Get research results by ID
+ *     tags: [Research]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Research ID
+ *     responses:
+ *       200:
+ *         description: Research results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Research'
+ *       404:
+ *         description: Research not found
+ */
+
 // Comprehensive schema for validating research responses
 const VehicleResearchSchema = z.object({
   diagnosticSteps: z.array(z.object({

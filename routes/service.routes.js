@@ -5,6 +5,156 @@ import protectRoute from "../middleware/protectRoute.js";
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Service:
+ *       type: object
+ *       required:
+ *         - name
+ *         - description
+ *         - price
+ *       properties:
+ *         name:
+ *           type: string
+ *           description: Name of the service
+ *         description:
+ *           type: string
+ *           description: Detailed description of the service
+ *         price:
+ *           type: number
+ *           format: float
+ *           description: Price of the service
+ *         duration:
+ *           type: integer
+ *           description: Estimated duration in minutes
+ *         category:
+ *           type: string
+ *           description: Service category (e.g., maintenance, repair, diagnostic)
+ *         isActive:
+ *           type: boolean
+ *           description: Whether the service is currently available
+ */
+
+/**
+ * @swagger
+ * /api/services:
+ *   get:
+ *     summary: Get all services
+ *     tags: [Services]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of services
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Service'
+ *       401:
+ *         description: Unauthorized
+ */
+
+/**
+ * @swagger
+ * /api/services/{id}:
+ *   get:
+ *     summary: Get service by ID
+ *     tags: [Services]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Service ID
+ *     responses:
+ *       200:
+ *         description: Service details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Service'
+ *       404:
+ *         description: Service not found
+ */
+
+/**
+ * @swagger
+ * /api/services:
+ *   post:
+ *     summary: Create a new service
+ *     tags: [Services]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/Service'
+ *     responses:
+ *       201:
+ *         description: Service created successfully
+ *       400:
+ *         description: Invalid input
+ */
+
+/**
+ * @swagger
+ * /api/services/{id}:
+ *   put:
+ *     summary: Update a service
+ *     tags: [Services]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Service ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/Service'
+ *     responses:
+ *       200:
+ *         description: Service updated successfully
+ *       404:
+ *         description: Service not found
+ */
+
+/**
+ * @swagger
+ * /api/services/{id}:
+ *   delete:
+ *     summary: Delete a service
+ *     tags: [Services]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Service ID
+ *     responses:
+ *       200:
+ *         description: Service deleted successfully
+ *       404:
+ *         description: Service not found
+ */
+
 // Create new service request
 router.post('/requests', protectRoute, async (req, res) => {
     try {

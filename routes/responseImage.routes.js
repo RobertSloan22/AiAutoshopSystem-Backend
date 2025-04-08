@@ -12,6 +12,73 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     ImageResponse:
+ *       type: object
+ *       required:
+ *         - prompt
+ *       properties:
+ *         prompt:
+ *           type: string
+ *           description: The image generation prompt
+ *         imageUrl:
+ *           type: string
+ *           format: uri
+ *           description: URL of the generated image
+ *         style:
+ *           type: string
+ *           enum: [realistic, artistic, technical]
+ *           description: Style of the generated image
+ *         size:
+ *           type: string
+ *           enum: [small, medium, large]
+ *           description: Size of the generated image
+ */
+
+/**
+ * @swagger
+ * /api/response-image:
+ *   post:
+ *     summary: Generate an image based on a prompt
+ *     tags: [Response Image]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - prompt
+ *             properties:
+ *               prompt:
+ *                 type: string
+ *                 description: Description of the image to generate
+ *               style:
+ *                 type: string
+ *                 enum: [realistic, artistic, technical]
+ *                 description: Desired style of the image
+ *               size:
+ *                 type: string
+ *                 enum: [small, medium, large]
+ *                 description: Desired size of the image
+ *     responses:
+ *       200:
+ *         description: Image generated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ImageResponse'
+ *       400:
+ *         description: Invalid input
+ *       429:
+ *         description: Rate limit exceeded
+ */
+
 // Helper function to validate if URL points to an image
 const isValidImageUrl = async (url) => {
   if (!url) return true;

@@ -522,4 +522,123 @@ router.post('/question-with-image', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     OpenAIResponse:
+ *       type: object
+ *       required:
+ *         - prompt
+ *       properties:
+ *         prompt:
+ *           type: string
+ *           description: The input prompt
+ *         response:
+ *           type: string
+ *           description: The AI-generated response
+ *         model:
+ *           type: string
+ *           description: The OpenAI model used
+ *         tokens:
+ *           type: integer
+ *           description: Number of tokens used
+ *         temperature:
+ *           type: number
+ *           format: float
+ *           description: Temperature setting for generation
+ */
+
+/**
+ * @swagger
+ * /api/openai/chat:
+ *   post:
+ *     summary: Generate a chat response using OpenAI
+ *     tags: [OpenAI]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - prompt
+ *             properties:
+ *               prompt:
+ *                 type: string
+ *                 description: The chat prompt
+ *               model:
+ *                 type: string
+ *                 enum: [gpt-3.5-turbo, gpt-4]
+ *                 description: OpenAI model to use
+ *               temperature:
+ *                 type: number
+ *                 format: float
+ *                 minimum: 0
+ *                 maximum: 2
+ *                 description: Controls randomness in the response
+ *               maxTokens:
+ *                 type: integer
+ *                 description: Maximum number of tokens to generate
+ *     responses:
+ *       200:
+ *         description: Chat response generated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OpenAIResponse'
+ *       400:
+ *         description: Invalid input
+ *       429:
+ *         description: Rate limit exceeded
+ */
+
+/**
+ * @swagger
+ * /api/openai/completion:
+ *   post:
+ *     summary: Generate a text completion using OpenAI
+ *     tags: [OpenAI]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - prompt
+ *             properties:
+ *               prompt:
+ *                 type: string
+ *                 description: The completion prompt
+ *               model:
+ *                 type: string
+ *                 enum: [text-davinci-003, gpt-3.5-turbo-instruct]
+ *                 description: OpenAI model to use
+ *               temperature:
+ *                 type: number
+ *                 format: float
+ *                 minimum: 0
+ *                 maximum: 2
+ *                 description: Controls randomness in the response
+ *               maxTokens:
+ *                 type: integer
+ *                 description: Maximum number of tokens to generate
+ *     responses:
+ *       200:
+ *         description: Completion generated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OpenAIResponse'
+ *       400:
+ *         description: Invalid input
+ *       429:
+ *         description: Rate limit exceeded
+ */
+
 export default router;
