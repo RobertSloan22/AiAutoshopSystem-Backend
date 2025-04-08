@@ -1,43 +1,18 @@
 import OpenAI from 'openai';
-import { createClient } from '@supabase/supabase-js';
 import config from '../config/config.js';
 
 // Debug logging for configuration
-console.log('Supabase URL:', config.supabase.url);
 console.log('OpenAI API Key configured:', !!config.openai.apiKey);
 
-if (!config.supabase.url) {
-  throw new Error('Supabase URL is not configured. Please check your environment variables.');
-}
-
-if (!config.supabase.serviceKey) {
-  throw new Error('Supabase service key is not configured. Please check your environment variables.');
+if (!config.openai.apiKey) {
+  throw new Error('OpenAI API key is not configured. Please check your environment variables.');
 }
 
 const openai = new OpenAI({
   apiKey: config.openai.apiKey
 });
 
-const supabase = createClient(
-  config.supabase.url,
-  config.supabase.serviceKey,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false
-    },
-    global: {
-      headers: {
-        'Authorization': `Bearer ${config.supabase.serviceKey}`,
-        'apikey': config.supabase.serviceKey,
-        'jwt_secret': process.env.JWT_SECRET
-      }
-    }
-  }
-);
-
-// Store data in vector store
+// Store data in OpenAI vector store
 export const storeData = async (req, res) => {
   try {
     const { researchData, vehicleInfo, problem } = req.body;
@@ -59,31 +34,27 @@ export const storeData = async (req, res) => {
 
     console.log('Successfully generated embedding');
 
-    // Store in Supabase
-    const { data, error } = await supabase
-      .from('vector_store')
-      .insert([
-        {
-          content: textToEmbed,
-          embedding: embedding.data[0].embedding,
-          metadata: {
-            researchData,
-            vehicleInfo,
-            problem
-          }
-        }
-      ]);
+    // Store in OpenAI vector store
+    const vectorStore = await openai.beta.vector_stores.create({
+      name: "vehicle_research_store"
+    });
 
-    if (error) {
-      console.error('Supabase insert error:', error);
-      throw error;
-    }
+    const { id: vectorStoreId } = vectorStore;
 
-    console.log('Successfully stored in Supabase');
-    res.json({ success: true, data });
+    await openai.beta.vector_stores.files.upload(
+      vectorStoreId,
+      {
+        content: textToEmbed,
+        embedding: embedding.data[0].embedding,
+        metadata: { researchData, vehicleInfo, problem }
+      }
+    );
+
+    console.log('Successfully stored in OpenAI vector store');
+    res.json({ success: true, message: 'Data stored successfully in OpenAI vector store' });
   } catch (error) {
     console.error('Vector store error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: error.message,
       details: error.toString(),
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
@@ -91,7 +62,7 @@ export const storeData = async (req, res) => {
   }
 };
 
-// Query vector store
+// Query OpenAI vector store
 export const queryData = async (req, res) => {
   try {
     const { query, limit = 5 } = req.body;
@@ -106,70 +77,22 @@ export const queryData = async (req, res) => {
 
     console.log('Successfully generated query embedding');
 
-    // Search vector store using cosine similarity
-    const { data: searchResults, error } = await supabase
-      .rpc('match_documents', {
-        query_embedding: embedding.data[0].embedding,
-        match_threshold: 0.7, // Adjust this threshold as needed
-        match_count: limit
-      });
+    // Search OpenAI vector store
+    const searchResults = await openai.beta.vector_stores.search({
+      vectorStoreName: "vehicle_research_store",
+      queryEmbedding: embedding.data[0].embedding,
+      matchThreshold: 0.7,
+      matchCount: limit
+    });
 
-    if (error) {
-      console.error('Supabase search error:', error);
-      throw error;
-    }
-
-    console.log(`Found ${searchResults?.length || 0} matches`);
+    console.log(`Found ${searchResults.length} matches`);
     res.json({ results: searchResults });
   } catch (error) {
     console.error('Vector store query error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: error.message,
       details: error.toString(),
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
-
-// Test connections
-export const testConnections = async (req, res) => {
-  try {
-    console.log('Testing OpenAI connection...');
-    // Test OpenAI connection
-    const embeddingTest = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: "test"
-    });
-    console.log('OpenAI connection successful');
-
-    console.log('Testing Supabase connection...');
-    // Test Supabase connection
-    const { data: supabaseTest, error: supabaseError } = await supabase
-      .from('vector_store')
-      .select('id')
-      .limit(1);
-
-    if (supabaseError) {
-      console.error('Supabase connection error:', supabaseError);
-      throw supabaseError;
-    }
-    console.log('Supabase connection successful');
-
-    res.json({ 
-      success: true,
-      openaiStatus: 'connected',
-      supabaseStatus: 'connected',
-      supabaseUrl: config.supabase.url
-    });
-  } catch (error) {
-    console.error('Connection test error:', error);
-    res.status(500).json({ 
-      error: error.message,
-      details: error.toString(),
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-      openaiStatus: error.message.includes('OpenAI') ? 'error' : 'unknown',
-      supabaseStatus: error.message.includes('supabase') ? 'error' : 'unknown',
-      supabaseUrl: config.supabase.url
-    });
-  }
-}; 

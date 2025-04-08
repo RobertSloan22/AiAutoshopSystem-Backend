@@ -4,7 +4,7 @@ import protectRoute from "../middleware/protectRoute.js";
 
 const router = express.Router();
 
-router.get('/licenseplate', protectRoute, async (req, res) => {
+router.get('/lookup', protectRoute, async (req, res) => {
   const { plate, state } = req.query;
   
   try {

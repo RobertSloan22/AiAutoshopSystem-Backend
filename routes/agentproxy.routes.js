@@ -3,7 +3,7 @@ import fetch from 'node-fetch';
 
 const router = express.Router();
 
-const AGENT_SERVICE_URL = 'http://localhost:3500/agent';
+const AGENT_SERVICE_URL = 'http://localhost:3005/agent';
 
 router.post('/message', async (req, res) => {
     try {

@@ -1,74 +1,59 @@
 import express from 'express';
-import axios from 'axios';
-import { ChatOpenAI } from '@langchain/openai';
-import { PromptTemplate } from '@langchain/core/prompts';
-import { RunnableSequence } from '@langchain/core/runnables';
-import { StringOutputParser } from '@langchain/core/output_parsers';
+import { OpenAI } from 'openai';
 import { z } from 'zod';
-import { OpenAI } from '@langchain/openai';
 import PartsRetriever from '../parts.service.js';
 
 const router = express.Router();
 
-// Updated Service Research Schema with new diagnostic details and partsAvailability section
+// Initialize OpenAI client
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+// Reuse the same schemas from research.service.js
 const ServiceResearchSchema = z.object({
     diagnosticSteps: z.array(z.object({
         step: z.string(),
         details: z.string(),
-        componentsTested: z.array(z.string()).optional(),      // New field: list of components to test
-        testingProcedure: z.string().optional(),               // New field: detailed testing procedure
+        componentsTested: z.array(z.string()).optional(),
+        testingProcedure: z.string().optional(),
         tools: z.array(z.string()).optional(),
         expectedReadings: z.string().optional(),
-        normalRanges: z.string().optional(),                   // New field: normal value ranges
-        componentLocation: z.string().optional(),              // New field: where to find the component
         notes: z.string().optional()
     })),
     possibleCauses: z.array(z.object({
         cause: z.string(),
         likelihood: z.string(),
-        explanation: z.string(),
-        modelSpecificNotes: z.string().optional(),             // New field: make/model specific information
-        commonSigns: z.array(z.string()).optional()            // New field: symptoms that indicate this cause
+        explanation: z.string()
     })),
     recommendedFixes: z.array(z.object({
         fix: z.string(),
         difficulty: z.string(),
         estimatedCost: z.string(),
         professionalOnly: z.boolean().optional(),
-        parts: z.array(z.string()).optional(),
-        laborHours: z.string().optional(),                     // New field: estimated labor time
-        specialTools: z.array(z.string()).optional(),          // New field: special tools required
-        procedureSteps: z.array(z.string()).optional()         // New field: step-by-step procedure
+        parts: z.array(z.string()).optional()
     })),
     technicalNotes: z.object({
         commonIssues: z.array(z.string()),
         serviceIntervals: z.array(z.string()).optional(),
         recalls: z.array(z.string()).optional(),
-        tsbs: z.array(z.string()).optional(),
-        manufacturerSpecificInfo: z.string().optional(),       // New field: manufacturer-specific information
-        preventativeMaintenance: z.array(z.string()).optional() // New field: preventative maintenance tips
+        tsbs: z.array(z.string()).optional()
     }),
     references: z.array(z.object({
         source: z.string(),
         url: z.string().optional(),
         type: z.string(),
-        relevance: z.string(),
-        pageReference: z.string().optional(),                  // New field: specific page or section reference
-        excerpt: z.string().optional()                         // New field: relevant excerpt from the source
+        relevance: z.string()
     })),
     partsAvailability: z.array(z.object({
         part: z.string(),
         supplier: z.string(),
         availability: z.string(),
         cost: z.string(),
-        url: z.string().optional(),
-        oemPartNumber: z.string().optional(),                  // New field: OEM part number
-        aftermarketAlternatives: z.array(z.string()).optional(), // New field: aftermarket options
-        compatibilityNotes: z.string().optional()              // New field: compatibility information
+        url: z.string().optional()
     })).optional()
 });
 
-// Detailed Research Schema remains unchanged
 const DetailedResearchSchema = z.object({
     title: z.string(),
     category: z.string(),
@@ -92,7 +77,6 @@ async function getPartsAvailability(partName, vehicle, location = 'local') {
         const partsRetriever = new PartsRetriever();
         const searchResults = await partsRetriever.searchParts(partName, vehicle);
         
-        // Get detailed information for each part
         const detailedResults = await Promise.all(
             searchResults.slice(0, 3).map(async (result) => {
                 try {
@@ -122,26 +106,28 @@ async function getPartsAvailability(partName, vehicle, location = 'local') {
     }
 }
 
-// Helper function to make LLM requests with smaller chunks
-async function getLLMResponse(model, prompt, data, retries = 3, delay = 1000) {
+// Helper function to make O3-mini API requests
+async function getO3Response(prompt, retries = 3, delay = 1000) {
     let lastError;
     
     for (let i = 0; i < retries; i++) {
         try {
-            const chain = RunnableSequence.from([
-                prompt,
-                model,
-                new StringOutputParser()
-            ]);
-            
-            const result = await chain.invoke(data);
-            
-            if (!result) {
-                throw new Error('Empty response from LLM');
+            const response = await openai.responses.create({
+                model: "o3-mini",
+                input: [
+                    {
+                        role: "user",
+                        content: prompt,
+                    },
+                ],
+            });
+
+            if (!response.output_text) {
+                throw new Error('Empty response from O3-mini');
             }
 
             // Clean and prepare the response
-            let jsonStr = result;
+            let jsonStr = response.output_text;
             
             // If the response is wrapped in markdown code blocks, remove them
             jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
@@ -184,7 +170,7 @@ async function getLLMResponse(model, prompt, data, retries = 3, delay = 1000) {
             }
         } catch (error) {
             lastError = error;
-            console.error(`LLM request attempt ${i + 1} failed:`, error);
+            console.error(`O3-mini request attempt ${i + 1} failed:`, error);
             
             if (i < retries - 1) {
                 await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
@@ -198,19 +184,9 @@ async function getLLMResponse(model, prompt, data, retries = 3, delay = 1000) {
 // Service research endpoint
 router.post('/service', async (req, res) => {
     const { serviceRequest, vehicle, customer } = req.body;
-    let parsedResults = {};  // Declare parsedResults at the top level
-    try {
-        // Initialize LangChain components with more powerful model
-        const chatModel = new ChatOpenAI({
-            modelName: 'o3-mini',  // Upgraded from gpt-4o-mini for more detailed responses
-            openAIApiKey: process.env.OPENAI_API_KEY,
-            configuration: {
-                timeout: 90000,    // Increased timeout to 90 seconds for more thorough research
-                maxRetries: 3,
-                retryDelay: 1000,
-            },
-        });
+    let parsedResults = {};
 
+    try {
         // Split research into smaller chunks
         const baseData = {
             customerName: `${customer.firstName} ${customer.lastName}`,
@@ -224,182 +200,127 @@ router.post('/service', async (req, res) => {
             additionalNotes: serviceRequest.additionalNotes
         };
 
-        // 1. Initial Diagnostic Assessment with enhanced prompt
-        const initialAssessmentPrompt = PromptTemplate.fromTemplate(`
-You are an expert automotive technician with extensive experience diagnosing issues on {vehicleMake} {vehicleModel} vehicles.
-Provide a comprehensive initial assessment for this service request with highly detailed and specific information.
-Focus on problem analysis, diagnostic steps, and safety considerations specific to this exact vehicle model and year.
+        // 1. Initial Diagnostic Assessment
+        const initialAssessmentPrompt = `
+You are an expert automotive technician. Provide an initial assessment for this service request.
+Focus on basic problem analysis, initial diagnostic steps, and safety considerations.
 
 Vehicle Information:
-Year: {vehicleYear} Make: {vehicleMake} Model: {vehicleModel}
-VIN: {vin}
+Year: ${baseData.vehicleYear} Make: ${baseData.vehicleMake} Model: ${baseData.vehicleModel}
+VIN: ${baseData.vin}
 
 Service Request:
-Type: {serviceType}
-Description: {description}
-Priority: {priority}
-Additional Notes: {additionalNotes}
-
-Include make/model-specific known issues, common failure points, and technical service bulletins.
-Your assessment should incorporate manufacturer-specific diagnostic procedures and exact testing values.
-Your assessment should be helpful to the already seasoned technician so the information needs to be in depth and detailed. Not just the basics.
+Type: ${baseData.serviceType}
+Description: ${baseData.description}
+Priority: ${baseData.priority}
+Additional Notes: ${baseData.additionalNotes}
 
 Provide response in JSON format with:
-{{
-    "initialAssessment": {{
+{
+    "initialAssessment": {
         "problemAnalysis": string,
-        "vehicleSpecificConsiderations": string,
-        "knownIssuesForThisModel": [string],
         "safetyConsiderations": [string],
         "initialSteps": [
-            {{
+            {
                 "step": string,
                 "purpose": string,
-                "specificTestPoints": string,
-                "expectedValues": string,
                 "safetyNotes": string
-            }}
+            }
         ]
-    }}
-}}
-`);
+    }
+}`;
 
-        // 2. Technical Analysis Prompt with enhanced detail requirements
-        const technicalAnalysisPrompt = PromptTemplate.fromTemplate(`
-As an expert {vehicleMake} technician, provide extremely detailed diagnostic procedures for this specific issue on a {vehicleYear} {vehicleMake} {vehicleModel}.
-Focus on exact tests, precise measurements, and specific component checks unique to this vehicle including details on the location of components for this {vehicleYear} {vehicleMake} {vehicleModel}.
-Include manufacturer-recommended diagnostic procedures, specific harness connector identifiers, and pin-specific test points.
+        // 2. Technical Analysis Prompt
+        const technicalAnalysisPrompt = `
+As an expert technician, provide detailed diagnostic procedures for this issue.
+Focus on specific tests, measurements, and component checks.
 
 Vehicle Information:
-Year: {vehicleYear} Make: {vehicleMake} Model: {vehicleModel}
-VIN: {vin}
+Year: ${baseData.vehicleYear} Make: ${baseData.vehicleMake} Model: ${baseData.vehicleModel}
+VIN: ${baseData.vin}
 
-Issue Description: {description}
-
-Include exact connector pin numbers, specific test point locations, precise component identifiers, and actual expected measurement values.
-Reference the specific pages in the factory service manual where these procedures are documented.
+Issue Description: ${baseData.description}
 
 IMPORTANT: All arrays must contain properly formatted strings. For testingSteps, provide each step as a complete string without numbering.
 
 Provide response in JSON format with:
-{{
+{
     "diagnosticProcedures": [
-        {{
+        {
             "procedure": string,
             "components": [string],
-            "componentLocation": string,
-            "connectorIdentifiers": string,
             "testingSteps": [string],
             "requiredTools": [string],
-            "expectedReadings": string,
-            "normalValueRange": string,
-            "serviceManualReference": string
-        }}
+            "expectedReadings": string
+        }
     ]
-}}
+}`;
 
-Example format for testingSteps:
-"testingSteps": [
-    "Connect the diagnostic tool to the OBD port J1962 under the driver-side dash",
-    "Start the engine and let it reach operating temperature (195°F-212°F)",
-    "Record the oxygen sensor voltage readings (should cycle between 0.1V and 0.9V)"
-]
-`);
-
-        // 3. Repair Solutions Prompt with enhanced detail requirements
-        const repairSolutionsPrompt = PromptTemplate.fromTemplate(`
-Based on the diagnostic information, provide extremely detailed causes and repair solutions specific to a {vehicleYear} {vehicleMake} {vehicleModel}.
-Focus on highly specific repair procedures, exact part numbers, and detailed instructions.
-Your assessment should be helpful to the already seasoned technician so the information needs to be in depth and detailed. Not just the basics.
+        // 3. Repair Solutions Prompt
+        const repairSolutionsPrompt = `
+Based on the diagnostic information, provide possible causes and repair solutions.
+Focus on specific repair procedures and parts requirements.
 
 Vehicle Information:
-Year: {vehicleYear} Make: {vehicleMake} Model: {vehicleModel}
-Issue: {description}
-
-Include:
-- Specific torque specifications for fasteners
-- Specific installation instructions for parts
-- Specific removal instructions for parts
-- Specific testing procedures for parts
-- Specific testing values for parts
-- Detailed Location of parts on the vehicle that are accurate for this vehicle
-- Exact service manual page references
-- Required special tools with part numbers
-- Step-by-step procedures with detailed instructions
-- Model-specific information that differs from other years/trims
-- Manufacturer-recommended repair methods
+Year: ${baseData.vehicleYear} Make: ${baseData.vehicleMake} Model: ${baseData.vehicleModel}
+Issue: ${baseData.description}
 
 Provide response in JSON format with:
-{{
+{
     "possibleCauses": [
-        {{
+        {
             "cause": string,
             "likelihood": string,
-            "explanation": string,
-            "modelSpecificNotes": string,
-            "commonSigns": [string]
-        }}
+            "explanation": string
+        }
     ],
     "repairSolutions": [
-        {{
+        {
             "solution": string,
             "difficulty": string,
             "parts": [string],
-            "oemPartNumbers": [string],
-            "torqueSpecifications": string,
             "estimatedCost": string,
-            "laborHours": string,
-            "specialTools": [string],
-            "procedureSteps": [string],
-            "serviceManualReference": string,
-            "partLocation": [string],
-            "installationDetails": [string],
-            "removalDetails": [string],
-            "testingDetails": [string],
-            "testingValues": [string],
-            "partNotes": [string]
-        }}
+            "laborHours": string
+        }
     ]
-}}
-`);
+}`;
 
         // 4. Technical Information Prompt
-        const technicalInfoPrompt = PromptTemplate.fromTemplate(`
+        const technicalInfoPrompt = `
 Provide relevant technical information, service bulletins, and recalls for this vehicle and issue.
 
 Vehicle Information:
-Year: {vehicleYear} Make: {vehicleMake} Model: {vehicleModel}
-VIN: {vin}
-Issue: {description}
+Year: ${baseData.vehicleYear} Make: ${baseData.vehicleMake} Model: ${baseData.vehicleModel}
+VIN: ${baseData.vin}
+Issue: ${baseData.description}
 
 Provide response in JSON format with:
-{{
-    "technicalNotes": {{
+{
+    "technicalNotes": {
         "commonIssues": [string],
         "serviceIntervals": [string],
         "recalls": [string],
         "tsbs": [string]
-    }}
-}}
-`);
+    }
+}`;
 
         // Process each step sequentially with error handling
         try {
             // 1. Initial Assessment
             console.log('Starting initial assessment...');
-            const initialAssessment = await getLLMResponse(chatModel, initialAssessmentPrompt, baseData);
+            const initialAssessment = await getO3Response(initialAssessmentPrompt);
             parsedResults.initialAssessment = initialAssessment;
             console.log('Initial assessment completed');
 
             // 2. Technical Analysis
             console.log('Starting technical analysis...');
-            const technicalAnalysis = await getLLMResponse(chatModel, technicalAnalysisPrompt, baseData);
+            const technicalAnalysis = await getO3Response(technicalAnalysisPrompt);
             parsedResults.diagnosticProcedures = technicalAnalysis.diagnosticProcedures;
             console.log('Technical analysis completed');
 
             // 3. Repair Solutions
             console.log('Starting repair solutions analysis...');
-            const repairSolutions = await getLLMResponse(chatModel, repairSolutionsPrompt, baseData);
+            const repairSolutions = await getO3Response(repairSolutionsPrompt);
             const repairData = repairSolutions;
             parsedResults.possibleCauses = repairData.possibleCauses;
             parsedResults.repairSolutions = repairData.repairSolutions;
@@ -407,18 +328,17 @@ Provide response in JSON format with:
 
             // 4. Technical Information
             console.log('Starting technical information gathering...');
-            const technicalInfo = await getLLMResponse(chatModel, technicalInfoPrompt, baseData);
+            const technicalInfo = await getO3Response(technicalInfoPrompt);
             parsedResults.technicalNotes = technicalInfo.technicalNotes;
             console.log('Technical information completed');
         } catch (error) {
             console.error('Error during research steps:', error);
-            // Continue with partial results if we have any
             if (Object.keys(parsedResults).length === 0) {
-                throw error; // Re-throw if we have no results at all
+                throw error;
             }
         }
 
-        // Format into final schema with enhanced fields
+        // Format into final schema with fallbacks for missing data
         const formattedResult = {
             diagnosticSteps: parsedResults.diagnosticProcedures 
                 ? parsedResults.diagnosticProcedures.map(proc => ({
@@ -427,49 +347,26 @@ Provide response in JSON format with:
                     componentsTested: proc.components || [],
                     testingProcedure: Array.isArray(proc.testingSteps) ? proc.testingSteps.join('\n') : proc.testingSteps || '',
                     tools: proc.requiredTools || [],
-                    expectedReadings: proc.expectedReadings || '',
-                    normalRanges: proc.normalValueRange || '',
-                    componentLocation: proc.componentLocation || '',
-                    notes: proc.serviceManualReference || ''
+                    expectedReadings: proc.expectedReadings || ''
                 }))
                 : [],
-            possibleCauses: parsedResults.possibleCauses 
-                ? parsedResults.possibleCauses.map(cause => ({
-                    cause: cause.cause,
-                    likelihood: cause.likelihood,
-                    explanation: cause.explanation,
-                    modelSpecificNotes: cause.modelSpecificNotes || '',
-                    commonSigns: cause.commonSigns || []
-                }))
-                : [],
+            possibleCauses: parsedResults.possibleCauses || [],
             recommendedFixes: parsedResults.repairSolutions 
                 ? parsedResults.repairSolutions.map(solution => ({
                     fix: solution.solution,
                     difficulty: solution.difficulty,
                     estimatedCost: solution.estimatedCost || 'Unknown',
                     professionalOnly: solution.difficulty === 'Complex',
-                    parts: solution.parts || [],
-                    laborHours: solution.laborHours || '',
-                    specialTools: solution.specialTools || [],
-                    procedureSteps: solution.procedureSteps || []
+                    parts: solution.parts || []
                 }))
                 : [],
-            technicalNotes: parsedResults.technicalNotes 
-                ? {
-                    commonIssues: parsedResults.technicalNotes.commonIssues || [],
-                    serviceIntervals: parsedResults.technicalNotes.serviceIntervals || [],
-                    recalls: parsedResults.technicalNotes.recalls || [],
-                    tsbs: parsedResults.technicalNotes.tsbs || [],
-                    manufacturerSpecificInfo: parsedResults.technicalNotes.manufacturerSpecificInfo || '',
-                    preventativeMaintenance: parsedResults.technicalNotes.preventativeMaintenance || []
-                }
-                : {
-                    commonIssues: [],
-                    serviceIntervals: [],
-                    recalls: [],
-                    tsbs: []
-                },
-            references: [] // Can be populated from technical info if needed
+            technicalNotes: parsedResults.technicalNotes || {
+                commonIssues: [],
+                serviceIntervals: [],
+                recalls: [],
+                tsbs: []
+            },
+            references: []
         };
 
         // Validate the formatted result
@@ -478,7 +375,6 @@ Provide response in JSON format with:
             validatedResult = ServiceResearchSchema.parse(formattedResult);
         } catch (validationError) {
             console.error('Schema validation error:', validationError);
-            // Send partial results even if validation fails
             return res.json({
                 success: true,
                 result: formattedResult,
@@ -499,7 +395,6 @@ Provide response in JSON format with:
                 const location = customer.location || 'local';
                 const partsArray = Array.from(partsSet);
                 
-                // Process parts availability sequentially to avoid overwhelming the API
                 const partsAvailability = [];
                 for (const partName of partsArray) {
                     try {
@@ -539,31 +434,20 @@ router.post('/detail', async (req, res) => {
     const { vin, year, make, model, category, item, originalProblem } = req.body;
 
     try {
-        const chatModel = new ChatOpenAI({
-            modelName: 'o3-mini',
-            openAIApiKey: process.env.OPENAI_API_KEY,
-            configuration: {
-                timeout: 60000, // 60 second timeout
-                maxRetries: 3,
-                retryDelay: 1000,
-            },
-        });
-
-        const detailPrompt = PromptTemplate.fromTemplate(`
+        const detailPrompt = `
 You are an expert automotive technician providing detailed information about a specific aspect of a vehicle problem.
 Your response must be a valid JSON object matching the specified schema. Do not include markdown formatting or code blocks.
-Your assessment should be helpful to the already seasoned technician so the information needs to be in depth and detailed. Not just the basics.
 
 Vehicle Information:
-Year: {year}
-Make: {make}
-Model: {model}
-VIN: {vin}
+Year: ${year}
+Make: ${make}
+Model: ${model}
+VIN: ${vin}
 
-Original Problem: {originalProblem}
+Original Problem: ${originalProblem}
 
-Category: {category}
-Item Details: {itemDetails}
+Category: ${category}
+Item Details: ${JSON.stringify(item)}
 
 Provide an in-depth analysis of this specific item. Include:
 1. A clear title for this specific item.
@@ -575,10 +459,9 @@ Provide an in-depth analysis of this specific item. Include:
 7. Estimated time for this specific item.
 8. Required expertise level.
 9. Additional resources or references.
-10. Parts information including part numbers, any special details on installation, and any other relevant information.
 
 The response must be a valid JSON object with this exact structure:
-{{
+{
     "title": "string",
     "category": "string",
     "detailedDescription": "string",
@@ -588,37 +471,16 @@ The response must be a valid JSON object with this exact structure:
     "relatedIssues": ["string"],
     "estimatedTime": "string",
     "requiredExpertise": "string",
-    "parts": [
-        {{
-            "partNumber": "string",
-            "installationDetails": "string"
-        }}
-    ],
     "additionalResources": [
-        {{
+        {
             "title": "string",
             "url": "string",
             "description": "string"
-        }}
-    ],
-    "parts": [
-        {{
-            "partNumber": "string",
-            "installationDetails": "string"
-        }}
+        }
     ]
-}}
+}`;
 
-Focus on providing deep, technical insights specific to this make/model while maintaining safety and manufacturer guidelines.
-`);
-
-        const chain = RunnableSequence.from([
-            detailPrompt,
-            chatModel,
-            new StringOutputParser()
-        ]);
-
-        console.log('Invoking LLM with data:', {
+        console.log('Invoking O3-mini with data:', {
             year,
             make,
             model,
@@ -630,68 +492,8 @@ Focus on providing deep, technical insights specific to this make/model while ma
 
         let result;
         try {
-            // Add timeout handling
-            result = await Promise.race([
-                chain.invoke({
-                    year,
-                    make,
-                    model,
-                    vin,
-                    originalProblem,
-                    category,
-                    itemDetails: JSON.stringify(item),
-                    parts: JSON.stringify(parts)
-                }),
-                new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('LLM request timed out after 60 seconds')), 60000)
-                )
-            ]);
-            console.log('Raw LLM response:', result);
-        } catch (chainError) {
-            console.error('Error in chain execution:', chainError);
-            if (chainError.message.includes('timed out')) {
-                return res.status(504).json({
-                    success: false,
-                    error: 'Request timed out. The model is taking longer than expected to respond. Please try again.',
-                    details: process.env.NODE_ENV === 'development' ? chainError.message : undefined
-                });
-            }
-            throw new Error(`Chain execution failed: ${chainError.message}`);
-        }
-
-        if (!result) {
-            console.error('Empty response received from LLM');
-            throw new Error('Empty response from LLM');
-        }
-
-        if (typeof result !== 'string') {
-            console.error('Unexpected response type:', typeof result);
-            console.error('Response:', result);
-            throw new Error(`Unexpected response type: ${typeof result}`);
-        }
-
-        // Clean up the response by removing markdown code block syntax if present
-        const cleanedContent = result
-            .replace(/```json\n?/g, '')
-            .replace(/```\n?/g, '')
-            .trim();
-
-        console.log('Cleaned content:', cleanedContent);
-
-        // Try to find JSON object in the response if it's not already JSON
-        let jsonStr = cleanedContent;
-        if (!jsonStr.trim().startsWith('{')) {
-            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-                console.error('No JSON found in cleaned content');
-                throw new Error('No JSON found in response');
-            }
-            jsonStr = jsonMatch[0];
-        }
-
-        try {
-            const parsedResult = JSON.parse(jsonStr);
-            console.log('Parsed result:', parsedResult);
+            result = await getO3Response(detailPrompt);
+            console.log('Parsed result:', result);
             
             // Ensure all required fields are present with default values
             const defaultResult = {
@@ -704,12 +506,11 @@ Focus on providing deep, technical insights specific to this make/model while ma
                 relatedIssues: [],
                 estimatedTime: '',
                 requiredExpertise: '',
-                additionalResources: [],
-                parts: []
+                additionalResources: []
             };
 
             // Merge parsed result with defaults
-            const mergedResult = { ...defaultResult, ...parsedResult };
+            const mergedResult = { ...defaultResult, ...result };
             console.log('Merged result:', mergedResult);
 
             // Ensure arrays are properly formatted
@@ -735,12 +536,10 @@ Focus on providing deep, technical insights specific to this make/model while ma
             });
         } catch (parseError) {
             console.error('Error parsing or validating response:', parseError);
-            console.error('Raw response:', jsonStr);
             return res.status(500).json({ 
                 success: false,
                 error: 'Failed to parse or validate AI response',
-                details: process.env.NODE_ENV === 'development' ? parseError.message : undefined,
-                rawResponse: process.env.NODE_ENV === 'development' ? jsonStr : undefined
+                details: process.env.NODE_ENV === 'development' ? parseError.message : undefined
             });
         }
     } catch (error) {
@@ -756,17 +555,12 @@ Focus on providing deep, technical insights specific to this make/model while ma
 // Add embeddings endpoint
 router.post('/embeddings', async (req, res) => {
     try {
-        const model = new OpenAI({
-            modelName: 'text-embedding-3-small',
-            openAIApiKey: process.env.OPENAI_API_KEY,
-        });
-
-        const result = await model.embeddings.create({
+        const response = await openai.embeddings.create({
             model: "text-embedding-3-small",
             input: req.body.input,
         });
 
-        res.json(result);
+        res.json(response);
     } catch (error) {
         console.error('Error generating embeddings:', error);
         res.status(500).json({ 
@@ -777,4 +571,4 @@ router.post('/embeddings', async (req, res) => {
     }
 });
 
-export default router;
+export default router; 

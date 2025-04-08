@@ -6,12 +6,16 @@ const router = express.Router();
 
 router.post('/images', protectRoute, async (req, res) => {
     try {
+        const { imageUrl, thumbnailUrl, title, source, link, originalUrl } = req.body;
+        
+        // Create image record
         const imageData = {
-            title: req.body.title,
-            imageUrl: req.body.imageUrl,
-            thumbnailUrl: req.body.thumbnailUrl,
-            source: req.body.source,
-            link: req.body.link,
+            title: title || 'Untitled',
+            imageUrl: imageUrl,
+            thumbnailUrl: thumbnailUrl || imageUrl,
+            source: source || new URL(imageUrl).hostname,
+            link: link || imageUrl,
+            originalUrl: originalUrl || imageUrl,
             timestamp: new Date()
         };
         
@@ -19,7 +23,10 @@ router.post('/images', protectRoute, async (req, res) => {
         res.status(201).json(savedImage);
     } catch (error) {
         console.error('Failed to save image:', error);
-        res.status(500).json({ error: 'Failed to save image' });
+        res.status(500).json({ 
+            error: 'Failed to save image',
+            details: error.message 
+        });
     }
 });
 
@@ -33,4 +40,20 @@ router.get('/images', protectRoute, async (req, res) => {
   }
 });
 
-export default router; 
+router.delete('/images/:id', protectRoute, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedImage = await Image.findByIdAndDelete(id);
+    
+    if (!deletedImage) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+    
+    res.json({ message: 'Image deleted successfully' });
+  } catch (error) {
+    console.error('Failed to delete image:', error);
+    res.status(500).json({ error: 'Failed to delete image' });
+  }
+});
+
+export default router;

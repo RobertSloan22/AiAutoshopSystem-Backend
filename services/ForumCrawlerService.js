@@ -1,7 +1,13 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { Chroma } from "@langchain/community/vectorstores/chroma";
+import { ChromaClient } from "chromadb";
+import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
+import { Buffer } from 'buffer';
+import { writeFileSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 // Custom embeddings class for local model
 class LocalEmbeddings {
@@ -35,6 +41,8 @@ export class ForumCrawlerService {
     static processedUrls = new Set();
     static maxDepth = 4; // Reduced depth for targeted crawling
     static maxPages = 40; // Reduced pages for targeted crawling
+    static chromaClient = null;
+    static collectionName = "forum_content";
 
     // Add BMW Forums specific configuration
     static bmwForumsConfig = {
@@ -325,46 +333,157 @@ export class ForumCrawlerService {
         }
     }
 
+    static async initializeChromaDB() {
+        try {
+            if (!this.chromaClient) {
+                this.chromaClient = new ChromaClient({
+                    path: process.env.CHROMA_URL || "http://localhost:8000"
+                });
+                console.log('ChromaDB client initialized');
+            }
+
+            // Get or create collection
+            try {
+                await this.chromaClient.getCollection({ name: this.collectionName });
+                console.log('Using existing ChromaDB collection');
+            } catch {
+                await this.chromaClient.createCollection({ 
+                    name: this.collectionName,
+                    metadata: {
+                        "description": "Forum content and discussions collection",
+                        "created_at": new Date().toISOString()
+                    }
+                });
+                console.log('Created new ChromaDB collection');
+            }
+
+            // Initialize vector store with ChromaDB
+            if (!this.vectorStore) {
+                this.vectorStore = await Chroma.fromExistingCollection(
+                    new LocalEmbeddings(),
+                    { collectionName: this.collectionName }
+                );
+                console.log('Vector store initialized with ChromaDB');
+            }
+        } catch (error) {
+            console.error('Error initializing ChromaDB:', error);
+            throw error;
+        }
+    }
+
+    static async isPDF(url) {
+        try {
+            const response = await axios.head(url);
+            return response.headers['content-type']?.includes('application/pdf');
+        } catch (error) {
+            console.error('Error checking content type:', error);
+            return false;
+        }
+    }
+
+    static async processPDF(url) {
+        try {
+            console.log('Processing PDF:', url);
+            
+            // Download PDF content
+            const response = await axios.get(url, {
+                responseType: 'arraybuffer'
+            });
+            
+            // Create a temporary file to store the PDF
+            const tempFilePath = join(tmpdir(), `temp_${Date.now()}.pdf`);
+            writeFileSync(tempFilePath, Buffer.from(response.data));
+            
+            // Create PDF loader with the temporary file
+            const loader = new PDFLoader(tempFilePath);
+            
+            // Load and process PDF
+            const docs = await loader.load();
+            
+            // Split documents into chunks
+            const textSplitter = new RecursiveCharacterTextSplitter({
+                chunkSize: 1000,
+                chunkOverlap: 200,
+            });
+            
+            const docSplits = await textSplitter.splitDocuments(docs);
+            
+            // Add metadata to each document
+            docSplits.forEach(doc => {
+                doc.metadata = {
+                    ...doc.metadata,
+                    source: url,
+                    type: 'pdf',
+                    timestamp: new Date().toISOString()
+                };
+            });
+            
+            // Clean up temporary file
+            try {
+                unlinkSync(tempFilePath);
+            } catch (error) {
+                console.warn('Failed to delete temporary PDF file:', error);
+            }
+            
+            console.log(`Successfully processed PDF with ${docSplits.length} chunks`);
+            return docSplits;
+        } catch (error) {
+            console.error('Error processing PDF:', error);
+            throw new Error(`Failed to process PDF: ${error.message}`);
+        }
+    }
+
     static async crawlForumContent(url, question = null) {
         try {
             if (!this.isValidUrl(url)) {
                 throw new Error('Invalid URL provided');
             }
 
-            console.log('Starting forum crawl...');
+            console.log('Starting content crawl...');
             this.processedUrls.clear();
+
+            // Initialize ChromaDB if not already done
+            await this.initializeChromaDB();
 
             let allDocs = [];
 
-            if (question) {
-                // Targeted crawl with search terms
-                console.log('Starting targeted crawl with question:', question);
-                const searchTerms = this.extractSearchTerms(question);
-                console.log('Search terms:', searchTerms);
-
-                // Search for relevant pages
-                const relevantUrls = await this.searchForumPages(url, searchTerms);
-                console.log(`Found ${relevantUrls.length} potentially relevant pages`);
-
-                // Crawl the found pages and their immediate links
-                for (const pageUrl of relevantUrls) {
-                    if (this.processedUrls.size < this.maxPages) {
-                        const docs = await this.crawlPage(pageUrl);
-                        allDocs.push(...docs);
-                    }
-                }
-
-                // If we found very little content, fall back to regular crawling
-                if (allDocs.length < 5 && !this.processedUrls.has(url)) {
-                    console.log('Insufficient results from search, falling back to regular crawl...');
-                    const regularDocs = await this.crawlPage(url);
-                    allDocs.push(...regularDocs);
-                }
+            // Check if URL is a PDF
+            if (await this.isPDF(url)) {
+                console.log('Detected PDF content, processing...');
+                const pdfDocs = await this.processPDF(url);
+                allDocs.push(...pdfDocs);
             } else {
-                // Regular crawl without search terms
-                console.log('Starting regular crawl...');
-                const docs = await this.crawlPage(url);
-                allDocs.push(...docs);
+                // Existing web page crawling logic
+                if (question) {
+                    // Targeted crawl with search terms
+                    console.log('Starting targeted crawl with question:', question);
+                    const searchTerms = this.extractSearchTerms(question);
+                    console.log('Search terms:', searchTerms);
+
+                    // Search for relevant pages
+                    const relevantUrls = await this.searchForumPages(url, searchTerms);
+                    console.log(`Found ${relevantUrls.length} potentially relevant pages`);
+
+                    // Crawl the found pages and their immediate links
+                    for (const pageUrl of relevantUrls) {
+                        if (this.processedUrls.size < this.maxPages) {
+                            const docs = await this.crawlPage(pageUrl);
+                            allDocs.push(...docs);
+                        }
+                    }
+
+                    // If we found very little content, fall back to regular crawling
+                    if (allDocs.length < 5 && !this.processedUrls.has(url)) {
+                        console.log('Insufficient results from search, falling back to regular crawl...');
+                        const regularDocs = await this.crawlPage(url);
+                        allDocs.push(...regularDocs);
+                    }
+                } else {
+                    // Regular crawl without search terms
+                    console.log('Starting regular crawl...');
+                    const docs = await this.crawlPage(url);
+                    allDocs.push(...docs);
+                }
             }
 
             console.log(`Total pages processed: ${this.processedUrls.size}`);
@@ -374,36 +493,34 @@ export class ForumCrawlerService {
                 throw new Error('No content could be extracted from any pages');
             }
 
-            // Initialize vector store if not exists
-            if (!this.vectorStore) {
-                console.log('Initializing vector store...');
-                const embeddings = new LocalEmbeddings(this.localLLMUrl);
-                this.vectorStore = await MemoryVectorStore.fromDocuments(allDocs, embeddings);
-            } else {
-                console.log('Adding documents to existing vector store...');
-                await this.vectorStore.addDocuments(allDocs);
-            }
+            // Add documents to ChromaDB
+            console.log('Adding documents to ChromaDB...');
+            await this.vectorStore.addDocuments(allDocs);
+            console.log('Documents successfully added to ChromaDB');
 
             return { 
                 success: true, 
-                message: 'Forum content processed successfully',
+                message: 'Content processed successfully',
                 pagesProcessed: this.processedUrls.size,
                 totalChunks: allDocs.length,
                 processedUrls: Array.from(this.processedUrls)
             };
 
         } catch (error) {
-            console.error('Error crawling forum:', error);
-            throw new Error(`Failed to process forum content: ${error.message}`);
+            console.error('Error crawling content:', error);
+            throw new Error(`Failed to process content: ${error.message}`);
         }
     }
 
     static async queryContent(question) {
-        if (!this.vectorStore) {
-            throw new Error('No forum content has been processed yet');
-        }
-
         try {
+            // Initialize ChromaDB if not already done
+            await this.initializeChromaDB();
+
+            if (!this.vectorStore) {
+                throw new Error('No forum content has been processed yet');
+            }
+
             console.log(`Querying content for: ${question}`);
             const relevantDocs = await this.vectorStore.similaritySearch(question, 5);
             console.log(`Found ${relevantDocs.length} relevant documents`);

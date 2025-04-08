@@ -5,7 +5,7 @@ import protectRoute from "../middleware/protectRoute.js";
 const router = express.Router();
 
 const openai = new OpenAI({
-  apiKey: process.env.VITE_OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY
 });
 
 router.post('/generate-diagram', protectRoute, async (req, res) => {
