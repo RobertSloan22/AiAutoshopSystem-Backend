@@ -1,5 +1,9 @@
 import axios from 'axios';
 import Image from '../models/image.model.js';
+import stringSimilarity from 'string-similarity';
+import pLimit from 'p-limit';
+
+const limit = pLimit(10);
 
 // Helper function to validate image URL extension
 const hasValidImageExtension = (url) => {
@@ -15,31 +19,34 @@ const hasValidImageExtension = (url) => {
 };
 
 // Helper function to validate image URL is accessible and has correct content type
-const validateImageAccessibility = async (url) => {
-  try {
-    const response = await axios.head(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      },
-      timeout: 5000 // 5 second timeout
-    });
+const validateImageAccessibility = async (url, retries = 2) => {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const response = await axios.head(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        },
+        timeout: 5000 // 5 second timeout
+      });
 
-    const contentType = response.headers['content-type'];
-    const contentLength = response.headers['content-length'];
+      const contentType = response.headers['content-type'];
+      const contentLength = response.headers['content-length'];
 
-    // Check content type
-    if (!contentType || !contentType.startsWith('image/')) {
-      return false;
+      // Check content type
+      if (!contentType || !contentType.startsWith('image/')) {
+        return false;
+      }
+
+      // Check file size (max 10MB)
+      if (contentLength && parseInt(contentLength) > 10 * 1024 * 1024) {
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      if (i === retries) return false;
+      await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
     }
-
-    // Check file size (max 10MB)
-    if (contentLength && parseInt(contentLength) > 10 * 1024 * 1024) {
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    return false;
   }
 };
 
@@ -62,9 +69,13 @@ const saveImage = async (imageData) => {
   }
 };
 
+const computeSemanticScore = (text, query) => {
+  return stringSimilarity.compareTwoStrings(text, query);
+};
+
 export const searchImages = async (req, res) => {
   try {
-    const { query, num = 50, vehicleInfo } = req.body;
+    const { query, num = 100, vehicleInfo } = req.body;
     
     if (!vehicleInfo || !vehicleInfo.year || !vehicleInfo.make || !vehicleInfo.model) {
       return res.status(400).json({ error: 'Vehicle information is required' });
@@ -75,7 +86,7 @@ export const searchImages = async (req, res) => {
     const engineInfo = vehicleInfo.engine ? ` ${vehicleInfo.engine}` : '';
     
     // Determine if the query is for a specific part/component
-    const commonPartTerms = ['pump', 'sensor', 'belt', 'module', 'routing', 'circuit', 'filter', 'motor', 'valve', 'relay', 'switch', 'module', 'harness'];
+    const commonPartTerms = ['pump', 'sensor', 'belt', 'module', 'routing', 'circuit', 'filter', 'motor', 'valve', 'relay', 'switch', 'harness'];
     const isPartQuery = query.toLowerCase().split(' ').some(word => commonPartTerms.includes(word));
     
     // Construct final search query based on query type
@@ -90,7 +101,7 @@ export const searchImages = async (req, res) => {
     }
     
     // Ensure vehicle specificity in the query
-    const refinedQuery = `"${vehicleString}" ${engineInfo} ${technicalTerms}`;
+    const refinedQuery = `"${vehicleString}"${engineInfo} ${technicalTerms}`;
 
     console.log('Refined search query:', refinedQuery);
 
@@ -141,90 +152,56 @@ export const searchImages = async (req, res) => {
       return hasStrongIndicator || hasUrlIndicator;
     };
 
-    // Filter results with more lenient criteria
+    const trustedSources = ['alldatadiy.com', 'repairpal.com', 'workshop-manuals.com'];
+
     let filteredResults = await Promise.all(
-      (response.data.images || []).map(async (image) => {
-        // Basic URL validation
-        if (!image.imageUrl || !hasValidImageExtension(image.imageUrl)) {
-          return null;
-        }
+      (response.data.images || []).map(image => limit(async () => {
+        if (!image.imageUrl || !hasValidImageExtension(image.imageUrl)) return null;
 
-        // Check vehicle relevance with flexible matching
         const imageText = `${image.title} ${image.link} ${image.source}`.toLowerCase();
-        const vehicleTerms = [
-          vehicleInfo.year.toString(),
-          vehicleInfo.make.toLowerCase(),
-          vehicleInfo.model.toLowerCase()
-        ];
-
-        // Initialize relevance score
-        image.relevanceScore = 0;
-
-        // Check if it's likely a diagram
+        const vehicleTerms = [vehicleInfo.year.toString(), vehicleInfo.make.toLowerCase(), vehicleInfo.model.toLowerCase()];
         const isDiagram = isDiagramImage(imageText, image.imageUrl);
-        if (!isDiagram) {
-          return null; // Filter out non-diagram images
-        }
-        image.relevanceScore += 3; // Boost score for being a diagram
 
-        // For part queries, require stricter vehicle matching but still reasonable
+        if (!isDiagram) return null;
+
+        image.relevanceScore = 3;
+
+        const hasMake = imageText.includes(vehicleInfo.make.toLowerCase());
+        const hasModel = imageText.includes(vehicleInfo.model.toLowerCase());
+        const hasYear = imageText.includes(vehicleInfo.year.toString());
+        const hasEngine = vehicleInfo.engine && imageText.includes(vehicleInfo.engine.toLowerCase());
+        const hasPart = query.toLowerCase().split(' ').some(word => imageText.includes(word));
+
         if (isPartQuery) {
-          // Must match (make AND model) AND contain the part name
-          const hasMake = imageText.includes(vehicleInfo.make.toLowerCase());
-          const hasModel = imageText.includes(vehicleInfo.model.toLowerCase());
-          const hasPart = query.toLowerCase().split(' ').some(word => imageText.includes(word));
-          
-          // Optional but beneficial matches
-          const hasYear = imageText.includes(vehicleInfo.year.toString());
-          const hasEngine = vehicleInfo.engine && imageText.includes(vehicleInfo.engine.toLowerCase());
-          
-          // Require core matches
-          if (!hasMake || !hasModel || !hasPart) {
-            return null;
-          }
-          
-          // Add to relevance score
+          if (!(hasMake && hasModel && hasPart)) return null;
           image.relevanceScore += (hasYear ? 2 : 0) + (hasEngine ? 1 : 0);
-          image.relevanceScore += hasPart ? 2 : 0; // Boost score for part match
+          image.relevanceScore += hasPart ? 2 : 0;
         } else {
-          // For non-part queries, use more lenient matching
-          const hasMake = imageText.includes(vehicleInfo.make.toLowerCase());
           const hasModelOrYear = vehicleTerms.slice(0, 2).some(term => imageText.includes(term));
-          
-          if (!hasMake || !hasModelOrYear) {
-            return null;
-          }
-          
+          if (!hasMake || !hasModelOrYear) return null;
           image.relevanceScore += vehicleTerms.filter(term => imageText.includes(term)).length;
         }
 
-        // Check for specific diagram types and boost score accordingly
-        const diagramTypes = [
-          'exploded view',
-          'parts diagram',
-          'assembly diagram',
-          'technical drawing',
-          'repair diagram',
-          'service diagram'
-        ];
-
+        const diagramTypes = ['exploded view', 'parts diagram', 'assembly diagram', 'technical drawing', 'repair diagram', 'service diagram'];
         for (const type of diagramTypes) {
           if (imageText.includes(type)) {
             image.relevanceScore += 1;
           }
         }
 
-        // Validate image accessibility
-        const isAccessible = await validateImageAccessibility(image.imageUrl);
-        if (!isAccessible) {
-          return null;
+        if (trustedSources.some(domain => image.link?.includes(domain) || image.source?.includes(domain))) {
+          image.relevanceScore += 2;
         }
 
+        image.relevanceScore += Math.floor(computeSemanticScore(imageText, refinedQuery) * 5);
+
+        const isAccessible = await validateImageAccessibility(image.imageUrl);
+        if (!isAccessible) return null;
+
         return image;
-      })
+      }))
     );
 
-    // Remove null results
     filteredResults = filteredResults.filter(Boolean);
     
     // Sort results by relevance score and matching terms
@@ -266,7 +243,10 @@ export const searchImages = async (req, res) => {
     });
 
     res.json({ 
-      images: savedImages,
+      images: savedImages.map(img => ({
+        ...img.toObject?.() || img,
+        relevanceScore: img.relevanceScore
+      })),
       metadata: {
         originalQuery: query,
         refinedQuery,
