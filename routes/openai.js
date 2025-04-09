@@ -407,116 +407,294 @@ router.post('/validate-image', async (req, res) => {
 /**
  * POST /api/openai/question-with-image
  * 
- * Handles user questions, generates a text response using OpenAI's Responses API, and includes web search results with relevant images.
+ * Handles user questions about automotive components/systems and returns both technical explanation
+ * and relevant technical diagrams.
  * 
  * Expects a JSON body containing:
- *  - question: The user's question
+ *  - question: The user's technical question about a vehicle component or system
+ *  - context: (optional) Additional context like vehicle make, model, year
  * 
  * Returns:
  *  - { textResponse: string, sources: array, images: array } on success
  *  - { error: string } on failure
  */
 router.post('/question-with-image', async (req, res) => {
-  const { question } = req.body;
+  const { question, context } = req.body;
 
   if (!question) {
     return res.status(400).json({ error: 'Question is required' });
   }
 
   try {
-    // Use OpenAI's Responses API with web search to generate a response with images
-    const response = await openai.responses.create({
-      model: "gpt-4o-mini",
-      input: question,
-      tools: [
-        { type: "web_search" }
+    // Enhance the question with automotive context
+    const enhancedQuestion = context ? 
+      `${question} for a ${context.year || ''} ${context.make || ''} ${context.model || ''}`.trim() :
+      question;
+
+    // Create a system message focused on automotive technical expertise
+    const systemMessage = `You are an expert Automotive Technical Advisor specializing in vehicle systems, 
+    components, and technical documentation. When analyzing questions:
+    1. Focus on providing precise technical explanations with specific measurements and specifications
+    2. Reference official repair manuals and technical documentation standards
+    3. Emphasize safety-critical information when relevant
+    4. Include references to relevant technical diagrams and schematics
+    5. Use industry-standard terminology`;
+
+    // First, get the technical explanation from OpenAI
+    const chatResponse = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: systemMessage
+        },
+        {
+          role: "user",
+          content: `Provide a detailed technical explanation about: ${enhancedQuestion}. Include specific references to technical diagrams that would be helpful.`
+        }
       ],
-      max_output_tokens: 1000  // USING THE CORRECT PARAMETER NAME
+      temperature: 0.7,
+      max_tokens: 1000
     });
-    
-    // Extract the text response and sources from the result
-    let textResponse = '';
-    let sources = [];
+
+    if (!chatResponse.choices || chatResponse.choices.length === 0) {
+      throw new Error('No response received from OpenAI');
+    }
+
+    const textResponse = chatResponse.choices[0].message.content;
+
+    // Now perform a web search to find relevant diagrams
+    const searchQuery = `${enhancedQuestion} technical diagram schematic automotive`;
     let images = [];
-    
-    // Process the response to extract text, sources, and image URLs
-    if (response.output && response.output.length > 0) {
-      for (const output of response.output) {
-        if (output.type === 'message' && output.content && output.content.length > 0) {
-          for (const content of output.content) {
-            if (content.type === 'output_text') {
-              textResponse += content.text;
-              
-              // Extract annotations (sources/citations)
-              if (content.annotations && content.annotations.length > 0) {
-                for (const annotation of content.annotations) {
-                  if (annotation.type === 'url_citation') {
-                    sources.push({
-                      title: annotation.title,
-                      url: annotation.url
-                    });
-                    
-                    // Check if URL might contain an image
-                    if (annotation.url.match(/\.(jpeg|jpg|gif|png)$/i) || 
-                        annotation.title.toLowerCase().includes('image') || 
-                        annotation.title.toLowerCase().includes('photo')) {
-                      images.push(annotation.url);
-                    }
-                  }
-                }
-              }
-            }
-          }
+    let sources = [];
+
+    try {
+      // Use axios to perform a web search (you might want to use a proper search API here)
+      const searchResponse = await axios.get('https://www.googleapis.com/customsearch/v1', {
+        params: {
+          key: process.env.GOOGLE_API_KEY,
+          cx: process.env.GOOGLE_SEARCH_ENGINE_ID,
+          q: searchQuery,
+          searchType: 'image',
+          num: 5,
+          imgType: 'photo',
+          safe: 'active'
         }
+      });
+
+      if (searchResponse.data && searchResponse.data.items) {
+        images = searchResponse.data.items
+          .filter(item => {
+            const url = item.link.toLowerCase();
+            return url.endsWith('.jpg') || 
+                   url.endsWith('.jpeg') || 
+                   url.endsWith('.png') || 
+                   url.endsWith('.gif');
+          })
+          .map(item => ({
+            url: item.link,
+            title: item.title,
+            source: item.image.contextLink
+          }));
+
+        // Add sources
+        sources = searchResponse.data.items.map(item => ({
+          title: item.title,
+          url: item.image.contextLink
+        }));
       }
+    } catch (searchError) {
+      console.error('Error performing image search:', searchError);
+      // Continue without images if search fails
     }
-    
-    // If no images were found in the citations, attempt to extract image URLs from the response text
-    if (images.length === 0) {
-      // Look for URLs in the response text that might be images
-      const urlRegex = /(https?:\/\/[^\s]+\.(jpeg|jpg|gif|png))/gi;
-      const matches = textResponse.match(urlRegex);
-      if (matches) {
-        images = [...matches];
-      }
-      
-      // If still no images, try to find image URLs in the source URLs
-      if (images.length === 0 && sources.length > 0) {
-        // Use the first source URL to validate and possibly fetch an image
-        try {
-          const sourceUrl = sources[0].url;
-          const validateResult = await axios.get(sourceUrl, {
-            responseType: 'text',
-            timeout: 3000
-          });
-          
-          // Look for image URLs in the HTML
-          const imgRegex = /<img[^>]+src="([^">]+)"/g;
-          let match;
-          while ((match = imgRegex.exec(validateResult.data)) !== null) {
-            // Only add reasonably sized images (avoid icons)
-            if (!match[1].includes('icon') && !match[1].includes('logo')) {
-              // Convert relative URLs to absolute
-              const imgUrl = new URL(match[1], sourceUrl).href;
-              images.push(imgUrl);
-              if (images.length >= 3) break; // Limit to 3 images
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching images from source:', error);
-        }
-      }
-    }
+
+    // Convert image URLs to use our proxy
+    const proxiedImages = images.map(img => ({
+      ...img,
+      url: `/api/openai/proxy-image?url=${encodeURIComponent(img.url)}`
+    }));
 
     return res.status(200).json({
       textResponse,
       sources,
-      images
+      images: proxiedImages
     });
+
   } catch (error) {
-    console.error('Error handling question with image:', error);
+    console.error('Error in question-with-image:', error);
+
+    // Handle specific OpenAI API errors
+    if (error.response?.status === 429) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded. Please try again later.',
+        details: error.message
+      });
+    }
+
+    if (error.response?.status === 400) {
+      return res.status(400).json({
+        error: 'Invalid request to AI service',
+        details: error.message
+      });
+    }
+
+    // Handle network errors
+    if (error.code === 'ECONNREFUSED' || error.code === 'ECONNABORTED') {
+      return res.status(503).json({
+        error: 'Service temporarily unavailable',
+        details: 'Could not connect to AI service'
+      });
+    }
+
     return res.status(500).json({ 
       error: 'Failed to process request',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * GET /api/openai/proxy-image
+ * 
+ * Proxies an image from an external URL to handle CORS and security concerns.
+ * 
+ * Query Parameters:
+ *  - url: The URL of the image to proxy
+ * 
+ * Returns:
+ *  - The image data with appropriate content type
+ *  - Various error status codes on failure
+ */
+router.get('/proxy-image', async (req, res) => {
+  try {
+    const imageUrl = req.query.url;
+    
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      return res.status(400).json({
+        error: 'URL parameter is required and must be a string'
+      });
+    }
+
+    // Validate URL format
+    try {
+      new URL(imageUrl);
+    } catch (e) {
+      return res.status(400).json({
+        error: 'Invalid URL format'
+      });
+    }
+
+    // Fetch the image with axios
+    const response = await axios({
+      method: 'get',
+      url: imageUrl,
+      responseType: 'stream',
+      timeout: 5000, // 5 second timeout
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+
+    // Validate content type
+    const contentType = response.headers['content-type'];
+    if (!contentType || !contentType.startsWith('image/')) {
+      return res.status(400).json({
+        error: 'URL does not point to a valid image'
+      });
+    }
+
+    // Set appropriate headers
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+
+    // Stream the response
+    response.data.pipe(res);
+  } catch (error) {
+    console.error('Proxy image error:', error);
+
+    // Handle specific error cases
+    if (error.code === 'ECONNABORTED') {
+      return res.status(408).json({
+        error: 'Request timeout while fetching image'
+      });
+    }
+
+    if (error.response) {
+      return res.status(error.response.status).json({
+        error: `Failed to fetch image: ${error.response.statusText}`
+      });
+    }
+
+    return res.status(500).json({
+      error: 'Error proxying image',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * GET /api/openai/test-google-search
+ * 
+ * Test endpoint to verify Google Custom Search API setup
+ * 
+ * Returns:
+ *  - { success: true, images: array } on success
+ *  - { error: string } on failure
+ */
+router.get('/test-google-search', async (req, res) => {
+  try {
+    // Verify environment variables
+    if (!process.env.GOOGLE_API_KEY || !process.env.GOOGLE_SEARCH_ENGINE_ID) {
+      return res.status(500).json({
+        error: 'Google API credentials not configured',
+        details: 'Please check GOOGLE_API_KEY and GOOGLE_SEARCH_ENGINE_ID in .env file'
+      });
+    }
+
+    // Test search query
+    const searchResponse = await axios.get('https://www.googleapis.com/customsearch/v1', {
+      params: {
+        key: process.env.GOOGLE_API_KEY,
+        cx: process.env.GOOGLE_SEARCH_ENGINE_ID,
+        q: 'car engine diagram',
+        searchType: 'image',
+        num: 3,
+        imgType: 'photo',
+        safe: 'active'
+      }
+    });
+
+    if (!searchResponse.data || !searchResponse.data.items) {
+      return res.status(500).json({
+        error: 'Invalid response from Google API',
+        details: searchResponse.data
+      });
+    }
+
+    const images = searchResponse.data.items.map(item => ({
+      url: item.link,
+      title: item.title,
+      thumbnail: item.image.thumbnailLink,
+      source: item.image.contextLink
+    }));
+
+    return res.status(200).json({
+      success: true,
+      images
+    });
+
+  } catch (error) {
+    console.error('Google Search API test error:', error);
+
+    if (error.response?.data?.error?.message) {
+      return res.status(500).json({
+        error: 'Google API Error',
+        details: error.response.data.error.message
+      });
+    }
+
+    return res.status(500).json({
+      error: 'Failed to test Google Search API',
       details: error.message
     });
   }
