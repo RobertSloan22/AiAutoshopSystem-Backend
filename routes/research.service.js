@@ -1023,8 +1023,7 @@ Focus on providing deep, technical insights specific to this make/model while ma
                     vin,
                     originalProblem,
                     category,
-                    itemDetails: JSON.stringify(item),
-                    parts: JSON.stringify(parts)
+                    itemDetails: JSON.stringify(item)
                 }),
                 new Promise((_, reject) => 
                     setTimeout(() => reject(new Error('LLM request timed out after 60 seconds')), 60000)
@@ -1237,22 +1236,22 @@ Analyze the symptoms and provide:
 3. Technical rationale for this diagnostic approach
 
 Response should be in JSON format:
-{
+{{
     "possibleCauses": [
-        {
+        {{
             "cause": string,
             "probability": number (0-1),
             "evidence": [string]
-        }
+        }}
     ],
-    "nextStep": {
+    "nextStep": {{
         "action": string,
         "testPoints": [string],
         "expectedValues": [string],
         "requiredTools": [string],
         "technicalRationale": string
-    }
-}
+    }}
+}}
 `);
 
         const initialAnalysis = await getLLMResponse(
