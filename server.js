@@ -226,29 +226,7 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  path: '/socket.io/',
-  transports: ['websocket', 'polling']
-});
-
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-
-  socket.on('error', (error) => {
-    console.error('Socket error:', error);
-  });
-
-  socket.on('disconnect', (reason) => {
-    console.log('Client disconnected:', socket.id, 'Reason:', reason);
-  });
-});
-
+// Start the server
 server.listen(PORT, () => {
-  connectToMongoDB();
-  console.log(`Server Running on port ${PORT}`);
+	console.log(`Server Running on port ${PORT}`);
 });

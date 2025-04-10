@@ -8,10 +8,13 @@ import { StringOutputParser } from '@langchain/core/output_parsers';
 import dotenv from 'dotenv';
 import axios from 'axios';
 import { z } from 'zod';
+import { OpenAIEmbeddings } from '@langchain/openai';
+import { MemoryVectorStore } from 'langchain/vectorstores/memory';
 
 dotenv.config();
 
 const router = express.Router();
+const vectorStore = new MemoryVectorStore(new OpenAIEmbeddings());
 
 /**
  * @swagger
@@ -234,6 +237,78 @@ async function processAIResponse(chain, data, retries = 3, delay = 1000) {
   throw new Error(`Failed after ${retries} attempts. Last error: ${lastError.message}`);
 }
 
+// Add storeResearchInVectorDB function
+async function storeResearchInVectorDB(researchData, metadata = {}) {
+    try {
+        const documents = [];
+
+        // Split into smaller, focused chunks for better retrieval
+        if (researchData.diagnosticSteps) {
+            researchData.diagnosticSteps.forEach((step, index) => {
+                documents.push({
+                    pageContent: `Diagnostic Step ${index + 1}:\n${step.step}\n${step.details}`,
+                    metadata: {
+                        ...metadata,
+                        type: 'diagnostic_step',
+                        stepNumber: index + 1,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            });
+        }
+
+        if (researchData.possibleCauses) {
+            researchData.possibleCauses.forEach((cause, index) => {
+                documents.push({
+                    pageContent: `Possible Cause ${index + 1}:\n${cause.cause}\nExplanation: ${cause.explanation}`,
+                    metadata: {
+                        ...metadata,
+                        type: 'possible_cause',
+                        causeNumber: index + 1,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            });
+        }
+
+        if (researchData.recommendedFixes) {
+            researchData.recommendedFixes.forEach((fix, index) => {
+                documents.push({
+                    pageContent: `Recommended Fix ${index + 1}:\n${fix.fix}\nProcedure: ${fix.procedureOverview}`,
+                    metadata: {
+                        ...metadata,
+                        type: 'recommended_fix',
+                        fixNumber: index + 1,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            });
+        }
+
+        if (researchData.technicalNotes) {
+            Object.entries(researchData.technicalNotes).forEach(([key, value]) => {
+                documents.push({
+                    pageContent: `Technical Note - ${key}:\n${Array.isArray(value) ? value.join('\n') : value}`,
+                    metadata: {
+                        ...metadata,
+                        type: 'technical_note',
+                        noteType: key,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            });
+        }
+
+        // Store all documents
+        await vectorStore.addDocuments(documents);
+        console.log(`Successfully stored ${documents.length} documents in vector database`);
+        return true;
+    } catch (error) {
+        console.error('Error storing research in vector database:', error);
+        return false;
+    }
+}
+
 /**
  * POST /api/research
  *
@@ -397,6 +472,30 @@ Never use placeholder values like "Refer to manufacturer specifications" or "Che
     // Process the response with retries and error handling
     const parsedResult = await processAIResponse(chain, vehicleData);
     
+    // Store in vector database before sending response
+    try {
+        await storeResearchInVectorDB(parsedResult, {
+            vehicleInfo: {
+                vin,
+                year,
+                make,
+                model,
+                trim,
+                engine,
+                transmission,
+                mileage
+            },
+            dtcCodes: dtcCodes || [],
+            problem,
+            timestamp: new Date().toISOString(),
+            source: 'research_routes'
+        });
+        console.log('Research data stored in vector database');
+    } catch (vectorStoreError) {
+        console.error('Error storing in vector database:', vectorStoreError);
+        // Continue with response even if vector storage fails
+    }
+
     // Attempt to validate with schema
     try {
       const validatedResult = VehicleResearchSchema.parse(parsedResult);
@@ -404,7 +503,6 @@ Never use placeholder values like "Refer to manufacturer specifications" or "Che
       return res.status(200).json({ result: validatedResult });
     } catch (validationError) {
       console.warn('Schema validation warning:', validationError.message);
-      // Return the data anyway, even if validation fails
       return res.status(200).json({ 
         result: parsedResult,
         warning: 'Response structure may not match expected schema'
@@ -546,6 +644,28 @@ Provide your response in this JSON format:
       trim: trim || '',
       engine: engine || ''
     });
+
+    // Store technical details in vector database
+    try {
+        await storeResearchInVectorDB(technicalData, {
+            vehicleInfo: {
+                vin,
+                year,
+                make,
+                model,
+                trim,
+                engine
+            },
+            component,
+            system,
+            timestamp: new Date().toISOString(),
+            source: 'technical_details'
+        });
+        console.log('Technical details stored in vector database');
+    } catch (vectorStoreError) {
+        console.error('Error storing technical details in vector database:', vectorStoreError);
+        // Continue with response even if vector storage fails
+    }
     
     return res.status(200).json({ result: technicalData });
     
