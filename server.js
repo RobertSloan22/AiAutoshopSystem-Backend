@@ -20,6 +20,7 @@ import authRoutes from "./routes/auth.routes.js";
 import researchRoutes from './routes/research.routes.js';
 import researchServiceRoutes from './routes/research.service.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
+import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import agentproxyRoutes from "./routes/agentproxy.routes.js"
@@ -114,6 +115,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/research", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
 app.use("/api/research/o3", researchO3ServiceRoutes);
+app.use("/api/multiagent-research", multiagentResearchRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);

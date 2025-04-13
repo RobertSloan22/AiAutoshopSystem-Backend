@@ -359,8 +359,20 @@ async function storeResearchInVectorDB(formattedResult, metadata) {
       ...formattedResult.possibleCauses.map(cause => `${cause.cause}: ${cause.explanation}`),
       ...formattedResult.recommendedFixes.map(fix => `${fix.fix}: ${fix.procedureOverview || ''}`),
       formattedResult.technicalNotes.commonIssues.join('. '),
-      formattedResult.technicalNotes.manufacturerSpecificNotes || ''
-    ].join('\n\n');
+      formattedResult.technicalNotes.manufacturerSpecificNotes || formattedResult.technicalNotes.manufacturerSpecificInfo || ''
+    ].filter(Boolean).join('\n\n');
+    
+    // If there's no text to embed, log an error and return
+    if (!textToEmbed || textToEmbed.trim() === '') {
+      console.error('No valid text to embed in the research data');
+      console.log('Research data structure:', JSON.stringify({
+        diagnosticSteps: formattedResult.diagnosticSteps?.length || 0,
+        possibleCauses: formattedResult.possibleCauses?.length || 0,
+        recommendedFixes: formattedResult.recommendedFixes?.length || 0,
+        technicalNotes: Object.keys(formattedResult.technicalNotes || {})
+      }));
+      throw new Error('No valid text to embed in the research data');
+    }
     
     // Create a valid UUID for this research data 
     const uniqueId = crypto.randomUUID();
@@ -371,21 +383,23 @@ async function storeResearchInVectorDB(formattedResult, metadata) {
       pageContent: textToEmbed,
       metadata: {
         // Store metadata for filtering and retrieval
-        vehicleInfo: metadata.vehicleInfo,
-        problem: metadata.problem,
-        dtcCodes: metadata.dtcCodes,
-        timestamp: metadata.timestamp,
+        vehicleInfo: metadata.vehicleInfo || {},
+        problem: metadata.problem || '',
+        dtcCodes: metadata.dtcCodes || [],
+        timestamp: metadata.timestamp || new Date().toISOString(),
         id: uniqueId,
         
         // Store important section counts for reference
-        diagnosticStepsCount: formattedResult.diagnosticSteps.length,
-        possibleCausesCount: formattedResult.possibleCauses.length,
-        recommendedFixesCount: formattedResult.recommendedFixes.length,
+        diagnosticStepsCount: formattedResult.diagnosticSteps?.length || 0,
+        possibleCausesCount: formattedResult.possibleCauses?.length || 0,
+        recommendedFixesCount: formattedResult.recommendedFixes?.length || 0,
         
         // Add full research data
         researchData: formattedResult
       }
     };
+    
+    console.log(`Prepared document for vector storage with ${textToEmbed.length} characters of text`);
     
     // Parallel storage in multiple vector stores
     const storePromises = [];
@@ -394,8 +408,9 @@ async function storeResearchInVectorDB(formattedResult, metadata) {
     if (VectorService.initialized) {
       storePromises.push(
         VectorService.addDocuments([document], { collection: VECTOR_COLLECTION_NAME })
-          .then(() => {
+          .then((result) => {
             console.log(`Successfully stored research data in VectorService with ID: ${uniqueId}`);
+            console.log(`VectorService result:`, result);
             return true;
           })
           .catch(error => {
@@ -403,14 +418,17 @@ async function storeResearchInVectorDB(formattedResult, metadata) {
             return false;
           })
       );
+    } else {
+      console.warn('VectorService not initialized, skipping primary storage');
     }
     
     // 2. Store in MemoryVectorService for fast retrieval
     if (MemoryVectorService.hasInstance(MEMORY_INSTANCE_NAME)) {
       storePromises.push(
         MemoryVectorService.addDocuments(MEMORY_INSTANCE_NAME, [document])
-          .then(() => {
+          .then((result) => {
             console.log(`Successfully stored research data in MemoryVectorService instance: ${MEMORY_INSTANCE_NAME}`);
+            console.log(`MemoryVectorService result:`, result);
             return true;
           })
           .catch(error => {
@@ -418,6 +436,8 @@ async function storeResearchInVectorDB(formattedResult, metadata) {
             return false;
           })
       );
+    } else {
+      console.warn(`MemoryVectorService instance ${MEMORY_INSTANCE_NAME} not available, skipping memory storage`);
     }
     
     // 3. Legacy storage in Qdrant directly (for backward compatibility)
@@ -428,12 +448,18 @@ async function storeResearchInVectorDB(formattedResult, metadata) {
           apiKey: process.env.OPENAI_API_KEY,
         });
         
+        console.log(`Generating embeddings for Qdrant storage with text length: ${textToEmbed.length}`);
         const embeddingResponse = await openaiClient.embeddings.create({
           model: "text-embedding-3-small",
           input: textToEmbed.substring(0, 8000) // Limit text length if needed
         });
         
+        if (!embeddingResponse.data || !embeddingResponse.data[0] || !embeddingResponse.data[0].embedding) {
+          throw new Error('Failed to generate embeddings from OpenAI');
+        }
+        
         const embedding = embeddingResponse.data[0].embedding;
+        console.log(`Generated embedding with dimension: ${embedding.length}`);
         
         storePromises.push(
           qdrantClient.upsert(RESEARCH_COLLECTION_NAME, {
@@ -444,18 +470,18 @@ async function storeResearchInVectorDB(formattedResult, metadata) {
                 vector: embedding,
                 payload: {
                   // Store metadata for filtering and retrieval
-                  vehicleInfo: metadata.vehicleInfo,
-                  problem: metadata.problem,
-                  dtcCodes: metadata.dtcCodes,
-                  timestamp: metadata.timestamp,
+                  vehicleInfo: metadata.vehicleInfo || {},
+                  problem: metadata.problem || '',
+                  dtcCodes: metadata.dtcCodes || [],
+                  timestamp: metadata.timestamp || new Date().toISOString(),
                   
                   // Store content for display
                   content: textToEmbed,
                   
                   // Store important sections for specific retrieval
-                  diagnosticStepsCount: formattedResult.diagnosticSteps.length,
-                  possibleCausesCount: formattedResult.possibleCauses.length,
-                  recommendedFixesCount: formattedResult.recommendedFixes.length,
+                  diagnosticStepsCount: formattedResult.diagnosticSteps?.length || 0,
+                  possibleCausesCount: formattedResult.possibleCauses?.length || 0,
+                  recommendedFixesCount: formattedResult.recommendedFixes?.length || 0,
                   
                   // Store full research data
                   researchData: formattedResult
@@ -487,6 +513,10 @@ async function storeResearchInVectorDB(formattedResult, metadata) {
         results.map((r, i) => `Store operation ${i}: ${r.status}`));
     }
     
+    // Count successful storage operations
+    const successCount = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+    console.log(`Successfully stored research data in ${successCount} out of ${storePromises.length} vector databases`);
+    
     // Return true if at least one storage operation succeeded
     return results.some(r => r.status === 'fulfilled' && r.value === true);
   } catch (error) {
@@ -501,6 +531,20 @@ async function searchSimilarResearch(query, filter = {}, limit = 5) {
     console.log(`Searching for research similar to: "${query.substring(0, 50)}..."`, 
       Object.keys(filter).length > 0 ? `with filters: ${JSON.stringify(filter)}` : '');
     
+    // Validate and prepare filter
+    const preparedFilter = {};
+    if (filter.make) {
+      preparedFilter['metadata.vehicleInfo.make'] = filter.make;
+    }
+    if (filter.model) {
+      preparedFilter['metadata.vehicleInfo.model'] = filter.model;
+    }
+    if (filter.year) {
+      preparedFilter['metadata.vehicleInfo.year'] = filter.year;
+    }
+    
+    console.log(`Prepared filter for vector search:`, preparedFilter);
+    
     let results = [];
     
     // Try searching in MemoryVectorService first (fastest)
@@ -511,7 +555,7 @@ async function searchSimilarResearch(query, filter = {}, limit = 5) {
           MEMORY_INSTANCE_NAME, 
           query, 
           parseInt(limit),
-          filter
+          preparedFilter
         );
         
         if (memoryResults && memoryResults.length > 0) {
@@ -533,7 +577,7 @@ async function searchSimilarResearch(query, filter = {}, limit = 5) {
           parseInt(limit), 
           { 
             collection: VECTOR_COLLECTION_NAME,
-            filter: filter
+            filter: preparedFilter
           }
         );
         
@@ -584,13 +628,24 @@ async function searchSimilarResearch(query, filter = {}, limit = 5) {
         };
       }
       
-      const qdrantResults = await qdrantClient.search(RESEARCH_COLLECTION_NAME, {
+      const qdrantSearch = {
         vector: embedding,
-        limit: limit,
-        filter: Object.keys(filterCondition).length > 0 ? { must: filterCondition } : undefined,
+        limit: parseInt(limit),
         with_payload: true,
         with_vectors: false
-      });
+      };
+      
+      // Only add filter if we have conditions
+      if (Object.keys(filterCondition).length > 0) {
+        qdrantSearch.filter = { must: Object.entries(filterCondition).map(([key, value]) => ({ 
+          key, 
+          match: { value } 
+        }))};
+      }
+      
+      console.log(`Executing Qdrant search with params:`, JSON.stringify(qdrantSearch));
+      
+      const qdrantResults = await qdrantClient.search(RESEARCH_COLLECTION_NAME, qdrantSearch);
       
       console.log(`Found ${qdrantResults.length} results in Qdrant`);
       
@@ -1318,11 +1373,22 @@ router.post('/search-similar', async (req, res) => {
   }
   
   try {
+    console.log(`Received search request with query: "${query.substring(0, 50)}..."`);
+    console.log(`Filter parameters: make=${make || 'not specified'}, model=${model || 'not specified'}, year=${year || 'not specified'}`);
+    console.log(`Result limit: ${limit || 5}`);
+    
     // Build filter based on provided parameters
     const filter = {};
     if (make) filter.make = make;
     if (model) filter.model = model;
-    if (year) filter.year = year;
+    if (year) filter.year = parseInt(year) || year; // Ensure numeric if possible
+    
+    // Log the services available
+    console.log(`Available search services:
+      - Qdrant: ${process.env.USE_LEGACY_QDRANT !== 'false' ? 'enabled' : 'disabled'}
+      - VectorService: ${VectorService.initialized ? 'initialized' : 'not initialized'}
+      - MemoryVectorService: ${MemoryVectorService.hasInstance(MEMORY_INSTANCE_NAME) ? 'available' : 'not available'}
+    `);
     
     // Search for similar research results
     const searchResults = await searchSimilarResearch(
@@ -1331,10 +1397,18 @@ router.post('/search-similar', async (req, res) => {
       limit || 5
     );
     
+    console.log(`Search completed. Found ${searchResults.length} results`);
+    
+    // Log sample of the results
+    if (searchResults.length > 0) {
+      console.log(`First result metadata:`, JSON.stringify(searchResults[0].metadata, null, 2));
+    }
+    
     return res.status(200).json({
       results: searchResults,
       count: searchResults.length,
-      query
+      query,
+      filters: filter
     });
   } catch (error) {
     console.error('Error searching similar research:', error);
