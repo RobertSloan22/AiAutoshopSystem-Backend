@@ -16,11 +16,11 @@ class LocalEmbeddings {
     async embedDocuments(texts) {
         try {
             console.log(`Generating embeddings for ${texts.length} texts`);
-            const response = await axios.post(`${this.baseUrl}/api/embeddings`, {
-                model: "nomic-embed-text",
+            const response = await axios.post(`${this.baseUrl}/v1/embeddings`, {
+                model: "text-embedding-ada-002",
                 input: texts
             });
-            return response.data.embeddings;
+            return response.data.data.map(item => item.embedding);
         } catch (error) {
             console.error('Error generating embeddings:', error);
             throw error;

@@ -1,14 +1,18 @@
-import { Server } from "socket.io";
-import http from "http";
-import express from "express";
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
 
 const app = express();
+app.use(cors());
+
+// Create HTTP server
 const server = http.createServer(app);
 
-// Create a single Socket.IO instance with unified configuration
+// Initialize Socket.io
 const io = new Server(server, {
 	cors: {
-		origin: ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080", "https://your-production-url.com"],
+		origin: "*", // In production, restrict to your frontend domain
 		credentials: true,
 		methods: ["GET", "POST"],
 		allowedHeaders: ["Content-Type", "Authorization"]
@@ -70,4 +74,5 @@ io.on("connection", (socket) => {
 	});
 });
 
-export { app, io, server };
+// Export app, server and io for use in server.js
+export { io, app, server };

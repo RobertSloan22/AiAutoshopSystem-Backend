@@ -434,34 +434,35 @@ router.post('/question-with-image', async (req, res) => {
     // Create a system message focused on automotive technical expertise
     const systemMessage = `You are an expert Automotive Technical Advisor specializing in vehicle systems, 
     components, and technical documentation. When analyzing questions:
-    1. Focus on providing precise technical explanations with specific measurements and specifications
-    2. Reference official repair manuals and technical documentation standards
+    1. Focus on finding the most relevant technical diagrams and schematics
+    2. Explain the diagrams and schematics and how they relate to the question
     3. Emphasize safety-critical information when relevant
-    4. Include references to relevant technical diagrams and schematics
+    4. The Diagrams have to have meta data that is relevant to the question
     5. Use industry-standard terminology`;
 
-    // First, get the technical explanation from OpenAI
-    const chatResponse = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: systemMessage
-        },
-        {
-          role: "user",
-          content: `Provide a detailed technical explanation about: ${enhancedQuestion}. Include specific references to technical diagrams that would be helpful.`
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 1000
+    // Use the Responses API instead of Chat Completions
+    const response = await openai.responses.create({
+      model: "gpt-4o",
+      user: "Technician",
+      input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
+        role: "user",
+        content: [
+          { type: "input_text", text: `Get technical diagrams for the following question: ${enhancedQuestion}. Include specific references to technical diagrams that would be helpful.` }
+        ]
+      }],
+      max_output_tokens: 1000
     });
 
-    if (!chatResponse.choices || chatResponse.choices.length === 0) {
+    if (!response || !response.output_text) {
       throw new Error('No response received from OpenAI');
     }
 
-    const textResponse = chatResponse.choices[0].message.content;
+    const textResponse = response.output_text;
 
     // Now perform a web search to find relevant diagrams
     const searchQuery = `${enhancedQuestion} technical diagram schematic automotive`;
@@ -516,12 +517,117 @@ router.post('/question-with-image', async (req, res) => {
 
     return res.status(200).json({
       textResponse,
+      responseId: response.id,
+      conversationId: response.conversation_id,
       sources,
       images: proxiedImages
     });
 
   } catch (error) {
     console.error('Error in question-with-image:', error);
+
+    // Handle specific OpenAI API errors
+    if (error.response?.status === 429) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded. Please try again later.',
+        details: error.message
+      });
+    }
+
+    if (error.response?.status === 400) {
+      return res.status(400).json({
+        error: 'Invalid request to AI service',
+        details: error.message
+      });
+    }
+
+    // Handle network errors
+    if (error.code === 'ECONNREFUSED' || error.code === 'ECONNABORTED') {
+      return res.status(503).json({
+        error: 'Service temporarily unavailable',
+        details: 'Could not connect to AI service'
+      });
+    }
+
+    return res.status(500).json({ 
+      error: 'Failed to process request',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/openai/question
+ * 
+ * Handles user questions about automotive components/systems and returns technical explanation
+ * without using Google Custom Search API for image retrieval.
+ * 
+ * Expects a JSON body containing:
+ *  - question: The user's technical question about a vehicle component or system
+ *  - context: (optional) Additional context like vehicle make, model, year
+ * 
+ * Returns:
+ *  - { textResponse: string, sources: array, images: array } on success
+ *  - { error: string } on failure
+ */
+router.post('/question', async (req, res) => {
+  const { question, context } = req.body;
+
+  if (!question) {
+    return res.status(400).json({ error: 'Question is required' });
+  }
+
+  try {
+    // Enhance the question with automotive context
+    const enhancedQuestion = context ? 
+      `${question} for a ${context.year || ''} ${context.make || ''} ${context.model || ''}`.trim() :
+      question;
+
+    // Create a system message focused on automotive technical expertise
+    const systemMessage = `You are an expert Automotive Technical Advisor specializing in vehicle systems, 
+    components, and technical documentation. When analyzing questions:
+    1. Focus on finding the most relevant technical diagrams and schematics
+    2. Explain the diagrams and schematics and how they relate to the question
+    3. Emphasize safety-critical information when relevant
+    4. Provide detailed explanations about the relevant components and systems
+    5. Use industry-standard terminology`;
+
+    // Use the Responses API 
+    const response = await openai.responses.create({
+      model: "gpt-4o",
+      user: "Technician",
+      input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
+        role: "user",
+        content: [
+          { type: "input_text", text: `Answer the following question: ${enhancedQuestion}. Include specific references to technical diagrams that would be helpful.` }
+        ]
+      }],
+      max_output_tokens: 1000
+    });
+
+    if (!response || !response.output_text) {
+      throw new Error('No response received from OpenAI');
+    }
+
+    const textResponse = response.output_text;
+
+    // Return the response with empty images and sources arrays
+    // to maintain API compatibility with question-with-image endpoint
+    return res.status(200).json({
+      textResponse,
+      responseId: response.id,
+      conversationId: response.conversation_id,
+      sources: [],
+      images: []
+    });
+
+  } catch (error) {
+    console.error('Error in question endpoint:', error);
 
     // Handle specific OpenAI API errors
     if (error.response?.status === 429) {

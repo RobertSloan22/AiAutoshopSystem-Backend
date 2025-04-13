@@ -101,19 +101,45 @@ const scrapeForumPost = async (url) => {
 router.post('/process', async (req, res) => {
     try {
         const { url, question } = req.body;
+        
+        // Enhanced URL validation
         if (!url) {
-            return res.status(400).json({ success: false, message: 'URL is required' });
+            return res.status(400).json({ 
+                success: false, 
+                message: 'URL is required' 
+            });
         }
-
-        // If no question is provided, do a general crawl
-        const result = question 
-            ? await ForumCrawlerService.crawlForumContent(url, question)
-            : await ForumCrawlerService.crawlForumContent(url);
+        
+        // Basic URL validation before passing to service
+        try {
+            // Add protocol if missing
+            let formattedUrl = url;
+            if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
+                formattedUrl = 'https://' + formattedUrl;
+            }
             
-        res.json(result);
+            // Test if URL is valid
+            new URL(formattedUrl);
+            
+            // If no question is provided, do a general crawl
+            const result = question 
+                ? await ForumCrawlerService.crawlForumContent(formattedUrl, question)
+                : await ForumCrawlerService.crawlForumContent(formattedUrl);
+                
+            res.json(result);
+        } catch (urlError) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Invalid URL provided: ${url}`,
+                error: urlError.message
+            });
+        }
     } catch (error) {
         console.error('Error processing forum:', error);
-        res.status(500).json({ success: false, message: error.message || 'Failed to process forum content' });
+        res.status(500).json({ 
+            success: false, 
+            message: error.message || 'Failed to process forum content' 
+        });
     }
 });
 

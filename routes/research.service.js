@@ -5,18 +5,27 @@ import { PromptTemplate } from '@langchain/core/prompts';
 import { RunnableSequence } from '@langchain/core/runnables';
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { z } from 'zod';
-import { OpenAI } from '@langchain/openai';
+import { OpenAI as LangChainOpenAI } from '@langchain/openai';
 import PartsRetriever from '../parts.service.js';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { MemoryVectorStore } from 'langchain/vectorstores/memory';
 import crypto from 'crypto';
 import { DiagnosticSessionManager } from './session-manager.js';
 import { io as sharedIo } from '../socket/socket.js';
+import OpenAI from 'openai';
+import { VectorService } from '../services/VectorService.js';
+import { MemoryVectorService } from '../services/MemoryVectorService.js';
 
 const router = express.Router();
-const openai = new OpenAI(process.env.OPENAI_API_KEY);
+const openaiClient = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 const sessionManager = new DiagnosticSessionManager();
 const vectorStore = new MemoryVectorStore(new OpenAIEmbeddings());
+
+// Define constants for vector service
+const MEMORY_INSTANCE_NAME = 'research_service_memory';
+const VECTOR_COLLECTION_NAME = 'unified_research';
 
 /**
  * @swagger
@@ -378,7 +387,7 @@ async function getInitialAssessment(vehicleInfo, symptoms) {
     3. Estimated severity (low/medium/high)
     4. Safety considerations`;
 
-    const completion = await openai.chat.completions.create({
+    const completion = await openaiClient.chat.completions.create({
         model: "gpt-4-turbo-preview",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.7,
@@ -388,10 +397,95 @@ async function getInitialAssessment(vehicleInfo, symptoms) {
     return completion.choices[0].message.content;
 }
 
-// Add after the vectorStore initialization
-// Enhanced vector store search function
+// Initialize the vector services during module loading
+async function initializeVectorServices() {
+  try {
+    // Initialize VectorService for persistent storage
+    await VectorService.initialize({
+      collectionName: VECTOR_COLLECTION_NAME
+    });
+    console.log(`Initialized VectorService with collection: ${VECTOR_COLLECTION_NAME}`);
+    
+    // Initialize MemoryVectorService for temporary storage
+    await MemoryVectorService.initialize(MEMORY_INSTANCE_NAME);
+    console.log(`Initialized MemoryVectorService instance: ${MEMORY_INSTANCE_NAME}`);
+    
+    return true;
+  } catch (error) {
+    console.error('Error initializing vector services:', error);
+    // Continue even if initialization fails
+    return false;
+  }
+}
+
+// Initialize vector services on module load
+initializeVectorServices().catch(console.error);
+
+// Enhanced vector store search function - modified to use all available vector services
 async function searchVectorStore(query, metadata = {}, limit = 5) {
     try {
+        // Try memory vector store first (fastest)
+        try {
+            // Check if the memory vector store has content
+            if (MemoryVectorService.getSize(MEMORY_INSTANCE_NAME) > 0) {
+                console.log(`Searching MemoryVectorService instance: ${MEMORY_INSTANCE_NAME}`);
+                const memoryResults = await MemoryVectorService.similaritySearch(MEMORY_INSTANCE_NAME, query, limit);
+                
+                // Apply filters manually if any
+                const filteredResults = Object.keys(metadata).length > 0 
+                    ? memoryResults.filter(doc => {
+                        // Check each filter criteria
+                        for (const [key, value] of Object.entries(metadata)) {
+                            // For nested objects like vehicleInfo.make
+                            if (key.includes('.')) {
+                                const [parent, child] = key.split('.');
+                                if (!doc.metadata[parent] || doc.metadata[parent][child] !== value) {
+                                    return false;
+                                }
+                            } else if (doc.metadata[key] !== value) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    })
+                    : memoryResults;
+                
+                if (filteredResults.length > 0) {
+                    console.log(`Found ${filteredResults.length} results in MemoryVectorService`);
+                    return filteredResults.map(doc => ({
+                        content: doc.pageContent,
+                        metadata: doc.metadata,
+                        score: doc._distance || 1.0 // Similarity score if available
+                    }));
+                }
+            }
+        } catch (memoryError) {
+            console.error('Error searching MemoryVectorService:', memoryError);
+            // Continue to next vector store
+        }
+        
+        // Then try unified vector store
+        try {
+            if (VectorService.initialized) {
+                console.log(`Searching VectorService collection: ${VECTOR_COLLECTION_NAME}`);
+                const vectorResults = await VectorService.similaritySearch(query, limit, metadata);
+                
+                if (vectorResults.length > 0) {
+                    console.log(`Found ${vectorResults.length} results in VectorService`);
+                    return vectorResults.map(doc => ({
+                        content: doc.pageContent,
+                        metadata: doc.metadata,
+                        score: doc._distance || 1.0
+                    }));
+                }
+            }
+        } catch (vectorError) {
+            console.error('Error searching VectorService:', vectorError);
+            // Continue to original vector store
+        }
+        
+        // Fall back to original vector store implementation
+        console.log('Using original vector store search implementation');
         const results = await vectorStore.similaritySearch(query, limit, metadata);
         return results.map(doc => ({
             content: doc.pageContent,
@@ -404,9 +498,10 @@ async function searchVectorStore(query, metadata = {}, limit = 5) {
     }
 }
 
-// Modify storeResearchInVectorDB to create more granular chunks
+// Modified storeResearchInVectorDB to use all available vector services
 async function storeResearchInVectorDB(researchData, metadata = {}) {
     try {
+        // Prepare documents for storage
         const documents = [];
 
         // Split into smaller, focused chunks for better retrieval
@@ -427,7 +522,7 @@ async function storeResearchInVectorDB(researchData, metadata = {}) {
         if (researchData.possibleCauses) {
             researchData.possibleCauses.forEach((cause, index) => {
                 documents.push({
-                    pageContent: `Possible Cause ${index + 1}:\n${cause.cause}\nExplanation: ${cause.technicalExplanation}`,
+                    pageContent: `Possible Cause ${index + 1}:\n${cause.cause}\nExplanation: ${cause.explanation || cause.technicalExplanation || ''}`,
                     metadata: {
                         ...metadata,
                         type: 'possible_cause',
@@ -440,8 +535,10 @@ async function storeResearchInVectorDB(researchData, metadata = {}) {
 
         if (researchData.recommendedFixes) {
             researchData.recommendedFixes.forEach((fix, index) => {
+                const procedure = fix.procedureOverview || 
+                                 (fix.technicalProcedure ? fix.technicalProcedure.join('\n') : '');
                 documents.push({
-                    pageContent: `Recommended Fix ${index + 1}:\n${fix.fix}\nProcedure: ${fix.technicalProcedure?.join('\n')}`,
+                    pageContent: `Recommended Fix ${index + 1}:\n${fix.fix}\nProcedure: ${procedure}`,
                     metadata: {
                         ...metadata,
                         type: 'recommended_fix',
@@ -466,9 +563,36 @@ async function storeResearchInVectorDB(researchData, metadata = {}) {
             });
         }
 
-        // Store all documents
-        await vectorStore.addDocuments(documents);
-        console.log(`Successfully stored ${documents.length} documents in vector database`);
+        // Store in all available vector services
+        const storePromises = [];
+        
+        // 1. Store in original vector store
+        storePromises.push(
+            vectorStore.addDocuments(documents)
+                .then(() => console.log(`Stored ${documents.length} documents in original vector store`))
+                .catch(error => console.error('Error storing in original vector store:', error))
+        );
+        
+        // 2. Store in unified VectorService if available
+        if (VectorService.initialized) {
+            storePromises.push(
+                VectorService.addDocuments(documents)
+                    .then(() => console.log(`Stored ${documents.length} documents in VectorService`))
+                    .catch(error => console.error('Error storing in VectorService:', error))
+            );
+        }
+        
+        // 3. Store in MemoryVectorService for temporary fast access
+        storePromises.push(
+            MemoryVectorService.addDocuments(MEMORY_INSTANCE_NAME, documents)
+                .then(() => console.log(`Stored ${documents.length} documents in MemoryVectorService`))
+                .catch(error => console.error('Error storing in MemoryVectorService:', error))
+        );
+        
+        // Wait for all storage operations to complete
+        await Promise.allSettled(storePromises);
+        
+        console.log(`Successfully stored ${documents.length} documents in all vector databases`);
         return true;
     } catch (error) {
         console.error('Error storing research in vector database:', error);
@@ -1153,12 +1277,11 @@ Focus on providing deep, technical insights specific to this make/model while ma
 // Add embeddings endpoint
 router.post('/embeddings', async (req, res) => {
     try {
-        const model = new OpenAI({
-            modelName: 'text-embedding-3-small',
-            openAIApiKey: process.env.OPENAI_API_KEY,
+        const openaiClient = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY,
         });
 
-        const result = await model.embeddings.create({
+        const result = await openaiClient.embeddings.create({
             model: "text-embedding-3-small",
             input: req.body.input,
         });

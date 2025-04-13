@@ -1,19 +1,69 @@
 version: '3.8'
 
 services:
+  # Local database for vector storage
   chromadb:
-    image: chromadb/chroma:latest
-    environment:
-      - ALLOW_RESET=true
-      - CHROMA_SERVER_AUTH_CREDENTIALS_FILE=
-      - CHROMA_SERVER_AUTH_CREDENTIALS=
-      - CHROMA_SERVER_AUTH_PROVIDER=
-    volumes:
-      - chroma_data:/chroma/chroma
+    image: ghcr.io/chroma-core/chroma:latest
     ports:
       - "8000:8000"
-    restart: unless-stopped
+    volumes:
+      - chroma-data:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_PORT=8000
+      - CHROMA_SERVER_CORS_ALLOWED_ORIGINS=*
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Local model for embeddings
+  local-embeddings:
+    image: ghcr.io/nomic-ai/nomic-embed-text-cpu:latest
+    ports:
+      - "1234:1234"
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1234/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API backend
+  api:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - CHROMA_URL=http://chromadb:8000
+      - LOCAL_EMBEDDING_URL=http://local-embeddings:1234
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    ports:
+      - "3000:3000"
+    depends_on:
+      chromadb:
+        condition: service_healthy
+      local-embeddings:
+        condition: service_healthy
+    networks:
+      - app-network
+    volumes:
+      - ./:/app
+      - /app/node_modules
 
 volumes:
-  chroma_data:
-    driver: local 
+  chroma-data:
+
+networks:
+  app-network:
+    driver: bridge 

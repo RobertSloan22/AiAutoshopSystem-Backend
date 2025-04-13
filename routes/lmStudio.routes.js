@@ -5,7 +5,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { MemorySaver } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
-import PQueue from 'p-queue';
+import { default as PQueue } from 'p-queue';
 
 // Configure queue with concurrency limit
 const queue = new PQueue({
