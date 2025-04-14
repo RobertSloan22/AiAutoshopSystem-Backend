@@ -14,10 +14,13 @@ import swaggerUi from 'swagger-ui-express';
 import { specs } from './swagger.js';
 import lmStudioRoutes from './routes/lmStudio.routes.js';
 import licensePlateRoutes from './routes/licensePlate.routes.js';
+import blenderRoutes from './routes/blenderRoutes.js';
+import { initializeBlender } from './blender.js';
 import authRoutes from "./routes/auth.routes.js";
 import researchRoutes from './routes/research.routes.js';
 import researchServiceRoutes from './routes/research.service.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
+import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import agentproxyRoutes from "./routes/agentproxy.routes.js"
@@ -54,6 +57,9 @@ import responseImageRoutes from './routes/responseImage.routes.js';
 import vehicleQuestionsRoutes from './routes/vehicle-questions.routes.js';
 import plateToVinRoutes from './routes/plateToVin.js';
 import serpRoutes from './routes/serp.routes.js';
+import { VectorService } from './services/VectorService.js';
+import { MemoryVectorService } from './services/MemoryVectorService.js';
+import memoryVectorRoutes from './routes/memoryVector.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,6 +77,7 @@ mongoose.connect(process.env.MONGO_DB_URI)
 
 const allowedOrigins = [
   'https://us-license-plate-to-vin.p.rapidapi.com',
+  "http://127.0.0.1:5501/",
   'http://localhost:5173',
   'http://localhost:3000',
   'http://localhost:3500',
@@ -101,10 +108,14 @@ app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
 
+// Initialize Blender functionality
+initializeBlender(app);
+
 app.use("/api/auth", authRoutes);
 app.use("/api/research", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
 app.use("/api/research/o3", researchO3ServiceRoutes);
+app.use("/api/multiagent-research", multiagentResearchRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
@@ -141,6 +152,7 @@ app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 app.use('/api/license-plate', licensePlateRoutes);
 app.use('/api/plate-to-vin', plateToVinRoutes);
 app.use('/api/serp', serpRoutes);
+app.use('/api/memory-vector', memoryVectorRoutes);
 
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
@@ -226,7 +238,63 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+// Initialize VectorService
+async function initializeServices() {
+  try {
+    console.log('Initializing Vector Services...');
+    
+    // Initialize persistent vector storage
+    await VectorService.initialize({
+      useLocal: process.env.USE_LOCAL_STORAGE !== 'false',
+      useOpenAI: process.env.USE_OPENAI_STORAGE === 'true',
+      useDualStorage: process.env.USE_DUAL_STORAGE === 'true',
+      chromaUrl: process.env.CHROMA_URL,
+      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+      openaiApiKey: process.env.OPENAI_API_KEY
+    });
+    console.log('Persistent Vector Service initialized successfully');
+    
+    // Initialize memory vector storage
+    // Create default instance
+    await MemoryVectorService.initialize('default', {
+      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+      useOpenAI: false // Default to local embeddings for memory store
+    });
+    
+    // Create a session-specific instance for temporary user interactions
+    await MemoryVectorService.initialize('user_sessions', {
+      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+      useOpenAI: false
+    });
+    
+    // Create a forum-crawler instance for temporary forum crawling
+    await MemoryVectorService.initialize('forum_crawler', {
+      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+      useOpenAI: false
+    });
+    
+    console.log('Memory Vector Service initialized successfully');
+  } catch (error) {
+    console.error('Error initializing Vector Services:', error);
+    // Don't exit - the server should still start, but vector services might be limited
+  }
+}
+
 // Start the server
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
 	console.log(`Server Running on port ${PORT}`);
+	await initializeServices();
 });
+
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  process.exit(0);
+});
+
+export default app;

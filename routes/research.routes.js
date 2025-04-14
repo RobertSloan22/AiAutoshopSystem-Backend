@@ -1,6 +1,6 @@
 // routes/research.routes.js
 import express from 'express';
-import { OpenAI } from '@langchain/openai';
+import { OpenAI as LangChainOpenAI } from '@langchain/openai';
 import { ChatOpenAI } from '@langchain/openai';
 import { PromptTemplate } from '@langchain/core/prompts';
 import { RunnableSequence } from '@langchain/core/runnables';
@@ -8,13 +8,16 @@ import { StringOutputParser } from '@langchain/core/output_parsers';
 import dotenv from 'dotenv';
 import axios from 'axios';
 import { z } from 'zod';
-import { OpenAIEmbeddings } from '@langchain/openai';
-import { MemoryVectorStore } from 'langchain/vectorstores/memory';
+import { QdrantClient } from '@qdrant/js-client-rest';
+import OpenAI from 'openai';
+import crypto from 'crypto';
+// Import the unified vector services
+import { VectorService } from '../services/VectorService.js';
+import { MemoryVectorService } from '../services/MemoryVectorService.js';
 
 dotenv.config();
 
 const router = express.Router();
-const vectorStore = new MemoryVectorStore(new OpenAIEmbeddings());
 
 /**
  * @swagger
@@ -179,6 +182,111 @@ const VehicleResearchSchema = z.object({
   }))
 });
 
+// Configuration constants
+const RESEARCH_COLLECTION_NAME = 'vehicle_research';
+const VECTOR_COLLECTION_NAME = 'vehicle_research_store';
+const MEMORY_INSTANCE_NAME = 'vehicle_research_memory';
+const DEBUG_MODE = process.env.NODE_ENV === 'development';
+
+// Configure Qdrant client for legacy support
+const qdrantClient = new QdrantClient({ 
+  url: process.env.QDRANT_URL || 'http://localhost:6333' 
+});
+
+// Initialize vector services for research
+async function initializeVectorServices() {
+  try {
+    // Initialize all vector services in parallel
+    const initPromises = [];
+    
+    // 1. Initialize Qdrant collection (legacy)
+    initPromises.push(
+      (async () => {
+        try {
+          const collections = await qdrantClient.getCollections();
+          const collectionExists = collections.collections.some(
+            collection => collection.name === RESEARCH_COLLECTION_NAME
+          );
+
+          if (!collectionExists) {
+            console.log(`Creating Qdrant collection: ${RESEARCH_COLLECTION_NAME}`);
+            
+            // Vector size for text-embedding-3-small is 1536
+            await qdrantClient.createCollection(RESEARCH_COLLECTION_NAME, {
+              vectors: {
+                size: 1536,
+                distance: 'Cosine'
+              }
+            });
+            
+            console.log(`Collection ${RESEARCH_COLLECTION_NAME} created successfully`);
+          } else {
+            console.log(`Collection ${RESEARCH_COLLECTION_NAME} already exists`);
+          }
+          return true;
+        } catch (error) {
+          console.error('Error initializing Qdrant collection:', error);
+          return false;
+        }
+      })()
+    );
+    
+    // 2. Initialize primary VectorService
+    initPromises.push(
+      VectorService.initialize({
+        collectionName: VECTOR_COLLECTION_NAME,
+        useOpenAI: true,   // Use OpenAI for vehicle research for highest quality
+        useLocal: true     // Also use local for redundancy
+      })
+      .then(() => {
+        console.log(`Initialized VectorService with collection: ${VECTOR_COLLECTION_NAME}`);
+        return true;
+      })
+      .catch(error => {
+        console.error('Error initializing VectorService:', error);
+        return false;
+      })
+    );
+    
+    // 3. Initialize memory vector service
+    if (!MemoryVectorService.hasInstance(MEMORY_INSTANCE_NAME)) {
+      initPromises.push(
+        MemoryVectorService.initialize(MEMORY_INSTANCE_NAME)
+          .then(() => {
+            console.log(`Initialized MemoryVectorService instance: ${MEMORY_INSTANCE_NAME}`);
+            return true;
+          })
+          .catch(error => {
+            console.error('Error initializing MemoryVectorService:', error);
+            return false;
+          })
+      );
+    } else {
+      console.log(`MemoryVectorService instance ${MEMORY_INSTANCE_NAME} already exists`);
+    }
+    
+    // Wait for all initialization to complete
+    const results = await Promise.allSettled(initPromises);
+    
+    // Log initialization results
+    if (DEBUG_MODE) {
+      console.log('Vector services initialization results:', 
+        results.map((r, i) => `Service ${i}: ${r.status}`));
+    }
+    
+    // Return true if at least one service initialized successfully
+    return results.some(r => r.status === 'fulfilled' && r.value === true);
+  } catch (error) {
+    console.error('Error in initializeVectorServices:', error);
+    return false;
+  }
+}
+
+// Initialize services on startup
+initializeVectorServices().catch(err => {
+  console.error('Failed to initialize vector services:', err);
+});
+
 // Helper function to process AI responses with error handling
 async function processAIResponse(chain, data, retries = 3, delay = 1000) {
   let lastError;
@@ -237,76 +345,331 @@ async function processAIResponse(chain, data, retries = 3, delay = 1000) {
   throw new Error(`Failed after ${retries} attempts. Last error: ${lastError.message}`);
 }
 
-// Add storeResearchInVectorDB function
-async function storeResearchInVectorDB(researchData, metadata = {}) {
-    try {
-        const documents = [];
-
-        // Split into smaller, focused chunks for better retrieval
-        if (researchData.diagnosticSteps) {
-            researchData.diagnosticSteps.forEach((step, index) => {
-                documents.push({
-                    pageContent: `Diagnostic Step ${index + 1}:\n${step.step}\n${step.details}`,
-                    metadata: {
-                        ...metadata,
-                        type: 'diagnostic_step',
-                        stepNumber: index + 1,
-                        timestamp: new Date().toISOString()
-                    }
-                });
-            });
-        }
-
-        if (researchData.possibleCauses) {
-            researchData.possibleCauses.forEach((cause, index) => {
-                documents.push({
-                    pageContent: `Possible Cause ${index + 1}:\n${cause.cause}\nExplanation: ${cause.explanation}`,
-                    metadata: {
-                        ...metadata,
-                        type: 'possible_cause',
-                        causeNumber: index + 1,
-                        timestamp: new Date().toISOString()
-                    }
-                });
-            });
-        }
-
-        if (researchData.recommendedFixes) {
-            researchData.recommendedFixes.forEach((fix, index) => {
-                documents.push({
-                    pageContent: `Recommended Fix ${index + 1}:\n${fix.fix}\nProcedure: ${fix.procedureOverview}`,
-                    metadata: {
-                        ...metadata,
-                        type: 'recommended_fix',
-                        fixNumber: index + 1,
-                        timestamp: new Date().toISOString()
-                    }
-                });
-            });
-        }
-
-        if (researchData.technicalNotes) {
-            Object.entries(researchData.technicalNotes).forEach(([key, value]) => {
-                documents.push({
-                    pageContent: `Technical Note - ${key}:\n${Array.isArray(value) ? value.join('\n') : value}`,
-                    metadata: {
-                        ...metadata,
-                        type: 'technical_note',
-                        noteType: key,
-                        timestamp: new Date().toISOString()
-                    }
-                });
-            });
-        }
-
-        // Store all documents
-        await vectorStore.addDocuments(documents);
-        console.log(`Successfully stored ${documents.length} documents in vector database`);
-        return true;
-    } catch (error) {
-        console.error('Error storing research in vector database:', error);
-        return false;
+// Function to store research data in vector database
+async function storeResearchInVectorDB(formattedResult, metadata) {
+  try {
+    // Check if formattedResult is valid
+    if (!formattedResult || typeof formattedResult !== 'object') {
+      throw new Error('Invalid research data format');
     }
+    
+    // Prepare text for embedding - combine relevant sections
+    const textToEmbed = [
+      ...formattedResult.diagnosticSteps.map(step => `${step.step}: ${step.details}`),
+      ...formattedResult.possibleCauses.map(cause => `${cause.cause}: ${cause.explanation}`),
+      ...formattedResult.recommendedFixes.map(fix => `${fix.fix}: ${fix.procedureOverview || ''}`),
+      formattedResult.technicalNotes.commonIssues.join('. '),
+      formattedResult.technicalNotes.manufacturerSpecificNotes || formattedResult.technicalNotes.manufacturerSpecificInfo || ''
+    ].filter(Boolean).join('\n\n');
+    
+    // If there's no text to embed, log an error and return
+    if (!textToEmbed || textToEmbed.trim() === '') {
+      console.error('No valid text to embed in the research data');
+      console.log('Research data structure:', JSON.stringify({
+        diagnosticSteps: formattedResult.diagnosticSteps?.length || 0,
+        possibleCauses: formattedResult.possibleCauses?.length || 0,
+        recommendedFixes: formattedResult.recommendedFixes?.length || 0,
+        technicalNotes: Object.keys(formattedResult.technicalNotes || {})
+      }));
+      throw new Error('No valid text to embed in the research data');
+    }
+    
+    // Create a valid UUID for this research data 
+    const uniqueId = crypto.randomUUID();
+    console.log(`Generated valid UUID for vector storage: ${uniqueId}`);
+    
+    // Create document for vector services
+    const document = {
+      pageContent: textToEmbed,
+      metadata: {
+        // Store metadata for filtering and retrieval
+        vehicleInfo: metadata.vehicleInfo || {},
+        problem: metadata.problem || '',
+        dtcCodes: metadata.dtcCodes || [],
+        timestamp: metadata.timestamp || new Date().toISOString(),
+        id: uniqueId,
+        
+        // Store important section counts for reference
+        diagnosticStepsCount: formattedResult.diagnosticSteps?.length || 0,
+        possibleCausesCount: formattedResult.possibleCauses?.length || 0,
+        recommendedFixesCount: formattedResult.recommendedFixes?.length || 0,
+        
+        // Add full research data
+        researchData: formattedResult
+      }
+    };
+    
+    console.log(`Prepared document for vector storage with ${textToEmbed.length} characters of text`);
+    
+    // Parallel storage in multiple vector stores
+    const storePromises = [];
+    
+    // 1. Store in VectorService (primary storage)
+    if (VectorService.initialized) {
+      storePromises.push(
+        VectorService.addDocuments([document], { collection: VECTOR_COLLECTION_NAME })
+          .then((result) => {
+            console.log(`Successfully stored research data in VectorService with ID: ${uniqueId}`);
+            console.log(`VectorService result:`, result);
+            return true;
+          })
+          .catch(error => {
+            console.error('Error storing in VectorService:', error);
+            return false;
+          })
+      );
+    } else {
+      console.warn('VectorService not initialized, skipping primary storage');
+    }
+    
+    // 2. Store in MemoryVectorService for fast retrieval
+    if (MemoryVectorService.hasInstance(MEMORY_INSTANCE_NAME)) {
+      storePromises.push(
+        MemoryVectorService.addDocuments(MEMORY_INSTANCE_NAME, [document])
+          .then((result) => {
+            console.log(`Successfully stored research data in MemoryVectorService instance: ${MEMORY_INSTANCE_NAME}`);
+            console.log(`MemoryVectorService result:`, result);
+            return true;
+          })
+          .catch(error => {
+            console.error('Error storing in MemoryVectorService:', error);
+            return false;
+          })
+      );
+    } else {
+      console.warn(`MemoryVectorService instance ${MEMORY_INSTANCE_NAME} not available, skipping memory storage`);
+    }
+    
+    // 3. Legacy storage in Qdrant directly (for backward compatibility)
+    if (process.env.USE_LEGACY_QDRANT !== 'false') {
+      try {
+        // Generate embeddings using OpenAI client for Qdrant
+        const openaiClient = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY,
+        });
+        
+        console.log(`Generating embeddings for Qdrant storage with text length: ${textToEmbed.length}`);
+        const embeddingResponse = await openaiClient.embeddings.create({
+          model: "text-embedding-3-small",
+          input: textToEmbed.substring(0, 8000) // Limit text length if needed
+        });
+        
+        if (!embeddingResponse.data || !embeddingResponse.data[0] || !embeddingResponse.data[0].embedding) {
+          throw new Error('Failed to generate embeddings from OpenAI');
+        }
+        
+        const embedding = embeddingResponse.data[0].embedding;
+        console.log(`Generated embedding with dimension: ${embedding.length}`);
+        
+        storePromises.push(
+          qdrantClient.upsert(RESEARCH_COLLECTION_NAME, {
+            wait: true,
+            points: [
+              {
+                id: uniqueId,
+                vector: embedding,
+                payload: {
+                  // Store metadata for filtering and retrieval
+                  vehicleInfo: metadata.vehicleInfo || {},
+                  problem: metadata.problem || '',
+                  dtcCodes: metadata.dtcCodes || [],
+                  timestamp: metadata.timestamp || new Date().toISOString(),
+                  
+                  // Store content for display
+                  content: textToEmbed,
+                  
+                  // Store important sections for specific retrieval
+                  diagnosticStepsCount: formattedResult.diagnosticSteps?.length || 0,
+                  possibleCausesCount: formattedResult.possibleCauses?.length || 0,
+                  recommendedFixesCount: formattedResult.recommendedFixes?.length || 0,
+                  
+                  // Store full research data
+                  researchData: formattedResult
+                }
+              }
+            ]
+          })
+          .then(() => {
+            console.log(`Successfully stored research data in Qdrant with ID: ${uniqueId}`);
+            return true;
+          })
+          .catch(error => {
+            console.error('Error storing in Qdrant:', error);
+            return false;
+          })
+        );
+      } catch (embeddingError) {
+        console.error('Error generating embeddings for Qdrant:', embeddingError);
+        // Continue with other storage methods even if this fails
+      }
+    }
+    
+    // Wait for all storage operations to complete
+    const results = await Promise.allSettled(storePromises);
+    
+    // Log storage results in debug mode
+    if (DEBUG_MODE) {
+      console.log('Vector storage results:', 
+        results.map((r, i) => `Store operation ${i}: ${r.status}`));
+    }
+    
+    // Count successful storage operations
+    const successCount = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+    console.log(`Successfully stored research data in ${successCount} out of ${storePromises.length} vector databases`);
+    
+    // Return true if at least one storage operation succeeded
+    return results.some(r => r.status === 'fulfilled' && r.value === true);
+  } catch (error) {
+    console.error('Error in storeResearchInVectorDB:', error);
+    throw error;
+  }
+}
+
+// Function to search for similar research data
+async function searchSimilarResearch(query, filter = {}, limit = 5) {
+  try {
+    console.log(`Searching for research similar to: "${query.substring(0, 50)}..."`, 
+      Object.keys(filter).length > 0 ? `with filters: ${JSON.stringify(filter)}` : '');
+    
+    // Validate and prepare filter
+    const preparedFilter = {};
+    if (filter.make) {
+      preparedFilter['metadata.vehicleInfo.make'] = filter.make;
+    }
+    if (filter.model) {
+      preparedFilter['metadata.vehicleInfo.model'] = filter.model;
+    }
+    if (filter.year) {
+      preparedFilter['metadata.vehicleInfo.year'] = filter.year;
+    }
+    
+    console.log(`Prepared filter for vector search:`, preparedFilter);
+    
+    let results = [];
+    
+    // Try searching in MemoryVectorService first (fastest)
+    if (MemoryVectorService.hasInstance(MEMORY_INSTANCE_NAME)) {
+      try {
+        console.log(`Searching MemoryVectorService instance: ${MEMORY_INSTANCE_NAME}`);
+        const memoryResults = await MemoryVectorService.similaritySearch(
+          MEMORY_INSTANCE_NAME, 
+          query, 
+          parseInt(limit),
+          preparedFilter
+        );
+        
+        if (memoryResults && memoryResults.length > 0) {
+          console.log(`Found ${memoryResults.length} results in MemoryVectorService`);
+          results = memoryResults;
+          return results; // Return immediately for fastest response
+        }
+      } catch (memoryError) {
+        console.error('Error searching MemoryVectorService:', memoryError);
+      }
+    }
+    
+    // Try searching in VectorService next (second fastest)
+    if (results.length === 0 && VectorService.initialized) {
+      try {
+        console.log('Searching unified VectorService');
+        const vectorResults = await VectorService.similaritySearch(
+          query, 
+          parseInt(limit), 
+          { 
+            collection: VECTOR_COLLECTION_NAME,
+            filter: preparedFilter
+          }
+        );
+        
+        if (vectorResults && vectorResults.length > 0) {
+          console.log(`Found ${vectorResults.length} results in VectorService`);
+          results = vectorResults;
+          return results; // Return immediately for faster response
+        }
+      } catch (vectorError) {
+        console.error('Error searching VectorService:', vectorError);
+      }
+    }
+    
+    // Finally, fall back to Qdrant direct search if needed (legacy compatibility)
+    if (results.length === 0 && process.env.USE_LEGACY_QDRANT !== 'false') {
+      console.log('Falling back to legacy Qdrant search');
+      
+      // Generate embedding for the query using OpenAI
+      const openaiClient = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+      });
+      
+      const embeddingResponse = await openaiClient.embeddings.create({
+        model: "text-embedding-3-small",
+        input: query
+      });
+      
+      const embedding = embeddingResponse.data[0].embedding;
+      
+      // Build filter conditions for Qdrant if any
+      let filterCondition = {};
+      if (filter.make) {
+        filterCondition = {
+          ...filterCondition,
+          "payload.vehicleInfo.make": filter.make
+        };
+      }
+      if (filter.model) {
+        filterCondition = {
+          ...filterCondition,
+          "payload.vehicleInfo.model": filter.model
+        };
+      }
+      if (filter.year) {
+        filterCondition = {
+          ...filterCondition,
+          "payload.vehicleInfo.year": filter.year
+        };
+      }
+      
+      const qdrantSearch = {
+        vector: embedding,
+        limit: parseInt(limit),
+        with_payload: true,
+        with_vectors: false
+      };
+      
+      // Only add filter if we have conditions
+      if (Object.keys(filterCondition).length > 0) {
+        qdrantSearch.filter = { must: Object.entries(filterCondition).map(([key, value]) => ({ 
+          key, 
+          match: { value } 
+        }))};
+      }
+      
+      console.log(`Executing Qdrant search with params:`, JSON.stringify(qdrantSearch));
+      
+      const qdrantResults = await qdrantClient.search(RESEARCH_COLLECTION_NAME, qdrantSearch);
+      
+      console.log(`Found ${qdrantResults.length} results in Qdrant`);
+      
+      // Convert Qdrant results to the expected format
+      results = qdrantResults.map(result => ({
+        pageContent: result.payload.content,
+        metadata: {
+          vehicleInfo: result.payload.vehicleInfo,
+          problem: result.payload.problem,
+          dtcCodes: result.payload.dtcCodes,
+          timestamp: result.payload.timestamp,
+          score: result.score,
+          
+          // Include full research data if available
+          researchData: result.payload.researchData
+        }
+      }));
+    }
+    
+    return results;
+  } catch (error) {
+    console.error('Error searching similar research:', error);
+    throw error;
+  }
 }
 
 /**
@@ -472,42 +835,126 @@ Never use placeholder values like "Refer to manufacturer specifications" or "Che
     // Process the response with retries and error handling
     const parsedResult = await processAIResponse(chain, vehicleData);
     
-    // Store in vector database before sending response
+    console.log('========== RAW AI RESPONSE ==========');
+    console.log(JSON.stringify(parsedResult, null, 2).slice(0, 500) + '...');
+    console.log('=====================================');
+    
+    // After getting parsedResult, format it to match frontend expectations
+    const formattedResult = {
+      diagnosticSteps: parsedResult.diagnosticSteps?.map(step => ({
+        step: step.step || '',
+        details: step.details || '',
+        componentsTested: step.componentsTested || [],
+        testingProcedure: step.testingProcedure || '',
+        tools: step.tools || [],
+        expectedReadings: step.expectedReadings || '',
+        normalRanges: step.normalValueRanges || '',
+        componentLocation: step.componentLocation || '',
+        notes: step.notes || step.factoryServiceManualRef || ''
+      })) || [],
+      
+      possibleCauses: parsedResult.possibleCauses?.map(cause => ({
+        cause: cause.cause || '',
+        likelihood: cause.likelihood || 'Medium',
+        explanation: cause.explanation || cause.technicalExplanation || '',
+        modelSpecificNotes: cause.modelSpecificNotes || '',
+        commonSigns: cause.commonSymptomsForThisCause || []
+      })) || [],
+      
+      recommendedFixes: parsedResult.recommendedFixes?.map(fix => ({
+        fix: fix.fix || '',
+        difficulty: fix.difficulty || 'Moderate',
+        estimatedCost: fix.estimatedCost || 'Unknown',
+        professionalOnly: fix.professionalOnly || fix.difficulty === 'Complex',
+        parts: fix.parts?.map(part => 
+          typeof part === 'string' ? 
+            { name: part, partNumber: '', estimatedPrice: '', notes: '' } :
+            { 
+              name: part.name || part,
+              partNumber: part.partNumber || '',
+              estimatedPrice: part.estimatedPrice || '',
+              notes: part.notes || ''
+            }
+        ) || [],
+        laborTime: fix.laborHours || '',
+        specialTools: fix.specialTools || [],
+        torqueSpecifications: fix.torqueSpecs || '',
+        clearanceSpecifications: fix.clearanceSpecifications || '',
+        componentLocation: fix.componentLocation || '',
+        removalSteps: fix.removalSteps || [],
+        installationSteps: fix.installationSteps || []
+      })) || [],
+      
+      technicalNotes: {
+        commonIssues: parsedResult.technicalNotes?.commonIssues || [],
+        serviceIntervals: parsedResult.technicalNotes?.serviceIntervals || [],
+        recalls: parsedResult.technicalNotes?.recalls || [],
+        tsbs: parsedResult.technicalNotes?.tsbs || [],
+        manufacturerSpecificInfo: parsedResult.technicalNotes?.manufacturerSpecificInfo || '',
+        preventativeMaintenance: parsedResult.technicalNotes?.preventativeMaintenance || []
+      },
+      
+      references: parsedResult.references?.map(ref => ({
+        source: ref.source || '',
+        url: ref.url || '',
+        type: ref.type || 'Manual',
+        relevance: ref.relevance || 'High'
+      })) || []
+    };
+    
+    console.log('========== FORMATTED RESULT STRUCTURE ==========');
+    console.log('diagnosticSteps:', formattedResult.diagnosticSteps.length);
+    console.log('possibleCauses:', formattedResult.possibleCauses.length);
+    console.log('recommendedFixes:', formattedResult.recommendedFixes.length);
+    console.log('technicalNotes:', Object.keys(formattedResult.technicalNotes));
+    console.log('references:', formattedResult.references.length);
+    console.log('=================================================');
+    
+    // Sample data from each section to verify structure
+    if (formattedResult.diagnosticSteps.length > 0) {
+      console.log('Sample diagnosticStep:', JSON.stringify(formattedResult.diagnosticSteps[0], null, 2));
+    }
+    
+    if (formattedResult.possibleCauses.length > 0) {
+      console.log('Sample possibleCause:', JSON.stringify(formattedResult.possibleCauses[0], null, 2));
+    }
+    
+    if (formattedResult.recommendedFixes.length > 0) {
+      console.log('Sample recommendedFix:', JSON.stringify(formattedResult.recommendedFixes[0], null, 2));
+    }
+    
+    // Store in vector database
     try {
-        await storeResearchInVectorDB(parsedResult, {
-            vehicleInfo: {
-                vin,
-                year,
-                make,
-                model,
-                trim,
-                engine,
-                transmission,
-                mileage
-            },
-            dtcCodes: dtcCodes || [],
-            problem,
-            timestamp: new Date().toISOString(),
-            source: 'research_routes'
-        });
-        console.log('Research data stored in vector database');
+      await storeResearchInVectorDB(formattedResult, {
+        vehicleInfo: {
+          vin,
+          year,
+          make,
+          model,
+          trim,
+          engine,
+          transmission,
+          mileage
+        },
+        dtcCodes: dtcCodes || [],
+        problem,
+        timestamp: new Date().toISOString(),
+        source: 'research_routes'
+      });
+      console.log('Research data stored in vector database');
     } catch (vectorStoreError) {
-        console.error('Error storing in vector database:', vectorStoreError);
-        // Continue with response even if vector storage fails
+      console.error('Error storing in vector database:', vectorStoreError);
+      // Continue with response even if vector storage fails
     }
 
-    // Attempt to validate with schema
-    try {
-      const validatedResult = VehicleResearchSchema.parse(parsedResult);
-      console.log('Successfully validated research results schema');
-      return res.status(200).json({ result: validatedResult });
-    } catch (validationError) {
-      console.warn('Schema validation warning:', validationError.message);
-      return res.status(200).json({ 
-        result: parsedResult,
-        warning: 'Response structure may not match expected schema'
-      });
-    }
+    // Log the final response object right before sending
+    console.log('========== SENDING RESPONSE TO FRONTEND ==========');
+    console.log('Response structure:', JSON.stringify({ result: 'formattedResult' }, null, 2));
+    console.log('Keys in result object:', Object.keys(formattedResult));
+    console.log('===================================================');
+    
+    // Return the formatted result
+    return res.status(200).json({ result: formattedResult });
 
   } catch (error) {
     console.error('Error processing research request:', error);
@@ -644,28 +1091,6 @@ Provide your response in this JSON format:
       trim: trim || '',
       engine: engine || ''
     });
-
-    // Store technical details in vector database
-    try {
-        await storeResearchInVectorDB(technicalData, {
-            vehicleInfo: {
-                vin,
-                year,
-                make,
-                model,
-                trim,
-                engine
-            },
-            component,
-            system,
-            timestamp: new Date().toISOString(),
-            source: 'technical_details'
-        });
-        console.log('Technical details stored in vector database');
-    } catch (vectorStoreError) {
-        console.error('Error storing technical details in vector database:', vectorStoreError);
-        // Continue with response even if vector storage fails
-    }
     
     return res.status(200).json({ result: technicalData });
     
@@ -681,12 +1106,11 @@ Provide your response in this JSON format:
 // Add embeddings endpoint
 router.post('/embeddings', async (req, res) => {
   try {
-    const model = new OpenAI({
-      modelName: 'text-embedding-3-small',
-      openAIApiKey: process.env.OPENAI_API_KEY,
+    const openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
     });
 
-    const result = await model.embeddings.create({
+    const result = await openaiClient.embeddings.create({
       model: "text-embedding-3-small",
       input: req.body.input,
     });
@@ -931,6 +1355,65 @@ Only include TSBs that are specifically for the {year} {make} {model}, not gener
     console.error('Error processing service bulletin request:', error);
     return res.status(500).json({
       error: 'Failed to retrieve service bulletin information',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * POST /api/research/search-similar
+ * 
+ * Search for similar research results based on a query
+ */
+router.post('/search-similar', async (req, res) => {
+  const { query, make, model, year, limit } = req.body;
+  
+  if (!query) {
+    return res.status(400).json({ error: 'Query is required' });
+  }
+  
+  try {
+    console.log(`Received search request with query: "${query.substring(0, 50)}..."`);
+    console.log(`Filter parameters: make=${make || 'not specified'}, model=${model || 'not specified'}, year=${year || 'not specified'}`);
+    console.log(`Result limit: ${limit || 5}`);
+    
+    // Build filter based on provided parameters
+    const filter = {};
+    if (make) filter.make = make;
+    if (model) filter.model = model;
+    if (year) filter.year = parseInt(year) || year; // Ensure numeric if possible
+    
+    // Log the services available
+    console.log(`Available search services:
+      - Qdrant: ${process.env.USE_LEGACY_QDRANT !== 'false' ? 'enabled' : 'disabled'}
+      - VectorService: ${VectorService.initialized ? 'initialized' : 'not initialized'}
+      - MemoryVectorService: ${MemoryVectorService.hasInstance(MEMORY_INSTANCE_NAME) ? 'available' : 'not available'}
+    `);
+    
+    // Search for similar research results
+    const searchResults = await searchSimilarResearch(
+      query, 
+      filter, 
+      limit || 5
+    );
+    
+    console.log(`Search completed. Found ${searchResults.length} results`);
+    
+    // Log sample of the results
+    if (searchResults.length > 0) {
+      console.log(`First result metadata:`, JSON.stringify(searchResults[0].metadata, null, 2));
+    }
+    
+    return res.status(200).json({
+      results: searchResults,
+      count: searchResults.length,
+      query,
+      filters: filter
+    });
+  } catch (error) {
+    console.error('Error searching similar research:', error);
+    return res.status(500).json({
+      error: 'Failed to search similar research',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

@@ -77,6 +77,97 @@ router.post('/upload-image', upload.single('image'), async (req, res) => {
 });
 
 /**
+ * 
+ * 
+ * Route for The main dashboard, user drops in an image, the explination will be sent to the realtime voice
+ * agent int the appiication. 
+ */
+router.post('/dashboard-image', async (req, res) => {
+  const { imageUrl, prompt } = req.body;
+
+  // Validate required fields
+  if (!imageUrl || !prompt) {
+    return res.status(400).json({ 
+      error: 'Missing required fields',
+      details: 'Both imageUrl and prompt are required'
+    });
+  }
+
+  try {
+    console.log('Processing image explanation request...');
+    
+    // Create a system message for automotive technical advisor
+    const systemMessage = "You are assisting the user to diagnose their vehicle, you will be given a image of the vehicle and a prompt, you will need to diagnose the vehicle and provide a detailed explination of the problem, you will also need to provide a list of possible causes and recommended fixes.";
+
+    // For initial requests, we don't send a conversation_id so OpenAI will generate a new one
+    const requestPayload = {
+      model: "gpt-4o",
+      user: "Technician",
+      input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
+        role: "user",
+        content: [
+          { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${prompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
+          { type: "input_image", image_url: imageUrl }
+        ],
+        stream: true,
+      }],
+      max_output_tokens: 1000
+    };
+    
+    // Only add conversation_id if one was explicitly provided
+    if (req.body.conversationId) {
+      console.log(`Using existing conversation ID: ${req.body.conversationId}`);
+      requestPayload.conversation_id = req.body.conversationId;
+    } else {
+      console.log('No conversation ID provided, a new one will be generated');
+    }
+
+    // Create a response using the Responses API
+    const response = await openai.responses.create(requestPayload);
+    
+    console.log(`Response received with conversation ID: ${response.conversation_id}`);
+    
+    // Return the response with the conversation ID prominently included
+    return res.status(200).json({
+      explanation: response.output_text,
+      responseId: response.id,
+      conversationId: response.conversation_id,
+      status: 'success'
+    });
+
+  } catch (error) {
+    console.error('Error processing image explanation:', error);
+    
+    // Provide more specific error messages
+    if (error.response) {
+      return res.status(error.response.status).json({
+        error: 'Failed to process image',
+        details: error.response.data || error.message
+      });
+    }
+    
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+/**
  * POST /api/openai/explain-image
  * 
  * Unified endpoint that handles both base64 and URL-based image processing using the Responses API
@@ -121,6 +212,7 @@ router.post('/explain-image', async (req, res) => {
           { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${prompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
           { type: "input_image", image_url: imageUrl }
         ],
+        
       }],
       max_output_tokens: 1000
     };
@@ -434,34 +526,35 @@ router.post('/question-with-image', async (req, res) => {
     // Create a system message focused on automotive technical expertise
     const systemMessage = `You are an expert Automotive Technical Advisor specializing in vehicle systems, 
     components, and technical documentation. When analyzing questions:
-    1. Focus on providing precise technical explanations with specific measurements and specifications
-    2. Reference official repair manuals and technical documentation standards
+    1. Focus on finding the most relevant technical diagrams and schematics
+    2. Explain the diagrams and schematics and how they relate to the question
     3. Emphasize safety-critical information when relevant
-    4. Include references to relevant technical diagrams and schematics
+    4. The Diagrams have to have meta data that is relevant to the question
     5. Use industry-standard terminology`;
 
-    // First, get the technical explanation from OpenAI
-    const chatResponse = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: systemMessage
-        },
-        {
-          role: "user",
-          content: `Provide a detailed technical explanation about: ${enhancedQuestion}. Include specific references to technical diagrams that would be helpful.`
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 1000
+    // Use the Responses API instead of Chat Completions
+    const response = await openai.responses.create({
+      model: "gpt-4o",
+      user: "Technician",
+      input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
+        role: "user",
+        content: [
+          { type: "input_text", text: `Get technical diagrams for the following question: ${enhancedQuestion}. Include specific references to technical diagrams that would be helpful.` }
+        ]
+      }],
+      max_output_tokens: 1000
     });
 
-    if (!chatResponse.choices || chatResponse.choices.length === 0) {
+    if (!response || !response.output_text) {
       throw new Error('No response received from OpenAI');
     }
 
-    const textResponse = chatResponse.choices[0].message.content;
+    const textResponse = response.output_text;
 
     // Now perform a web search to find relevant diagrams
     const searchQuery = `${enhancedQuestion} technical diagram schematic automotive`;
@@ -516,12 +609,117 @@ router.post('/question-with-image', async (req, res) => {
 
     return res.status(200).json({
       textResponse,
+      responseId: response.id,
+      conversationId: response.conversation_id,
       sources,
       images: proxiedImages
     });
 
   } catch (error) {
     console.error('Error in question-with-image:', error);
+
+    // Handle specific OpenAI API errors
+    if (error.response?.status === 429) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded. Please try again later.',
+        details: error.message
+      });
+    }
+
+    if (error.response?.status === 400) {
+      return res.status(400).json({
+        error: 'Invalid request to AI service',
+        details: error.message
+      });
+    }
+
+    // Handle network errors
+    if (error.code === 'ECONNREFUSED' || error.code === 'ECONNABORTED') {
+      return res.status(503).json({
+        error: 'Service temporarily unavailable',
+        details: 'Could not connect to AI service'
+      });
+    }
+
+    return res.status(500).json({ 
+      error: 'Failed to process request',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/openai/question
+ * 
+ * Handles user questions about automotive components/systems and returns technical explanation
+ * without using Google Custom Search API for image retrieval.
+ * 
+ * Expects a JSON body containing:
+ *  - question: The user's technical question about a vehicle component or system
+ *  - context: (optional) Additional context like vehicle make, model, year
+ * 
+ * Returns:
+ *  - { textResponse: string, sources: array, images: array } on success
+ *  - { error: string } on failure
+ */
+router.post('/question', async (req, res) => {
+  const { question, context } = req.body;
+
+  if (!question) {
+    return res.status(400).json({ error: 'Question is required' });
+  }
+
+  try {
+    // Enhance the question with automotive context
+    const enhancedQuestion = context ? 
+      `${question} for a ${context.year || ''} ${context.make || ''} ${context.model || ''}`.trim() :
+      question;
+
+    // Create a system message focused on automotive technical expertise
+    const systemMessage = `You are an expert Automotive Technical Advisor specializing in vehicle systems, 
+    components, and technical documentation. When analyzing questions:
+    1. Focus on finding the most relevant technical diagrams and schematics
+    2. Explain the diagrams and schematics and how they relate to the question
+    3. Emphasize safety-critical information when relevant
+    4. Provide detailed explanations about the relevant components and systems
+    5. Use industry-standard terminology`;
+
+    // Use the Responses API 
+    const response = await openai.responses.create({
+      model: "gpt-4o",
+      user: "Technician",
+      input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
+        role: "user",
+        content: [
+          { type: "input_text", text: `Answer the following question: ${enhancedQuestion}. Include specific references to technical diagrams that would be helpful.` }
+        ]
+      }],
+      max_output_tokens: 1000
+    });
+
+    if (!response || !response.output_text) {
+      throw new Error('No response received from OpenAI');
+    }
+
+    const textResponse = response.output_text;
+
+    // Return the response with empty images and sources arrays
+    // to maintain API compatibility with question-with-image endpoint
+    return res.status(200).json({
+      textResponse,
+      responseId: response.id,
+      conversationId: response.conversation_id,
+      sources: [],
+      images: []
+    });
+
+  } catch (error) {
+    console.error('Error in question endpoint:', error);
 
     // Handle specific OpenAI API errors
     if (error.response?.status === 429) {

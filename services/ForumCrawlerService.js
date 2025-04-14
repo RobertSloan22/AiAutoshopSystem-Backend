@@ -1,48 +1,24 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
-import { Chroma } from "@langchain/community/vectorstores/chroma";
-import { ChromaClient } from "chromadb";
-import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
+import { VectorService } from './VectorService.js';
 import { Buffer } from 'buffer';
 import { writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-
-// Custom embeddings class for local model
-class LocalEmbeddings {
-    constructor(baseUrl = process.env.BASE_URL || 'http://localhost:1234') {
-        this.baseUrl = baseUrl;
-    }
-
-    async embedDocuments(texts) {
-        try {
-            console.log(`Generating embeddings for ${texts.length} texts`);
-            const response = await axios.post(`${this.baseUrl}/v1/embeddings`, {
-                model: "text-embedding-nomic-embed-text-v1.5",
-                input: texts
-            });
-            return response.data.data.map(item => item.embedding);
-        } catch (error) {
-            console.error('Error generating embeddings:', error);
-            throw error;
-        }
-    }
-
-    async embedQuery(text) {
-        const embeddings = await this.embedDocuments([text]);
-        return embeddings[0];
-    }
-}
+import { MemoryVectorService } from './MemoryVectorService.js';
+import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
+import { LoggerService } from './LoggerService.js';
 
 export class ForumCrawlerService {
-    static vectorStore = null;
-    static localLLMUrl = process.env.BASE_URL || 'http://localhost:1234';  // Use BASE_URL from .env
+    static vectorService = null;
+    static memoryVectorService = null;
+    static localLLMUrl = process.env.BASE_URL || 'http://localhost:8080';  // Use BASE_URL from .env
     static processedUrls = new Set();
     static maxDepth = 4; // Reduced depth for targeted crawling
     static maxPages = 40; // Reduced pages for targeted crawling
-    static chromaClient = null;
     static collectionName = "forum_content";
+    static memoryInstanceName = "short_term_forum";
 
     // Add BMW Forums specific configuration
     static bmwForumsConfig = {
@@ -91,10 +67,20 @@ export class ForumCrawlerService {
     };
 
     static isValidUrl(url) {
+        if (!url || typeof url !== 'string') {
+            return false;
+        }
+        
+        // Add protocol if missing
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            url = 'https://' + url;
+        }
+        
         try {
-            new URL(url);
-            return true;
-        } catch {
+            const parsedUrl = new URL(url);
+            return ['http:', 'https:'].includes(parsedUrl.protocol) && !!parsedUrl.hostname;
+        } catch (error) {
+            console.error(`Invalid URL format: ${url}`, error.message);
             return false;
         }
     }
@@ -162,7 +148,7 @@ export class ForumCrawlerService {
             return [];
         }
 
-        console.log(`Crawling page: ${url} (depth: ${depth})`);
+        LoggerService.info(`Crawling page: ${url} (depth: ${depth})`);
         this.processedUrls.add(url);
 
         try {
@@ -211,7 +197,7 @@ export class ForumCrawlerService {
 
             // Get links for recursive crawling
             const links = await this.extractLinks($, url);
-            console.log(`Found ${links.length} links on ${url}`);
+            LoggerService.info(`Found ${links.length} links on ${url}`);
 
             // Create document for current page
             const docs = [];
@@ -231,8 +217,8 @@ export class ForumCrawlerService {
                     timestamp: new Date().toISOString(),
                     depth: depth
                 }]);
+                LoggerService.info(`Created ${pageDocs.length} chunks for ${url}`);
                 docs.push(...pageDocs);
-                console.log(`Created ${pageDocs.length} chunks for ${url}`);
             }
 
             // Recursively crawl linked pages
@@ -245,7 +231,7 @@ export class ForumCrawlerService {
 
             return docs;
         } catch (error) {
-            console.error(`Error crawling ${url}:`, error);
+            LoggerService.error(`Error crawling ${url}:`, error);
             return [];
         }
     }
@@ -335,38 +321,26 @@ export class ForumCrawlerService {
 
     static async initializeChromaDB() {
         try {
-            if (!this.chromaClient) {
-                this.chromaClient = new ChromaClient({
-                    path: process.env.CHROMA_URL || "http://localhost:8000"
+            // Initialize the unified VectorService instead of ChromaDB directly
+            if (!this.vectorService) {
+                this.vectorService = await VectorService.initialize({
+                    collectionName: this.collectionName,
+                    localEmbeddingUrl: this.localLLMUrl
                 });
-                console.log('ChromaDB client initialized');
+                console.log('Vector service initialized for forum crawler');
             }
-
-            // Get or create collection
-            try {
-                await this.chromaClient.getCollection({ name: this.collectionName });
-                console.log('Using existing ChromaDB collection');
-            } catch {
-                await this.chromaClient.createCollection({ 
-                    name: this.collectionName,
-                    metadata: {
-                        "description": "Forum content and discussions collection",
-                        "created_at": new Date().toISOString()
-                    }
+            
+            // Initialize the in-memory vector store for short-term storage
+            if (!this.memoryVectorService) {
+                this.memoryVectorService = await MemoryVectorService.initialize(this.memoryInstanceName, {
+                    localEmbeddingUrl: this.localLLMUrl,
+                    useOpenAI: false,
+                    fallbackToOpenAI: true
                 });
-                console.log('Created new ChromaDB collection');
-            }
-
-            // Initialize vector store with ChromaDB
-            if (!this.vectorStore) {
-                this.vectorStore = await Chroma.fromExistingCollection(
-                    new LocalEmbeddings(),
-                    { collectionName: this.collectionName }
-                );
-                console.log('Vector store initialized with ChromaDB');
+                console.log('Memory vector service initialized for forum crawler');
             }
         } catch (error) {
-            console.error('Error initializing ChromaDB:', error);
+            console.error('Error initializing vector services:', error);
             throw error;
         }
     }
@@ -399,6 +373,7 @@ export class ForumCrawlerService {
             
             // Load and process PDF
             const docs = await loader.load();
+            console.log(`PDF loaded with ${docs.length} pages`);
             
             // Split documents into chunks
             const textSplitter = new RecursiveCharacterTextSplitter({
@@ -435,34 +410,46 @@ export class ForumCrawlerService {
 
     static async crawlForumContent(url, question = null) {
         try {
+            // Better URL validation with more informative errors
+            if (!url) {
+                throw new Error('No URL provided');
+            }
+            
+            if (typeof url !== 'string') {
+                throw new Error(`Invalid URL type: ${typeof url}, expected string`);
+            }
+            
             if (!this.isValidUrl(url)) {
-                throw new Error('Invalid URL provided');
+                // Log the problematic URL for debugging
+                LoggerService.error(`Invalid URL format: ${url}`);
+                throw new Error(`Invalid URL provided: ${url}`);
             }
 
-            console.log('Starting content crawl...');
+            LoggerService.startProcess('forum_crawl', question ? 'Targeted crawl' : 'Regular crawl');
+            LoggerService.info(`Starting content crawl for: ${url}`);
             this.processedUrls.clear();
 
-            // Initialize ChromaDB if not already done
+            // Initialize VectorService if not already done
             await this.initializeChromaDB();
 
             let allDocs = [];
 
             // Check if URL is a PDF
             if (await this.isPDF(url)) {
-                console.log('Detected PDF content, processing...');
+                LoggerService.info('Detected PDF content, processing...');
                 const pdfDocs = await this.processPDF(url);
                 allDocs.push(...pdfDocs);
             } else {
                 // Existing web page crawling logic
                 if (question) {
                     // Targeted crawl with search terms
-                    console.log('Starting targeted crawl with question:', question);
+                    LoggerService.info('Starting targeted crawl with question:', question);
                     const searchTerms = this.extractSearchTerms(question);
-                    console.log('Search terms:', searchTerms);
+                    LoggerService.info('Search terms:', searchTerms);
 
                     // Search for relevant pages
                     const relevantUrls = await this.searchForumPages(url, searchTerms);
-                    console.log(`Found ${relevantUrls.length} potentially relevant pages`);
+                    LoggerService.info(`Found ${relevantUrls.length} potentially relevant pages`);
 
                     // Crawl the found pages and their immediate links
                     for (const pageUrl of relevantUrls) {
@@ -474,29 +461,40 @@ export class ForumCrawlerService {
 
                     // If we found very little content, fall back to regular crawling
                     if (allDocs.length < 5 && !this.processedUrls.has(url)) {
-                        console.log('Insufficient results from search, falling back to regular crawl...');
+                        LoggerService.info('Insufficient results from search, falling back to regular crawl...');
                         const regularDocs = await this.crawlPage(url);
                         allDocs.push(...regularDocs);
                     }
                 } else {
                     // Regular crawl without search terms
-                    console.log('Starting regular crawl...');
+                    LoggerService.info('Starting regular crawl...');
                     const docs = await this.crawlPage(url);
                     allDocs.push(...docs);
                 }
             }
 
-            console.log(`Total pages processed: ${this.processedUrls.size}`);
-            console.log(`Total chunks created: ${allDocs.length}`);
+            LoggerService.info(`Total pages processed: ${this.processedUrls.size}`);
+            LoggerService.info(`Total chunks created: ${allDocs.length}`);
 
             if (allDocs.length === 0) {
                 throw new Error('No content could be extracted from any pages');
             }
 
-            // Add documents to ChromaDB
-            console.log('Adding documents to ChromaDB...');
-            await this.vectorStore.addDocuments(allDocs);
-            console.log('Documents successfully added to ChromaDB');
+            // Add documents to both vector stores
+            LoggerService.info('Adding documents to long-term vector store...');
+            await this.vectorService.addDocuments(allDocs);
+            LoggerService.info('Documents successfully added to long-term vector store');
+            
+            // Also add to short-term memory store
+            LoggerService.info('Adding documents to short-term memory store...');
+            await MemoryVectorService.addDocuments(this.memoryInstanceName, allDocs);
+            LoggerService.info('Documents successfully added to short-term memory store');
+
+            LoggerService.completeProcess('forum_crawl', {
+                pagesProcessed: this.processedUrls.size,
+                totalChunks: allDocs.length,
+                processedUrls: Array.from(this.processedUrls)
+            });
 
             return { 
                 success: true, 
@@ -507,23 +505,55 @@ export class ForumCrawlerService {
             };
 
         } catch (error) {
-            console.error('Error crawling content:', error);
+            LoggerService.error('Error crawling content:', error);
             throw new Error(`Failed to process content: ${error.message}`);
         }
     }
 
     static async queryContent(question) {
         try {
-            // Initialize ChromaDB if not already done
+            // Initialize VectorService if not already done
             await this.initializeChromaDB();
 
-            if (!this.vectorStore) {
+            if (!this.vectorService) {
                 throw new Error('No forum content has been processed yet');
             }
 
             console.log(`Querying content for: ${question}`);
-            const relevantDocs = await this.vectorStore.similaritySearch(question, 5);
-            console.log(`Found ${relevantDocs.length} relevant documents`);
+            
+            // Query both stores and combine results
+            let relevantDocs = [];
+            
+            // First try short-term memory store
+            console.log('Querying short-term memory store...');
+            try {
+                const shortTermDocs = await MemoryVectorService.similaritySearch(this.memoryInstanceName, question, 3);
+                if (shortTermDocs && shortTermDocs.length > 0) {
+                    console.log(`Found ${shortTermDocs.length} relevant documents in short-term memory`);
+                    relevantDocs.push(...shortTermDocs);
+                }
+            } catch (error) {
+                console.warn('Error querying short-term memory store:', error);
+            }
+            
+            // Then query long-term vector store
+            console.log('Querying long-term vector store...');
+            const longTermDocs = await this.vectorService.similaritySearch(question, 5);
+            if (longTermDocs && longTermDocs.length > 0) {
+                console.log(`Found ${longTermDocs.length} relevant documents in long-term store`);
+                // Add only documents not already in the results
+                for (const doc of longTermDocs) {
+                    if (!relevantDocs.some(existingDoc => 
+                        existingDoc.pageContent === doc.pageContent && 
+                        existingDoc.metadata.source === doc.metadata.source)) {
+                        relevantDocs.push(doc);
+                    }
+                }
+            }
+            
+            // Limit to top 5 most relevant documents
+            relevantDocs = relevantDocs.slice(0, 5);
+            console.log(`Using ${relevantDocs.length} relevant documents from both stores`);
 
             if (!this.localLLMUrl) {
                 throw new Error('LLM URL is not configured');
@@ -533,7 +563,7 @@ export class ForumCrawlerService {
 
             try {
                 const response = await axios.post(`${this.localLLMUrl}/v1/chat/completions`, {
-                    model: "hermes-3-llama-3.2-3b",
+                    model: "gpt-4o",
                     messages: [
                         {
                             role: "system",
@@ -587,7 +617,7 @@ export class ForumCrawlerService {
 
     static validateEnvironment() {
         if (!process.env.BASE_URL) {
-            console.warn('BASE_URL environment variable not set, using default: http://localhost:1234');
+            console.warn('BASE_URL environment variable not set, using default: http://localhost:8080');
         }
         // Add any other environment variable validations here
     }
