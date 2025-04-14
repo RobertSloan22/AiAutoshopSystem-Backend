@@ -77,6 +77,97 @@ router.post('/upload-image', upload.single('image'), async (req, res) => {
 });
 
 /**
+ * 
+ * 
+ * Route for The main dashboard, user drops in an image, the explination will be sent to the realtime voice
+ * agent int the appiication. 
+ */
+router.post('/dashboard-image', async (req, res) => {
+  const { imageUrl, prompt } = req.body;
+
+  // Validate required fields
+  if (!imageUrl || !prompt) {
+    return res.status(400).json({ 
+      error: 'Missing required fields',
+      details: 'Both imageUrl and prompt are required'
+    });
+  }
+
+  try {
+    console.log('Processing image explanation request...');
+    
+    // Create a system message for automotive technical advisor
+    const systemMessage = "You are assisting the user to diagnose their vehicle, you will be given a image of the vehicle and a prompt, you will need to diagnose the vehicle and provide a detailed explination of the problem, you will also need to provide a list of possible causes and recommended fixes.";
+
+    // For initial requests, we don't send a conversation_id so OpenAI will generate a new one
+    const requestPayload = {
+      model: "gpt-4o",
+      user: "Technician",
+      input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
+        role: "user",
+        content: [
+          { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${prompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
+          { type: "input_image", image_url: imageUrl }
+        ],
+        stream: true,
+      }],
+      max_output_tokens: 1000
+    };
+    
+    // Only add conversation_id if one was explicitly provided
+    if (req.body.conversationId) {
+      console.log(`Using existing conversation ID: ${req.body.conversationId}`);
+      requestPayload.conversation_id = req.body.conversationId;
+    } else {
+      console.log('No conversation ID provided, a new one will be generated');
+    }
+
+    // Create a response using the Responses API
+    const response = await openai.responses.create(requestPayload);
+    
+    console.log(`Response received with conversation ID: ${response.conversation_id}`);
+    
+    // Return the response with the conversation ID prominently included
+    return res.status(200).json({
+      explanation: response.output_text,
+      responseId: response.id,
+      conversationId: response.conversation_id,
+      status: 'success'
+    });
+
+  } catch (error) {
+    console.error('Error processing image explanation:', error);
+    
+    // Provide more specific error messages
+    if (error.response) {
+      return res.status(error.response.status).json({
+        error: 'Failed to process image',
+        details: error.response.data || error.message
+      });
+    }
+    
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+/**
  * POST /api/openai/explain-image
  * 
  * Unified endpoint that handles both base64 and URL-based image processing using the Responses API
@@ -121,6 +212,7 @@ router.post('/explain-image', async (req, res) => {
           { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${prompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
           { type: "input_image", image_url: imageUrl }
         ],
+        
       }],
       max_output_tokens: 1000
     };
