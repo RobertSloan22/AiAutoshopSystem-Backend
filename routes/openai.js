@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import ImageAnalysis from '../models/imageAnalysis.model.js';
 
 dotenv.config();
 
@@ -158,15 +159,6 @@ router.post('/dashboard-image', async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
 /**
  * POST /api/openai/explain-image
  * 
@@ -175,13 +167,14 @@ router.post('/dashboard-image', async (req, res) => {
  * Expects a JSON body containing:
  *  - imageUrl: URL of the image to analyze or base64 data URI
  *  - prompt: Specific question or instruction about the image
+ *  - userId: (optional) ID of the user making the request
  * 
  * Returns:
  *  - { explanation: string, responseId: string, conversationId: string, status: string } on success
  *  - { error: string, details?: string } on failure
  */
 router.post('/explain-image', async (req, res) => {
-  const { imageUrl, prompt } = req.body;
+  const { imageUrl, prompt, userId } = req.body;
 
   // Validate required fields
   if (!imageUrl || !prompt) {
@@ -193,6 +186,26 @@ router.post('/explain-image', async (req, res) => {
 
   try {
     console.log('Processing image explanation request...');
+    
+    // First, check if we already have this analysis in the database
+    const existingAnalysis = await ImageAnalysis.findOne({ 
+      imageUrl, 
+      prompt 
+    }).sort({ createdAt: -1 }).exec();
+
+    // If we have a recent analysis (less than 24 hours old), return it
+    if (existingAnalysis && 
+        (new Date() - new Date(existingAnalysis.createdAt)) < 24 * 60 * 60 * 1000) {
+      console.log(`Using cached analysis for image with ID: ${existingAnalysis._id}`);
+      
+      return res.status(200).json({
+        explanation: existingAnalysis.explanation,
+        responseId: existingAnalysis.responseId,
+        conversationId: existingAnalysis.conversationId,
+        status: 'success',
+        fromCache: true
+      });
+    }
     
     // Create a system message for automotive technical advisor
     const systemMessage = "You are an expert Automotive Technical Advisor with extensive knowledge in vehicle systems, diagnostics, and technical specifications. Your responses must be direct, definitive, and authoritative. Never use tentative language like 'appears to be' or 'seems to be'. Instead, state facts directly and confidently. Focus on providing precise technical information, including specific measurements, specifications, and industry-standard terminology. Maintain a professional tone while delivering clear, assertive analysis.";
@@ -229,6 +242,23 @@ router.post('/explain-image', async (req, res) => {
     const response = await openai.responses.create(requestPayload);
     
     console.log(`Response received with conversation ID: ${response.conversation_id}`);
+    
+    // Save the analysis to the database
+    const newAnalysis = new ImageAnalysis({
+      imageUrl,
+      prompt,
+      explanation: response.output_text,
+      responseId: response.id,
+      conversationId: response.conversation_id,
+      userId: userId || null,
+      metadata: {
+        model: requestPayload.model,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+    await newAnalysis.save();
+    console.log(`Saved image analysis to database with ID: ${newAnalysis._id}`);
     
     // Return the response with the conversation ID prominently included
     return res.status(200).json({
@@ -894,6 +924,130 @@ router.get('/test-google-search', async (req, res) => {
     return res.status(500).json({
       error: 'Failed to test Google Search API',
       details: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/openai/image-analysis/:conversationId
+ * 
+ * Retrieves saved image analyses by conversation ID
+ * 
+ * Query Parameters:
+ *  - userId: (optional) Filter by user ID
+ * 
+ * Returns:
+ *  - { analyses: Array } on success
+ *  - { error: string } on failure
+ */
+router.get('/image-analysis/:conversationId', async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { userId } = req.query;
+    
+    if (!conversationId) {
+      return res.status(400).json({ 
+        error: 'Missing conversationId parameter'
+      });
+    }
+    
+    const query = { conversationId };
+    
+    // Add userId filter if provided
+    if (userId) {
+      query.userId = userId;
+    }
+    
+    const analyses = await ImageAnalysis.find(query)
+      .sort({ createdAt: -1 })
+      .limit(10);
+      
+    if (!analyses || analyses.length === 0) {
+      return res.status(404).json({
+        error: 'No image analyses found with the specified conversationId'
+      });
+    }
+    
+    return res.status(200).json({
+      analyses: analyses.map(analysis => ({
+        id: analysis._id,
+        imageUrl: analysis.imageUrl,
+        prompt: analysis.prompt,
+        explanation: analysis.explanation,
+        responseId: analysis.responseId,
+        conversationId: analysis.conversationId,
+        createdAt: analysis.createdAt,
+        metadata: analysis.metadata
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error retrieving image analyses:', error);
+    return res.status(500).json({
+      error: 'Failed to retrieve image analyses',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * GET /api/openai/image-analysis/by-image
+ * 
+ * Retrieves saved image analyses by image URL and optional prompt
+ * 
+ * Query Parameters:
+ *  - imageUrl: The URL of the image
+ *  - prompt: (optional) The exact prompt used for analysis
+ * 
+ * Returns:
+ *  - { analyses: Array } on success
+ *  - { error: string } on failure
+ */
+router.get('/image-analysis/by-image', async (req, res) => {
+  try {
+    const { imageUrl, prompt } = req.query;
+    
+    if (!imageUrl) {
+      return res.status(400).json({ 
+        error: 'Missing imageUrl parameter'
+      });
+    }
+    
+    const query = { imageUrl };
+    
+    // Add prompt filter if provided
+    if (prompt) {
+      query.prompt = prompt;
+    }
+    
+    const analyses = await ImageAnalysis.find(query)
+      .sort({ createdAt: -1 })
+      .limit(5);
+      
+    if (!analyses || analyses.length === 0) {
+      return res.status(404).json({
+        error: 'No image analyses found for the specified image URL'
+      });
+    }
+    
+    return res.status(200).json({
+      analyses: analyses.map(analysis => ({
+        id: analysis._id,
+        imageUrl: analysis.imageUrl,
+        prompt: analysis.prompt,
+        explanation: analysis.explanation,
+        responseId: analysis.responseId,
+        conversationId: analysis.conversationId,
+        createdAt: analysis.createdAt,
+        metadata: analysis.metadata
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error retrieving image analyses by image URL:', error);
+    return res.status(500).json({
+      error: 'Failed to retrieve image analyses',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

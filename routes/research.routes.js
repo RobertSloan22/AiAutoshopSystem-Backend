@@ -14,6 +14,8 @@ import crypto from 'crypto';
 // Import the unified vector services
 import { VectorService } from '../services/VectorService.js';
 import { MemoryVectorService } from '../services/MemoryVectorService.js';
+// Import the research cache model
+import ResearchCache from '../models/researchCache.model.js';
 
 dotenv.config();
 
@@ -686,13 +688,18 @@ async function searchSimilarResearch(query, filter = {}, limit = 5) {
  *  - transmission: Transmission type (optional)
  *  - mileage: Vehicle mileage (optional)
  *  - dtcCodes: Array of DTC codes (optional)
+ *  - userId: User ID for tracking (optional)
+ *  - skipCache: Boolean to force fresh research (optional)
  *
  * Returns:
  *  - { result: object } on success, containing the detailed research analysis
  *  - { error: string } on failure
  */
 router.post('/', async (req, res) => {
-  const { vin, year, make, model, problem, trim, engine, transmission, mileage, dtcCodes } = req.body;
+  const { 
+    vin, year, make, model, problem, trim, engine, transmission, 
+    mileage, dtcCodes, userId, skipCache = false 
+  } = req.body;
 
   // Validate required fields
   if (!year || !make || !model || !problem) {
@@ -702,6 +709,45 @@ router.post('/', async (req, res) => {
   try {
     console.log(`Processing research request for ${year} ${make} ${model}`);
     console.log(`Problem: ${problem}`);
+    
+    // If skipCache is false, check for existing cached research
+    if (!skipCache) {
+      console.log('Checking cache for existing research...');
+      
+      // Create query for finding cached research
+      const cacheQuery = {
+        'vehicleInfo.year': year,
+        'vehicleInfo.make': make,
+        'vehicleInfo.model': model,
+        problem: problem
+      };
+      
+      // Add DTC codes to query if provided (any match)
+      if (dtcCodes && dtcCodes.length > 0) {
+        cacheQuery.dtcCodes = { $in: dtcCodes };
+      }
+      
+      // Check for recent cached research (less than 30 days old)
+      const cachedResearch = await ResearchCache.findOne(cacheQuery)
+        .sort({ createdAt: -1 })
+        .exec();
+        
+      // If we have a recent analysis (less than 30 days old), return it
+      if (cachedResearch && 
+          (new Date() - new Date(cachedResearch.createdAt)) < 30 * 24 * 60 * 60 * 1000) {
+        console.log(`Using cached research with ID: ${cachedResearch._id}`);
+        
+        return res.status(200).json({
+          result: cachedResearch.result,
+          fromCache: true,
+          cachedAt: cachedResearch.createdAt
+        });
+      }
+      
+      console.log('No recent cached research found. Generating new research...');
+    } else {
+      console.log('Cache lookup skipped by request.');
+    }
     
     // Note: Escape literal curly braces in the JSON structure by doubling them.
     const initialPrompt = PromptTemplate.fromTemplate(`
@@ -921,6 +967,36 @@ Never use placeholder values like "Refer to manufacturer specifications" or "Che
     
     if (formattedResult.recommendedFixes.length > 0) {
       console.log('Sample recommendedFix:', JSON.stringify(formattedResult.recommendedFixes[0], null, 2));
+    }
+    
+    // Store in MongoDB cache
+    try {
+      const newCacheEntry = new ResearchCache({
+        vehicleInfo: {
+          vin,
+          year,
+          make,
+          model,
+          trim,
+          engine,
+          transmission,
+          mileage
+        },
+        problem,
+        dtcCodes: dtcCodes || [],
+        result: formattedResult,
+        userId: userId || null,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          source: 'research_routes'
+        }
+      });
+      
+      await newCacheEntry.save();
+      console.log(`Saved research to database cache with ID: ${newCacheEntry._id}`);
+    } catch (cacheError) {
+      console.error('Error storing in research cache:', cacheError);
+      // Continue with response even if cache storage fails
     }
     
     // Store in vector database
@@ -1361,12 +1437,106 @@ Only include TSBs that are specifically for the {year} {make} {model}, not gener
 });
 
 /**
+ * GET /api/research/cache/:id
+ * 
+ * Retrieve a cached research record by ID
+ */
+router.get('/cache/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'Research ID is required' });
+    }
+    
+    const cachedResearch = await ResearchCache.findById(id);
+    
+    if (!cachedResearch) {
+      return res.status(404).json({ error: 'Cached research not found' });
+    }
+    
+    return res.status(200).json({
+      result: cachedResearch.result,
+      vehicleInfo: cachedResearch.vehicleInfo,
+      problem: cachedResearch.problem,
+      dtcCodes: cachedResearch.dtcCodes,
+      createdAt: cachedResearch.createdAt,
+      fromCache: true
+    });
+    
+  } catch (error) {
+    console.error('Error retrieving cached research:', error);
+    return res.status(500).json({
+      error: 'Failed to retrieve cached research',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * GET /api/research/cache
+ * 
+ * Search for cached research based on vehicle info and problem
+ */
+router.get('/cache', async (req, res) => {
+  try {
+    const { year, make, model, dtcCode, problem, limit = 10 } = req.query;
+    
+    // Build query based on provided parameters
+    const query = {};
+    
+    if (year) query['vehicleInfo.year'] = year;
+    if (make) query['vehicleInfo.make'] = make;
+    if (model) query['vehicleInfo.model'] = model;
+    if (dtcCode) query.dtcCodes = dtcCode;
+    if (problem) query.problem = { $regex: problem, $options: 'i' };
+    
+    // Require at least one parameter
+    if (Object.keys(query).length === 0) {
+      return res.status(400).json({ 
+        error: 'At least one search parameter is required (year, make, model, dtcCode, or problem)' 
+      });
+    }
+    
+    console.log(`Searching cache with query:`, query);
+    
+    const cachedResearch = await ResearchCache.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .exec();
+    
+    return res.status(200).json({
+      results: cachedResearch.map(item => ({
+        id: item._id,
+        vehicleInfo: item.vehicleInfo,
+        problem: item.problem,
+        dtcCodes: item.dtcCodes,
+        createdAt: item.createdAt,
+        resultSummary: {
+          diagnosticSteps: item.result.diagnosticSteps?.length || 0,
+          possibleCauses: item.result.possibleCauses?.length || 0,
+          recommendedFixes: item.result.recommendedFixes?.length || 0
+        }
+      })),
+      count: cachedResearch.length
+    });
+    
+  } catch (error) {
+    console.error('Error searching cached research:', error);
+    return res.status(500).json({
+      error: 'Failed to search cached research',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
  * POST /api/research/search-similar
  * 
  * Search for similar research results based on a query
  */
 router.post('/search-similar', async (req, res) => {
-  const { query, make, model, year, limit } = req.body;
+  const { query, make, model, year, limit, checkCache = true } = req.body;
   
   if (!query) {
     return res.status(400).json({ error: 'Query is required' });
@@ -1375,9 +1545,64 @@ router.post('/search-similar', async (req, res) => {
   try {
     console.log(`Received search request with query: "${query.substring(0, 50)}..."`);
     console.log(`Filter parameters: make=${make || 'not specified'}, model=${model || 'not specified'}, year=${year || 'not specified'}`);
-    console.log(`Result limit: ${limit || 5}`);
+    console.log(`Result limit: ${limit || 5}, Check cache: ${checkCache}`);
     
-    // Build filter based on provided parameters
+    // Combined results from cache and vector search
+    let combinedResults = [];
+    
+    // Check MongoDB cache first if enabled
+    if (checkCache) {
+      try {
+        console.log('Checking MongoDB cache for similar research...');
+        
+        // Create the cache query
+        const cacheQuery = {};
+        if (make) cacheQuery['vehicleInfo.make'] = make;
+        if (model) cacheQuery['vehicleInfo.model'] = model;
+        if (year) cacheQuery['vehicleInfo.year'] = year;
+        
+        // Add a text search for the query term in the problem field
+        if (query.length > 3) {
+          // Basic keyword search (not as sophisticated as vector search)
+          const keywords = query.split(/\s+/).filter(word => word.length > 3);
+          if (keywords.length > 0) {
+            const regexPattern = keywords.map(word => `(?=.*${word})`).join('');
+            cacheQuery.problem = { $regex: new RegExp(regexPattern, 'i') };
+          }
+        }
+        
+        const cachedResults = await ResearchCache.find(cacheQuery)
+          .sort({ createdAt: -1 })
+          .limit(parseInt(limit) || 5)
+          .exec();
+          
+        console.log(`Found ${cachedResults.length} results in MongoDB cache`);
+        
+        // Format cache results to match vector search results format
+        if (cachedResults.length > 0) {
+          const formattedCacheResults = cachedResults.map(item => ({
+            pageContent: item.problem,
+            metadata: {
+              id: item._id,
+              vehicleInfo: item.vehicleInfo,
+              problem: item.problem,
+              dtcCodes: item.dtcCodes,
+              timestamp: item.createdAt,
+              score: 1.0, // Default high score for exact matches
+              researchData: item.result,
+              fromCache: true
+            }
+          }));
+          
+          combinedResults = [...formattedCacheResults];
+        }
+      } catch (cacheError) {
+        console.error('Error searching MongoDB cache:', cacheError);
+        // Continue with vector search even if cache search fails
+      }
+    }
+    
+    // Build filter based on provided parameters for vector search
     const filter = {};
     if (make) filter.make = make;
     if (model) filter.model = model;
@@ -1390,23 +1615,48 @@ router.post('/search-similar', async (req, res) => {
       - MemoryVectorService: ${MemoryVectorService.hasInstance(MEMORY_INSTANCE_NAME) ? 'available' : 'not available'}
     `);
     
-    // Search for similar research results
-    const searchResults = await searchSimilarResearch(
+    // Search for similar research results in vector DB
+    const vectorSearchResults = await searchSimilarResearch(
       query, 
       filter, 
       limit || 5
     );
     
-    console.log(`Search completed. Found ${searchResults.length} results`);
+    console.log(`Vector search completed. Found ${vectorSearchResults.length} results`);
     
-    // Log sample of the results
-    if (searchResults.length > 0) {
-      console.log(`First result metadata:`, JSON.stringify(searchResults[0].metadata, null, 2));
-    }
+    // Add vector search results with source marker
+    const formattedVectorResults = vectorSearchResults.map(result => ({
+      ...result,
+      metadata: {
+        ...result.metadata,
+        fromVector: true
+      }
+    }));
+    
+    // Combine results, prioritizing vector search for semantic matches
+    combinedResults = [...combinedResults, ...formattedVectorResults];
+    
+    // Deduplicate results (prefer vector results for duplicates)
+    const seenIds = new Set();
+    const deduplicatedResults = combinedResults.filter(result => {
+      // Create a unique ID from the content and vehicle info
+      const vehicleInfo = result.metadata.vehicleInfo || {};
+      const uniqueId = `${vehicleInfo.year || ''}-${vehicleInfo.make || ''}-${vehicleInfo.model || ''}-${result.metadata.problem || ''}`;
+      
+      if (seenIds.has(uniqueId)) {
+        return false;
+      }
+      
+      seenIds.add(uniqueId);
+      return true;
+    });
+    
+    // Limit to requested number of results
+    const limitedResults = deduplicatedResults.slice(0, parseInt(limit) || 5);
     
     return res.status(200).json({
-      results: searchResults,
-      count: searchResults.length,
+      results: limitedResults,
+      count: limitedResults.length,
       query,
       filters: filter
     });

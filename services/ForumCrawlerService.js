@@ -538,17 +538,22 @@ export class ForumCrawlerService {
             
             // Then query long-term vector store
             console.log('Querying long-term vector store...');
-            const longTermDocs = await this.vectorService.similaritySearch(question, 5);
-            if (longTermDocs && longTermDocs.length > 0) {
-                console.log(`Found ${longTermDocs.length} relevant documents in long-term store`);
-                // Add only documents not already in the results
-                for (const doc of longTermDocs) {
-                    if (!relevantDocs.some(existingDoc => 
-                        existingDoc.pageContent === doc.pageContent && 
-                        existingDoc.metadata.source === doc.metadata.source)) {
-                        relevantDocs.push(doc);
+            try {
+                const longTermDocs = await this.vectorService.similaritySearch(question, 5);
+                if (longTermDocs && longTermDocs.length > 0) {
+                    console.log(`Found ${longTermDocs.length} relevant documents in long-term store`);
+                    // Add only documents not already in the results
+                    for (const doc of longTermDocs) {
+                        if (!relevantDocs.some(existingDoc => 
+                            existingDoc.pageContent === doc.pageContent && 
+                            existingDoc.metadata.source === doc.metadata.source)) {
+                            relevantDocs.push(doc);
+                        }
                     }
                 }
+            } catch (error) {
+                console.warn('Error querying long-term vector store:', error);
+                // Continue processing even if long-term store fails
             }
             
             // Limit to top 5 most relevant documents

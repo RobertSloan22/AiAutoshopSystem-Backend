@@ -427,20 +427,27 @@ export class VectorService {
         await this.ensureInitialized();
         
         const results = {
-            local: null,
-            openai: null
+            local: [],
+            openai: []
         };
         
         // Search local vector store
-        if (this.config.useLocal) {
+        if (this.localVectorStore) {
             try {
-                // Ensure options.filters is not an empty object for Chroma
-                let filters = options.filters || null;
-                if (filters && Object.keys(filters).length === 0) {
-                    filters = null;
-                }
+                // Extract and validate filter options
+                const filterOptions = options?.filters;
                 
-                // Pass modified filters to the vector store
+                // Explicitly set filters to null if undefined, null, or an empty object
+                // ChromaDB expects either null or a valid filter with operators
+                const filters = (filterOptions && 
+                               typeof filterOptions === 'object' && 
+                               Object.keys(filterOptions).length > 0) 
+                               ? filterOptions 
+                               : null;
+                
+                LoggerService.info('Searching local vector store with filters:', filters);
+                
+                // Pass validated filters to the vector store
                 const localResults = await this.localVectorStore.similaritySearch(
                     query, 
                     k,
@@ -448,7 +455,7 @@ export class VectorService {
                 );
                 results.local = localResults;
             } catch (error) {
-                console.error('Error searching local vector store:', error);
+                LoggerService.error('Error searching local vector store:', error);
             }
         }
         
