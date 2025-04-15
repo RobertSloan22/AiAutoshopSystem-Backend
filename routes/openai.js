@@ -149,7 +149,7 @@ router.post('/dashboard-image', async (req, res) => {
     console.log('Processing image explanation request...');
     
     // Create a system message for automotive technical advisor
-    const systemMessage = "You are assisting the user to diagnose their vehicle, you will be given a image of the vehicle and a prompt, you will need to diagnose the vehicle and provide a detailed explination of the problem, you will also need to provide a list of possible causes and recommended fixes.";
+    const systemMessage = "You are an Automotive Expert";
 
     // Clean up user prompt - remove any "You are..." preambles
     let cleanedPrompt = prompt;
