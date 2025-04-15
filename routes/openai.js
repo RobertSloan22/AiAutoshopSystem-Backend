@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import ImageAnalysis from '../models/imageAnalysis.model.js';
+import sharp from 'sharp';
 
 dotenv.config();
 
@@ -43,7 +45,7 @@ const upload = multer({
 /**
  * POST /api/openai/upload-image
  * 
- * Handles image uploads, saves them to the server, and returns the URL
+ * Handles image uploads, resizes them if needed, saves them to the server, and returns the URL
  * 
  * Expects a multipart form data with:
  *  - image: The image file to upload
@@ -58,14 +60,64 @@ router.post('/upload-image', upload.single('image'), async (req, res) => {
       return res.status(400).json({ error: 'No image uploaded' });
     }
 
-    // Create a URL for the uploaded image
+    const imagePath = path.join(process.cwd(), 'uploads', req.file.filename);
+    
+    // Get original image size
+    const originalStats = fs.statSync(imagePath);
+    const originalSizeInMB = originalStats.size / (1024 * 1024);
+    console.log(`Original image size: ${originalSizeInMB.toFixed(2)} MB`);
+    
+    // Resize image if larger than 800px on any dimension and convert to JPEG
+    let imageBuffer;
+    try {
+      // Process the image with Sharp - resize and optimize
+      imageBuffer = await sharp(imagePath)
+        .resize({
+          width: 800,  // Max width of 800px
+          height: 800, // Max height of 800px
+          fit: 'inside', // Maintain aspect ratio
+          withoutEnlargement: true // Don't enlarge smaller images
+        })
+        .jpeg({ quality: 80 }) // Convert to JPEG with 80% quality
+        .toBuffer();
+      
+      // Save the resized image back to disk
+      await fs.promises.writeFile(imagePath, imageBuffer);
+      
+      console.log(`Resized image saved to ${imagePath}`);
+    } catch (resizeError) {
+      console.error('Error resizing image:', resizeError);
+      // If resize fails, use the original file
+      imageBuffer = await fs.promises.readFile(imagePath);
+    }
+    
+    // Convert to base64
+    const base64Image = imageBuffer.toString('base64');
+    const contentType = 'image/jpeg'; // After resize, it's always JPEG
+    const dataUri = `data:${contentType};base64,${base64Image}`;
+    
+    // Log the image size
+    const sizeInMB = imageBuffer.length / (1024 * 1024);
+    console.log(`Processed image size: ${sizeInMB.toFixed(2)} MB (${imageBuffer.length} bytes)`);
+    
+    // Check image size for OpenAI limit (20MB)
+    if (sizeInMB > 20) {
+      return res.status(400).json({
+        error: 'Image size exceeds OpenAI limit of 20MB',
+        details: `Image is ${sizeInMB.toFixed(2)} MB, must be under 20MB`
+      });
+    }
+
+    // Create server URL for reference (not used for OpenAI)
     const serverUrl = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 5000}`;
     const imageUrl = `${serverUrl}/uploads/${req.file.filename}`;
 
     return res.status(200).json({
-      imageUrl,
-      contentType: req.file.mimetype,
-      filename: req.file.filename
+      imageUrl: dataUri, // Return the base64 data URI instead of a URL
+      originalUrl: imageUrl, // Keep the original URL for reference
+      contentType: contentType,
+      filename: req.file.filename,
+      sizeInMB: sizeInMB.toFixed(2)
     });
   } catch (error) {
     console.error('Error uploading image:', error);
@@ -99,6 +151,20 @@ router.post('/dashboard-image', async (req, res) => {
     // Create a system message for automotive technical advisor
     const systemMessage = "You are assisting the user to diagnose their vehicle, you will be given a image of the vehicle and a prompt, you will need to diagnose the vehicle and provide a detailed explination of the problem, you will also need to provide a list of possible causes and recommended fixes.";
 
+    // Clean up user prompt - remove any "You are..." preambles
+    let cleanedPrompt = prompt;
+    if (prompt.toLowerCase().includes('you are an automotive expert') || 
+        prompt.toLowerCase().includes('you are a mechanic') || 
+        prompt.toLowerCase().includes('as an automotive')) {
+      // Extract just the actual question/request part after these introductions
+      const promptParts = prompt.split('.');
+      if (promptParts.length > 1) {
+        // Skip the "You are..." introduction and use the rest
+        cleanedPrompt = promptParts.slice(1).join('.').trim();
+        console.log(`Cleaned up prompt from: "${prompt}" to: "${cleanedPrompt}"`);
+      }
+    }
+
     // For initial requests, we don't send a conversation_id so OpenAI will generate a new one
     const requestPayload = {
       model: "gpt-4o",
@@ -111,7 +177,7 @@ router.post('/dashboard-image', async (req, res) => {
       }, {
         role: "user",
         content: [
-          { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${prompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
+          { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${cleanedPrompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
           { type: "input_image", image_url: imageUrl }
         ],
         stream: true,
@@ -132,11 +198,14 @@ router.post('/dashboard-image', async (req, res) => {
     
     console.log(`Response received with conversation ID: ${response.conversation_id}`);
     
+    // Ensure we have a valid conversationId to satisfy MongoDB validation
+    const conversationId = response.conversation_id || `fallback-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    
     // Return the response with the conversation ID prominently included
     return res.status(200).json({
       explanation: response.output_text,
       responseId: response.id,
-      conversationId: response.conversation_id,
+      conversationId: conversationId,
       status: 'success'
     });
 
@@ -158,15 +227,6 @@ router.post('/dashboard-image', async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
 /**
  * POST /api/openai/explain-image
  * 
@@ -175,13 +235,14 @@ router.post('/dashboard-image', async (req, res) => {
  * Expects a JSON body containing:
  *  - imageUrl: URL of the image to analyze or base64 data URI
  *  - prompt: Specific question or instruction about the image
+ *  - userId: (optional) ID of the user making the request
  * 
  * Returns:
  *  - { explanation: string, responseId: string, conversationId: string, status: string } on success
  *  - { error: string, details?: string } on failure
  */
 router.post('/explain-image', async (req, res) => {
-  const { imageUrl, prompt } = req.body;
+  const { imageUrl, prompt, userId } = req.body;
 
   // Validate required fields
   if (!imageUrl || !prompt) {
@@ -194,8 +255,42 @@ router.post('/explain-image', async (req, res) => {
   try {
     console.log('Processing image explanation request...');
     
+    // First, check if we already have this analysis in the database
+    const existingAnalysis = await ImageAnalysis.findOne({ 
+      imageUrl, 
+      prompt 
+    }).sort({ createdAt: -1 }).exec();
+
+    // If we have a recent analysis (less than 24 hours old), return it
+    if (existingAnalysis && 
+        (new Date() - new Date(existingAnalysis.createdAt)) < 24 * 60 * 60 * 1000) {
+      console.log(`Using cached analysis for image with ID: ${existingAnalysis._id}`);
+      
+      return res.status(200).json({
+        explanation: existingAnalysis.explanation,
+        responseId: existingAnalysis.responseId,
+        conversationId: existingAnalysis.conversationId,
+        status: 'success',
+        fromCache: true
+      });
+    }
+    
     // Create a system message for automotive technical advisor
     const systemMessage = "You are an expert Automotive Technical Advisor with extensive knowledge in vehicle systems, diagnostics, and technical specifications. Your responses must be direct, definitive, and authoritative. Never use tentative language like 'appears to be' or 'seems to be'. Instead, state facts directly and confidently. Focus on providing precise technical information, including specific measurements, specifications, and industry-standard terminology. Maintain a professional tone while delivering clear, assertive analysis.";
+
+    // Clean up user prompt - remove any "You are..." preambles
+    let cleanedPrompt = prompt;
+    if (prompt.toLowerCase().includes('you are an automotive expert') || 
+        prompt.toLowerCase().includes('you are a mechanic') || 
+        prompt.toLowerCase().includes('as an automotive')) {
+      // Extract just the actual question/request part after these introductions
+      const promptParts = prompt.split('.');
+      if (promptParts.length > 1) {
+        // Skip the "You are..." introduction and use the rest
+        cleanedPrompt = promptParts.slice(1).join('.').trim();
+        console.log(`Cleaned up prompt from: "${prompt}" to: "${cleanedPrompt}"`);
+      }
+    }
 
     // For initial requests, we don't send a conversation_id so OpenAI will generate a new one
     const requestPayload = {
@@ -209,7 +304,7 @@ router.post('/explain-image', async (req, res) => {
       }, {
         role: "user",
         content: [
-          { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${prompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
+          { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${cleanedPrompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
           { type: "input_image", image_url: imageUrl }
         ],
         
@@ -230,11 +325,31 @@ router.post('/explain-image', async (req, res) => {
     
     console.log(`Response received with conversation ID: ${response.conversation_id}`);
     
+    // Ensure we have a valid conversationId to satisfy MongoDB validation
+    const conversationId = response.conversation_id || `fallback-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    
+    // Save the analysis to the database
+    const newAnalysis = new ImageAnalysis({
+      imageUrl,
+      prompt,
+      explanation: response.output_text,
+      responseId: response.id,
+      conversationId: conversationId,
+      userId: userId || null,
+      metadata: {
+        model: requestPayload.model,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+    await newAnalysis.save();
+    console.log(`Saved image analysis to database with ID: ${newAnalysis._id}`);
+    
     // Return the response with the conversation ID prominently included
     return res.status(200).json({
       explanation: response.output_text,
       responseId: response.id,
-      conversationId: response.conversation_id,
+      conversationId: conversationId,
       status: 'success'
     });
 
@@ -282,17 +397,9 @@ router.post('/explain-image/follow-up', async (req, res) => {
     });
   }
 
-  if (!conversationId) {
-    console.warn('No conversation ID provided for follow-up question. This may result in an incomplete conversation context.');
-    return res.status(400).json({ 
-      error: 'Missing conversation ID',
-      details: 'A conversation ID is required to maintain context with previous explanations'
-    });
-  }
-
   try {
     console.log('--------------------------------------------');
-    console.log(`Processing follow-up question with conversation ID: ${conversationId}`);
+    console.log(`Processing follow-up question for previous analysis: ${conversationId}`);
     console.log(`Question: "${question}"`);
     console.log(`Image URL: ${imageUrl.substring(0, 50)}...`);
     
@@ -304,17 +411,24 @@ router.post('/explain-image/follow-up', async (req, res) => {
       console.log(`Added vehicle context: ${vehicleInfo}`);
     }
 
-    // Create request payload - IMPORTANT: conversation_id must be included
+    // Instead of using conversation_id, we'll use a system message to establish context
+    const systemMessage = "You are an expert Automotive Technical Advisor. This is a follow-up question about an automotive part or system shown in the image. Maintain context from any previous explanations but focus on answering this specific question directly and authoritatively.";
+
+    // Create request payload without conversation_id
     const requestPayload = {
       model: "gpt-4o",
       user: "Technician",
-      conversation_id: conversationId, // This is critical for continuity
       input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
         role: "user",
         content: [
-          { type: "input_text", text: userMessage },
+          { type: "input_text", text: `This is a follow-up question about the automotive component in the image. Previous conversation ID was: ${conversationId}. The question is: ${userMessage}` },
           { type: "input_image", image_url: imageUrl }
-        ],
+        ]
       }],
       max_output_tokens: 1500
     };
@@ -332,18 +446,20 @@ router.post('/explain-image/follow-up', async (req, res) => {
       }))
     }, null, 2));
 
-    // Create a response using the Responses API with the existing conversation ID
+    // Create a response using the Responses API
     const response = await openai.responses.create(requestPayload);
     
-    console.log(`Follow-up response received with conversation ID: ${response.conversation_id}`);
-    console.log(`Response ID: ${response.id}`);
+    // Generate a new conversation ID if none returned
+    const responseConversationId = response.conversation_id || `fallback-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    
+    console.log(`Follow-up response received with ID: ${response.id}`);
     console.log(`Response text length: ${response.output_text.length} characters`);
     console.log('--------------------------------------------');
 
     return res.status(200).json({
       answer: response.output_text,
       responseId: response.id,
-      conversationId: response.conversation_id,
+      conversationId: responseConversationId,
       status: 'success'
     });
 
@@ -402,7 +518,19 @@ router.post('/validate-image', async (req, res) => {
       
       // Validate base64
       try {
-        Buffer.from(base64Data, 'base64');
+        const buffer = Buffer.from(base64Data, 'base64');
+        const sizeInBytes = buffer.length;
+        const sizeInMB = sizeInBytes / (1024 * 1024);
+        
+        console.log(`Image size: ${sizeInMB.toFixed(2)} MB (${sizeInBytes} bytes)`);
+        
+        // Check if image exceeds OpenAI's limit (20MB)
+        if (sizeInMB > 20) {
+          return res.status(400).json({
+            isValid: false,
+            error: `Image size (${sizeInMB.toFixed(2)} MB) exceeds OpenAI's 20MB limit`
+          });
+        }
       } catch (e) {
         return res.status(400).json({
           isValid: false,
@@ -460,6 +588,11 @@ router.post('/validate-image', async (req, res) => {
         error: 'Image size exceeds maximum limit of 10MB'
       });
     }
+
+    // Log image size
+    const sizeInBytes = imageResponse.data.length;
+    const sizeInMB = sizeInBytes / (1024 * 1024);
+    console.log(`External image size: ${sizeInMB.toFixed(2)} MB (${sizeInBytes} bytes)`);
 
     // Convert to base64 for OpenAI compatibility
     const base64Image = Buffer.from(imageResponse.data).toString('base64');
@@ -894,6 +1027,130 @@ router.get('/test-google-search', async (req, res) => {
     return res.status(500).json({
       error: 'Failed to test Google Search API',
       details: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/openai/image-analysis/:conversationId
+ * 
+ * Retrieves saved image analyses by conversation ID
+ * 
+ * Query Parameters:
+ *  - userId: (optional) Filter by user ID
+ * 
+ * Returns:
+ *  - { analyses: Array } on success
+ *  - { error: string } on failure
+ */
+router.get('/image-analysis/:conversationId', async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { userId } = req.query;
+    
+    if (!conversationId) {
+      return res.status(400).json({ 
+        error: 'Missing conversationId parameter'
+      });
+    }
+    
+    const query = { conversationId };
+    
+    // Add userId filter if provided
+    if (userId) {
+      query.userId = userId;
+    }
+    
+    const analyses = await ImageAnalysis.find(query)
+      .sort({ createdAt: -1 })
+      .limit(10);
+      
+    if (!analyses || analyses.length === 0) {
+      return res.status(404).json({
+        error: 'No image analyses found with the specified conversationId'
+      });
+    }
+    
+    return res.status(200).json({
+      analyses: analyses.map(analysis => ({
+        id: analysis._id,
+        imageUrl: analysis.imageUrl,
+        prompt: analysis.prompt,
+        explanation: analysis.explanation,
+        responseId: analysis.responseId,
+        conversationId: analysis.conversationId,
+        createdAt: analysis.createdAt,
+        metadata: analysis.metadata
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error retrieving image analyses:', error);
+    return res.status(500).json({
+      error: 'Failed to retrieve image analyses',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * GET /api/openai/image-analysis/by-image
+ * 
+ * Retrieves saved image analyses by image URL and optional prompt
+ * 
+ * Query Parameters:
+ *  - imageUrl: The URL of the image
+ *  - prompt: (optional) The exact prompt used for analysis
+ * 
+ * Returns:
+ *  - { analyses: Array } on success
+ *  - { error: string } on failure
+ */
+router.get('/image-analysis/by-image', async (req, res) => {
+  try {
+    const { imageUrl, prompt } = req.query;
+    
+    if (!imageUrl) {
+      return res.status(400).json({ 
+        error: 'Missing imageUrl parameter'
+      });
+    }
+    
+    const query = { imageUrl };
+    
+    // Add prompt filter if provided
+    if (prompt) {
+      query.prompt = prompt;
+    }
+    
+    const analyses = await ImageAnalysis.find(query)
+      .sort({ createdAt: -1 })
+      .limit(5);
+      
+    if (!analyses || analyses.length === 0) {
+      return res.status(404).json({
+        error: 'No image analyses found for the specified image URL'
+      });
+    }
+    
+    return res.status(200).json({
+      analyses: analyses.map(analysis => ({
+        id: analysis._id,
+        imageUrl: analysis.imageUrl,
+        prompt: analysis.prompt,
+        explanation: analysis.explanation,
+        responseId: analysis.responseId,
+        conversationId: analysis.conversationId,
+        createdAt: analysis.createdAt,
+        metadata: analysis.metadata
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Error retrieving image analyses by image URL:', error);
+    return res.status(500).json({
+      error: 'Failed to retrieve image analyses',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
