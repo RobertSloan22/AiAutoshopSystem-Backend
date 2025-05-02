@@ -79,6 +79,8 @@ const allowedOrigins = [
   'https://us-license-plate-to-vin.p.rapidapi.com',
   "http://127.0.0.1:5501/",
   'http://localhost:5173',
+  'https://dist-4ibg6nara-robmit2023s-projects.vercel.app/backgrounddashboard',
+  'https://b8a5-66-42-19-48.ngrok-free.app',
   'http://localhost:3000',
   'http://localhost:3500',
   'http://localhost:3005',
