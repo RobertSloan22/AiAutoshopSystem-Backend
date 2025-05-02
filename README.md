@@ -1,4 +1,5 @@
 # Unified Vector Storage System
+![image](https://github.com/user-attachments/assets/f2b4fe68-a05e-404d-80f3-21ade7b3d0df)
 
 This system provides a unified approach to vector storage for applications requiring vector embeddings and similarity search. It supports both local ChromaDB storage and OpenAI's vector database for redundancy.
 
