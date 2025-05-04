@@ -5,10 +5,15 @@ import jwt from "jsonwebtoken";
 
 export const signup = async (req, res) => {
 	try {
-		const { fullName, username, password, confirmPassword, gender } = req.body;
+		const { username, password, confirmPassword } = req.body;
 
-		if (password !== confirmPassword) {
+		// Only check confirmPassword if it was provided
+		if (confirmPassword && password !== confirmPassword) {
 			return res.status(400).json({ error: "Passwords don't match" });
+		}
+
+		if (!username || !password) {
+			return res.status(400).json({ error: "Username and password are required" });
 		}
 
 		const user = await User.findOne({ username });
@@ -21,17 +26,13 @@ export const signup = async (req, res) => {
 		const salt = await bcrypt.genSalt(10);
 		const hashedPassword = await bcrypt.hash(password, salt);
 
-		// https://avatar-placeholder.iran.liara.run/
-
-		const boyProfilePic = `https://avatar.iran.liara.run/public/boy?username=${username}`;
-		const girlProfilePic = `https://avatar.iran.liara.run/public/girl?username=${username}`;
+		// Default profile pic
+		const profilePic = `https://avatar.iran.liara.run/public/boy?username=${username}`;
 
 		const newUser = new User({
-			fullName,
 			username,
 			password: hashedPassword,
-			gender,
-			profilePic: gender === "male" ? boyProfilePic : girlProfilePic,
+			profilePic,
 		});
 
 		if (newUser) {
@@ -41,7 +42,6 @@ export const signup = async (req, res) => {
 
 			res.status(201).json({
 				_id: newUser._id,
-				fullName: newUser.fullName,
 				username: newUser.username,
 				profilePic: newUser.profilePic,
 			});
@@ -82,7 +82,6 @@ export const login = async (req, res) => {
 			token,
 			user: {
 				_id: user._id,
-				fullName: user.fullName,
 				username: user.username,
 				profilePic: user.profilePic,
 			}

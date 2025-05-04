@@ -11,6 +11,7 @@ import { Server } from "socket.io";
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
 import swaggerUi from 'swagger-ui-express';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import { specs } from './swagger.js';
 import lmStudioRoutes from './routes/lmStudio.routes.js';
 import licensePlateRoutes from './routes/licensePlate.routes.js';
@@ -81,6 +82,7 @@ const allowedOrigins = [
   'http://localhost:5173',
   'https://dist-4ibg6nara-robmit2023s-projects.vercel.app/backgrounddashboard',
   'https://b8a5-66-42-19-48.ngrok-free.app',
+  'https://noobtoolai.com',
   'http://localhost:3000',
   'http://localhost:3500',
   'http://localhost:3005',
@@ -90,6 +92,9 @@ const allowedOrigins = [
   'http://localhost:8000',
   'http://192.168.56.1:1234',
   'http://192.168.1.124:8000', // Supabase local URL
+  'http://99.37.183.149:5000',
+  'http://99.37.183.149:3000',
+  'https://99.37.183.149:5000', // For when Caddy provides SSL
   'app://*',
   'file://*',
   'electron://*'
@@ -101,7 +106,16 @@ app.use(helmet({
 
 // Configure CORS for REST API
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
   credentials: true
 }));
 
@@ -112,6 +126,26 @@ app.use(cookieParser());
 
 // Initialize Blender functionality
 initializeBlender(app);
+
+// Proxy middleware setup
+// Proxy requests to Eliza system
+app.use('/eliza', createProxyMiddleware({
+  target: 'http://localhost:3000',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/eliza': '/' // rewrite path
+  },
+}));
+
+// Proxy requests to Python websocket server
+app.use('/ws', createProxyMiddleware({
+  target: 'http://localhost:8001',
+  changeOrigin: true,
+  ws: true, // enable websocket proxy
+  pathRewrite: {
+    '^/ws': '/' // rewrite path
+  },
+}));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/research", researchRoutes);
@@ -205,6 +239,19 @@ app.get('/', (req, res) => {
           margin-bottom: 1rem;
           color: #3498db;
         }
+        .info {
+          text-align: left;
+          margin-top: 1.5rem;
+          padding: 1rem;
+          background: #f8f9fa;
+          border-radius: 5px;
+        }
+        .route {
+          font-family: monospace;
+          background: #eee;
+          padding: 0.2rem 0.4rem;
+          border-radius: 3px;
+        }
       </style>
     </head>
     <body>
@@ -212,6 +259,15 @@ app.get('/', (req, res) => {
         <div class="logo">🚗</div>
         <h1>Automotive AI Platform</h1>
         <p>Welcome to the Automotive AI Platform API. This is the backend service for our automotive intelligence system.</p>
+        
+        <div class="info">
+          <h3>Available Proxy Routes:</h3>
+          <ul>
+            <li><span class="route">/api/*</span> - Main backend services</li>
+            <li><span class="route">/eliza</span> - Eliza chat system</li>
+            <li><span class="route">/ws</span> - WebSocket server</li>
+          </ul>
+        </div>
       </div>
     </body>
     </html>
