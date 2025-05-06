@@ -1,0 +1,3 @@
+Analyze this diagram image. Create detailed Blender Python code that accurately recreates this diagram as a 3D model. 
+      Include all components shown. Label each section appropriately.
+      Just give me the Python code for Blender. No explanations needed.

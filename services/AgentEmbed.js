@@ -13,7 +13,7 @@ class LocalEmbeddings {
         try {
             console.log(`Generating embeddings for ${texts.length} texts`);
             const response = await axios.post(`${this.baseUrl}/v1/embeddings`, {
-                model: "text-embedding-nomic-embed-text-v1.5",
+                model: "text-embedding-ada-002",
                 input: texts
             });
             return response.data.data.map(item => item.embedding);

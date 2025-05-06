@@ -10,12 +10,18 @@ import cors from "cors";
 import { Server } from "socket.io";
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
+import swaggerUi from 'swagger-ui-express';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import { specs } from './swagger.js';
 import lmStudioRoutes from './routes/lmStudio.routes.js';
 import licensePlateRoutes from './routes/licensePlate.routes.js';
+import blenderRoutes from './routes/blenderRoutes.js';
+import { initializeBlender } from './blender.js';
 import authRoutes from "./routes/auth.routes.js";
 import researchRoutes from './routes/research.routes.js';
 import researchServiceRoutes from './routes/research.service.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
+import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import agentproxyRoutes from "./routes/agentproxy.routes.js"
@@ -52,6 +58,9 @@ import responseImageRoutes from './routes/responseImage.routes.js';
 import vehicleQuestionsRoutes from './routes/vehicle-questions.routes.js';
 import plateToVinRoutes from './routes/plateToVin.js';
 import serpRoutes from './routes/serp.routes.js';
+import { VectorService } from './services/VectorService.js';
+import { MemoryVectorService } from './services/MemoryVectorService.js';
+import memoryVectorRoutes from './routes/memoryVector.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,7 +78,11 @@ mongoose.connect(process.env.MONGO_DB_URI)
 
 const allowedOrigins = [
   'https://us-license-plate-to-vin.p.rapidapi.com',
+  "http://127.0.0.1:5501/",
   'http://localhost:5173',
+  'https://dist-4ibg6nara-robmit2023s-projects.vercel.app/backgrounddashboard',
+  'https://b8a5-66-42-19-48.ngrok-free.app',
+  'https://noobtoolai.com',
   'http://localhost:3000',
   'http://localhost:3500',
   'http://localhost:3005',
@@ -79,6 +92,9 @@ const allowedOrigins = [
   'http://localhost:8000',
   'http://192.168.56.1:1234',
   'http://192.168.1.124:8000', // Supabase local URL
+  'http://99.37.183.149:5000',
+  'http://99.37.183.149:3000',
+  'https://99.37.183.149:5000', // For when Caddy provides SSL
   'app://*',
   'file://*',
   'electron://*'
@@ -90,19 +106,52 @@ app.use(helmet({
 
 // Configure CORS for REST API
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
   credentials: true
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
+
+// Initialize Blender functionality
+initializeBlender(app);
+
+// Proxy middleware setup
+// Proxy requests to Eliza system
+app.use('/eliza', createProxyMiddleware({
+  target: 'http://localhost:3000',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/eliza': '/' // rewrite path
+  },
+}));
+
+// Proxy requests to Python websocket server
+app.use('/ws', createProxyMiddleware({
+  target: 'http://localhost:8001',
+  changeOrigin: true,
+  ws: true, // enable websocket proxy
+  pathRewrite: {
+    '^/ws': '/' // rewrite path
+  },
+}));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/research", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
 app.use("/api/research/o3", researchO3ServiceRoutes);
+app.use("/api/multiagent-research", multiagentResearchRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
@@ -139,6 +188,92 @@ app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 app.use('/api/license-plate', licensePlateRoutes);
 app.use('/api/plate-to-vin', plateToVinRoutes);
 app.use('/api/serp', serpRoutes);
+app.use('/api/memory-vector', memoryVectorRoutes);
+
+// Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
+  customSiteTitle: "Automotive AI Platform API Documentation",
+  customfavIcon: "/favicon.ico",
+  customCss: '.swagger-ui .topbar { display: none }'
+}));
+
+// Base URL route
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Automotive AI Platform</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 100vh;
+          background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }
+        .container {
+          text-align: center;
+          padding: 2rem;
+          background: white;
+          border-radius: 10px;
+          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          max-width: 600px;
+          margin: 1rem;
+        }
+        h1 {
+          color: #2c3e50;
+          margin-bottom: 1rem;
+        }
+        p {
+          color: #34495e;
+          line-height: 1.6;
+        }
+        .logo {
+          font-size: 2.5rem;
+          margin-bottom: 1rem;
+          color: #3498db;
+        }
+        .info {
+          text-align: left;
+          margin-top: 1.5rem;
+          padding: 1rem;
+          background: #f8f9fa;
+          border-radius: 5px;
+        }
+        .route {
+          font-family: monospace;
+          background: #eee;
+          padding: 0.2rem 0.4rem;
+          border-radius: 3px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="logo">🚗</div>
+        <h1>Automotive AI Platform</h1>
+        <p>Welcome to the Automotive AI Platform API. This is the backend service for our automotive intelligence system.</p>
+        
+        <div class="info">
+          <h3>Available Proxy Routes:</h3>
+          <ul>
+            <li><span class="route">/api/*</span> - Main backend services</li>
+            <li><span class="route">/eliza</span> - Eliza chat system</li>
+            <li><span class="route">/ws</span> - WebSocket server</li>
+          </ul>
+        </div>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
 // API error handling
 app.use('/api', (err, req, res, next) => {
   console.error('API error:', err);
@@ -161,29 +296,63 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  path: '/socket.io/',
-  transports: ['websocket', 'polling']
+// Initialize VectorService
+async function initializeServices() {
+  try {
+    console.log('Initializing Vector Services...');
+    
+    // Initialize persistent vector storage
+    await VectorService.initialize({
+      useLocal: process.env.USE_LOCAL_STORAGE !== 'false',
+      useOpenAI: process.env.USE_OPENAI_STORAGE === 'true',
+      useDualStorage: process.env.USE_DUAL_STORAGE === 'true',
+      chromaUrl: process.env.CHROMA_URL,
+      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+      openaiApiKey: process.env.OPENAI_API_KEY
+    });
+    console.log('Persistent Vector Service initialized successfully');
+    
+    // Initialize memory vector storage
+    // Create default instance
+    await MemoryVectorService.initialize('default', {
+      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+      useOpenAI: false // Default to local embeddings for memory store
+    });
+    
+    // Create a session-specific instance for temporary user interactions
+    await MemoryVectorService.initialize('user_sessions', {
+      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+      useOpenAI: false
+    });
+    
+    // Create a forum-crawler instance for temporary forum crawling
+    await MemoryVectorService.initialize('forum_crawler', {
+      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+      useOpenAI: false
+    });
+    
+    console.log('Memory Vector Service initialized successfully');
+  } catch (error) {
+    console.error('Error initializing Vector Services:', error);
+    // Don't exit - the server should still start, but vector services might be limited
+  }
+}
+
+// Start the server
+server.listen(PORT, async () => {
+	console.log(`Server Running on port ${PORT}`);
+	await initializeServices();
 });
 
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-
-  socket.on('error', (error) => {
-    console.error('Socket error:', error);
-  });
-
-  socket.on('disconnect', (reason) => {
-    console.log('Client disconnected:', socket.id, 'Reason:', reason);
-  });
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  process.exit(0);
 });
 
-server.listen(PORT, () => {
-  connectToMongoDB();
-  console.log(`Server Running on port ${PORT}`);
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  process.exit(0);
 });
+
+export default app;
