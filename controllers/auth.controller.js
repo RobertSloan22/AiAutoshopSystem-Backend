@@ -26,24 +26,38 @@ export const signup = async (req, res) => {
 		const salt = await bcrypt.genSalt(10);
 		const hashedPassword = await bcrypt.hash(password, salt);
 
-		// Default profile pic
-		const profilePic = `https://avatar.iran.liara.run/public/boy?username=${username}`;
-
 		const newUser = new User({
 			username,
 			password: hashedPassword,
-			profilePic,
 		});
 
 		if (newUser) {
-			// Generate JWT token here
-			generateTokenAndSetCookie(newUser._id, res);
 			await newUser.save();
+			
+			// Generate token
+			const token = jwt.sign(
+				{ userId: newUser._id },
+				process.env.JWT_SECRET,
+				{ expiresIn: '24h' }
+			);
+			
+			// Generate refresh token
+			const refreshToken = jwt.sign(
+				{ userId: newUser._id },
+				process.env.JWT_SECRET,
+				{ expiresIn: '7d' }
+			);
+			
+			// Also set as cookie for backward compatibility
+			generateTokenAndSetCookie(newUser._id, res);
 
 			res.status(201).json({
-				_id: newUser._id,
-				username: newUser.username,
-				profilePic: newUser.profilePic,
+				token,
+				refreshToken,
+				user: {
+					_id: newUser._id,
+					username: newUser.username,
+				}
 			});
 		} else {
 			res.status(400).json({ error: "Invalid user data" });
@@ -72,18 +86,29 @@ export const login = async (req, res) => {
 			return res.status(401).json({ error: "Invalid username or password" });
 		}
 
+		// Generate token for JSON response
 		const token = jwt.sign(
 			{ userId: user._id },
 			process.env.JWT_SECRET,
 			{ expiresIn: '24h' }
 		);
+		
+		// Generate refresh token
+		const refreshToken = jwt.sign(
+			{ userId: user._id },
+			process.env.JWT_SECRET,
+			{ expiresIn: '7d' }
+		);
+		
+		// Also set as cookie for backward compatibility
+		generateTokenAndSetCookie(user._id, res);
 
 		res.status(200).json({
 			token,
+			refreshToken,
 			user: {
 				_id: user._id,
 				username: user.username,
-				profilePic: user.profilePic,
 			}
 		});
 	} catch (error) {
@@ -94,10 +119,63 @@ export const login = async (req, res) => {
 
 export const logout = (req, res) => {
 	try {
-		// No need to clear cookies since we're using token-based auth
+		// For cookie-based auth, clear the cookie
+		res.cookie("jwt", "", {
+			maxAge: 0,
+			httpOnly: true,
+		});
+		
 		res.status(200).json({ message: "Logged out successfully" });
 	} catch (error) {
 		console.log("Error in logout controller", error.message);
+		res.status(500).json({ error: "Internal Server Error" });
+	}
+};
+
+export const refreshToken = async (req, res) => {
+	try {
+		const { refreshToken } = req.body;
+		
+		if (!refreshToken) {
+			return res.status(400).json({ error: "Refresh token is required" });
+		}
+		
+		// Verify the refresh token (using the same JWT_SECRET for now)
+		// In a production app, you might want to use a separate secret for refresh tokens
+		const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+		
+		// Find the user
+		const user = await User.findById(decoded.userId);
+		if (!user) {
+			return res.status(401).json({ error: "User not found" });
+		}
+		
+		// Generate new tokens
+		const newToken = jwt.sign(
+			{ userId: user._id },
+			process.env.JWT_SECRET,
+			{ expiresIn: '24h' }
+		);
+		
+		// Generate new refresh token (with longer expiration)
+		const newRefreshToken = jwt.sign(
+			{ userId: user._id },
+			process.env.JWT_SECRET,
+			{ expiresIn: '7d' }
+		);
+		
+		// Also update cookie for backward compatibility
+		generateTokenAndSetCookie(user._id, res);
+		
+		res.status(200).json({
+			token: newToken,
+			refreshToken: newRefreshToken
+		});
+	} catch (error) {
+		console.error("Error in refresh token controller:", error);
+		if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+			return res.status(401).json({ error: "Invalid or expired refresh token" });
+		}
 		res.status(500).json({ error: "Internal Server Error" });
 	}
 };

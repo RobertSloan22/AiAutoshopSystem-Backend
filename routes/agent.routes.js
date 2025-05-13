@@ -8,6 +8,53 @@ dotenv.config();
 const router = express.Router();
 const openai = new OpenAI();
 
+
+
+
+router.post('/realtime/sessions', async (req, res) => {
+  try {
+    let sdp = req.body.sdp || req.body;
+    if (!sdp || typeof sdp !== 'string') {
+      sdp = '';
+      req.setEncoding('utf8');
+      req.on('data', chunk => { sdp += chunk; });
+      await new Promise(resolve => req.on('end', resolve));
+    }
+    if (!sdp) {
+      return res.status(400).json({ error: 'No SDP provided in request body' });
+    }
+
+    const response = await fetch(
+      `https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/sdp",
+        },
+        body: sdp
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenAI API error:', errorText);
+      return res.status(500).json({ error: errorText });
+    }
+
+    const answerSdp = await response.text();
+    if (!answerSdp) {
+      return res.status(500).json({ error: 'No SDP received from OpenAI' });
+    }
+
+    // Return the SDP as JSON, not plain text!
+    res.json({ sdp: answerSdp });
+  } catch (error) {
+    console.error("Error in POST /realtime/sessions:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // POST route for chat completions
 router.post('/chat/completions', async (req, res) => {
   try {
@@ -68,7 +115,7 @@ router.post('/realtime', async (req, res) => {
 });
 
 // GET route for realtime sessions
-router.get('/session', async (req, res) => {
+router.get('/realtime/sessions', async (req, res) => {
   try {
     const response = await fetch(
       "https://api.openai.com/v1/realtime/sessions",

@@ -42,6 +42,74 @@ io.on("connection", (socket) => {
 	// Emit online users to all clients
 	io.emit("getOnlineUsers", Object.keys(userSocketMap));
 
+	// Emit connection status to the connected client
+	socket.emit("connection_status", {
+		status: "connected",
+		userId: userId,
+		socketId: socket.id,
+		timestamp: new Date().toISOString()
+	});
+
+	// Handle realtime chat events
+	socket.on("chat_message", (data) => {
+		try {
+			const { message, sessionId, receiverId } = data;
+
+			// If there's a specific receiver, send only to them
+			if (receiverId) {
+				const receiverSocketId = getReceiverSocketId(receiverId);
+				if (receiverSocketId) {
+					io.to(receiverSocketId).emit("chat_message", {
+						...data,
+						timestamp: new Date().toISOString()
+					});
+					return;
+				}
+			}
+
+			// Otherwise broadcast to the room if sessionId exists
+			if (sessionId) {
+				socket.to(sessionId).emit("chat_message", {
+					...data,
+					timestamp: new Date().toISOString()
+				});
+			}
+		} catch (error) {
+			console.error("Chat message error:", error);
+			socket.emit("error", {
+				type: "chat_message_error",
+				message: error.message,
+				timestamp: new Date().toISOString()
+			});
+		}
+	});
+
+	// Handle room joining for realtime sessions
+	socket.on("join_session", ({ sessionId }) => {
+		if (sessionId) {
+			socket.join(sessionId);
+			socket.to(sessionId).emit("user_joined", {
+				userId,
+				sessionId,
+				timestamp: new Date().toISOString()
+			});
+			console.log(`User ${userId} joined session ${sessionId}`);
+		}
+	});
+
+	// Handle room leaving
+	socket.on("leave_session", ({ sessionId }) => {
+		if (sessionId) {
+			socket.leave(sessionId);
+			socket.to(sessionId).emit("user_left", {
+				userId,
+				sessionId,
+				timestamp: new Date().toISOString()
+			});
+			console.log(`User ${userId} left session ${sessionId}`);
+		}
+	});
+
 	// Handle research-specific events
 	socket.on("vector-search", async (data) => {
 		try {
@@ -64,6 +132,13 @@ io.on("connection", (socket) => {
 	// Handle disconnection
 	socket.on("disconnect", () => {
 		console.log("User disconnected:", socket.id);
+
+		// Notify all clients that this user disconnected
+		io.emit("user_disconnected", {
+			userId,
+			timestamp: new Date().toISOString()
+		});
+
 		delete userSocketMap[userId];
 		io.emit("getOnlineUsers", Object.keys(userSocketMap));
 	});
@@ -71,6 +146,36 @@ io.on("connection", (socket) => {
 	// Handle errors
 	socket.on("error", (error) => {
 		console.error("Socket error:", error);
+		socket.emit("error", {
+			message: "An error occurred in the socket connection",
+			timestamp: new Date().toISOString()
+		});
+	});
+
+	// Handle WebRTC signaling
+	socket.on("webrtc_signal", (data) => {
+		try {
+			const { signal, sessionId, receiverId } = data;
+
+			if (receiverId) {
+				const receiverSocketId = getReceiverSocketId(receiverId);
+				if (receiverSocketId) {
+					io.to(receiverSocketId).emit("webrtc_signal", {
+						signal,
+						sessionId,
+						senderId: userId,
+						timestamp: new Date().toISOString()
+					});
+				}
+			}
+		} catch (error) {
+			console.error("WebRTC signaling error:", error);
+			socket.emit("error", {
+				type: "webrtc_signal_error",
+				message: error.message,
+				timestamp: new Date().toISOString()
+			});
+		}
 	});
 });
 

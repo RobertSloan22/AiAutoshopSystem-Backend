@@ -282,7 +282,7 @@ app.use('/ws', createProxyMiddleware({
   changeOrigin: true,
   ws: true,
   pathRewrite: {
-    '^/ws': '/'  // Map to root path for compatibility
+    '^/ws': '/ws'  // Map to /ws instead of / to match FastAPI's WebSocket endpoint
   },
   // Add WebSocket-specific settings
   websocket: true,
@@ -347,14 +347,6 @@ app.use('/ws', createProxyMiddleware({
         code: "WEBSOCKET_UNAVAILABLE"
       }));
     }
-  },
-  // IMPORTANT: Add this to prevent duplicate headers
-  onProxyRes: function(proxyRes, req, res) {
-    // Remove CORS headers from the Python server before adding our own
-    proxyRes.headers['access-control-allow-origin'] = null;
-    proxyRes.headers['access-control-allow-methods'] = null;
-    proxyRes.headers['access-control-allow-headers'] = null;
-    proxyRes.headers['access-control-allow-credentials'] = null;
   }
 }));
 
@@ -364,7 +356,7 @@ app.use('/research-ws', createProxyMiddleware({
   changeOrigin: true,
   ws: true,
   pathRewrite: {
-    '^/research-ws': '/'  // Map to root path for compatibility
+    '^/research-ws': '/research-ws'  // Map to /research-ws to match FastAPI's endpoint
   },
   // Add WebSocket-specific settings
   websocket: true,
