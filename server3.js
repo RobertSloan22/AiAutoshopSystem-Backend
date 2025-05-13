@@ -140,7 +140,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
 
     // Always allow localhost development
-    if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+    if (origin === 'http://localhost:5173') {
       return callback(null, origin);
     }
 
@@ -150,20 +150,18 @@ app.use(cors({
     }
 
     // Always allow your specific Vercel URLs
-    if (origin.includes('vercel.app') || 
-        origin.includes('vercel.com/robmit2023s-projects')) {
-      return callback(null, origin);
-    }
-
-    // Always allow ngrok domains
-    if (origin.includes('ngrok.app') || 
-        origin.includes('ngrok-free.app') ||
-        origin.includes('ngrok.io')) {
+    if (origin === 'https://vercel.com/robmit2023s-projects/dist/6SBKCk4Gz7NsVtLijqJEUUMkD9hh' ||
+        origin === 'https://dist-robmit2023s-projects.vercel.app' ||
+        origin.startsWith('https://dist-robmit2023s-projects.vercel.app/')) {
       return callback(null, origin);
     }
 
     // Check against allowedOrigins list
-    if (allowedOrigins.includes(origin)) {
+    if (allowedOrigins.includes(origin) ||
+        origin.includes('vercel.app') ||
+        origin.includes('vercel.com/robmit2023s-projects') ||
+        origin.includes('ngrok.app') ||
+        origin.includes('ngrok-free.app')) {
       return callback(null, origin);
     }
 
@@ -179,25 +177,12 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Sec-WebSocket-Key', 'Sec-WebSocket-Protocol', 'Sec-WebSocket-Version', 'Sec-WebSocket-Extensions'],   
-  exposedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Sec-WebSocket-Accept', 'Sec-WebSocket-Protocol', 'Sec-WebSocket-Version', 'Sec-WebSocket-Extensions'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],   
   maxAge: 86400 // 24 hours
 }));
 
 // Preflight handling
 app.options('*', cors());
-
-// Special handling for OPTIONS requests to eliza endpoint
-app.options('/eliza/*', (req, res) => {
-  const origin = req.headers.origin;
-  // Set CORS headers
-  res.header('Access-Control-Allow-Origin', origin);
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Max-Age', '86400'); // 24 hours
-  res.status(200).end();
-});
 
 // Parse JSON and URL-encoded data
 app.use(express.json({ limit: '50mb' }));
@@ -217,220 +202,68 @@ app.use('/eliza', createProxyMiddleware({
   pathRewrite: {
     '^/eliza': '/' // rewrite path
   },
-  // Add these settings:
-  timeout: 60000, // Increase timeout to 60 seconds
-  proxyTimeout: 60000,
-  // Configure larger limits for proxy
-  maxBodyLength: 10 * 1024 * 1024, // 10MB max body length
-  // Handle CORS headers correctly
-  onProxyRes: (proxyRes, req, res) => {
-    // Get the origin from the request
-    const origin = req.headers.origin;
-
-    // If there's an origin header, ensure proper CORS headers are set
-    if (origin) {
-      // For preflight OPTIONS requests and regular requests
-      proxyRes.headers['Access-Control-Allow-Origin'] = origin;
-      proxyRes.headers['Access-Control-Allow-Credentials'] = 'true';
-      proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH';
-      proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin';
-      proxyRes.headers['Access-Control-Max-Age'] = '86400'; // 24 hours
-    }
-
-    console.log('Eliza proxy response to origin:', origin);
-  },
-  // Better request handling
   onProxyReq: (proxyReq, req, res) => {
     // Add origin header to forwarded request if missing
     if (!proxyReq.getHeader('origin') && req.headers.origin) {
       proxyReq.setHeader('origin', req.headers.origin);
     }
-
-    // Set appropriate content length if possible
-    if (req.body) {
-      const bodyData = JSON.stringify(req.body);
-      proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-      // Stream body to request
-      proxyReq.write(bodyData);
-    }
-
     console.log('Eliza proxy request from origin:', req.headers.origin);
   },
-  // Handle connection errors better
+  onProxyRes: (proxyRes, req, res) => {
+    // Force CORS headers for all Eliza responses
+    const origin = req.headers.origin || '*';
+
+    // Always override CORS headers
+    proxyRes.headers['access-control-allow-origin'] = origin;
+    proxyRes.headers['access-control-allow-credentials'] = 'true';
+    proxyRes.headers['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH';
+    proxyRes.headers['access-control-allow-headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin';
+    proxyRes.headers['access-control-max-age'] = '86400';
+
+    console.log(`Eliza proxy responding to origin: ${origin}`);
+  },
   onError: (err, req, res) => {
     console.error('Eliza proxy error:', err);
-    if (!res.headersSent) {
-      res.writeHead(502, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': req.headers.origin || '*',
-        'Access-Control-Allow-Credentials': 'true',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, PATCH',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
-      });
-      res.end(JSON.stringify({
-        error: "Eliza service is currently unavailable",
-        message: err.message,
-        code: "SERVICE_UNAVAILABLE"
-      }));
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("Eliza service is currently unavailable");
     }
   }
 }));
 
-// research web socket for fastagent
+// Only one WebSocket proxy route
 app.use('/ws', createProxyMiddleware({
   target: 'http://localhost:8001',
   changeOrigin: true,
   ws: true,
   pathRewrite: {
-    '^/ws': '/'  // Map to root path for compatibility
+    '^/ws': '/'
   },
-  // Add WebSocket-specific settings
-  websocket: true,
-  // Increase timeouts significantly for ngrok tunneling
-  timeout: 120000, // 2 minutes
-  proxyTimeout: 120000,
-  // Handle WebSocket-specific events
-  onProxyReqWs: (proxyReq, req, socket, options, head) => {
-    // Log WebSocket connection attempts
-    console.log(`WebSocket connection attempt from ${req.headers.origin || 'unknown origin'} to /ws`);
-    
-    // Preserve original headers that help with WebSocket protocol negotiation
-    if (req.headers['sec-websocket-protocol']) {
-      proxyReq.setHeader('Sec-WebSocket-Protocol', req.headers['sec-websocket-protocol']);
-    }
-    
-    // Make sure host header is set properly
-    proxyReq.setHeader('Host', 'localhost:8001');
-    
-    // Add client IP to headers for logging
-    proxyReq.setHeader('X-Forwarded-For', req.connection.remoteAddress);
-    
-    // Extract client_id if provided in query string
-    const url = new URL(`http://localhost${req.url}`);
-    const clientId = url.searchParams.get('client_id');
-    if (clientId) {
-      // Forward client_id in a header
-      proxyReq.setHeader('X-Client-ID', clientId);
-      console.log(`Forwarding client_id: ${clientId}`);
-    }
-  },
-  // Better error logging for WebSocket connections
   onError: (err, req, res) => {
-    console.error('WebSocket proxy error:', err.message || err);
-    
-    // Check if this is a WebSocket upgrade request
-    const isWebSocketRequest = req.headers.upgrade && 
-      req.headers.upgrade.toLowerCase() === 'websocket';
-      
-    if (isWebSocketRequest) {
-      // WebSocket errors can't use normal response methods
-      console.error(`WebSocket connection failed: ${err.message || 'Unknown error'}`);
-      // Try to close socket with error if possible
-      if (req.socket && !req.socket.destroyed) {
-        req.socket.end();
-      }
-      return;
+    console.error('WebSocket proxy error:', err);
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("WebSocket service is currently unavailable");
     }
-    
-    // Handle HTTP requests with proper error response
-    if (res && !res.headersSent) {
-      // Set CORS headers for error responses too
-      const origin = req.headers.origin || '*';
-      res.writeHead(502, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': origin,
-        'Access-Control-Allow-Credentials': 'true'
-      });
-      res.end(JSON.stringify({
-        error: "WebSocket service is currently unavailable",
-        message: err.message || 'Connection error',
-        code: "WEBSOCKET_UNAVAILABLE"
-      }));
-    }
-  },
-  // IMPORTANT: Add this to prevent duplicate headers
-  onProxyRes: function(proxyRes, req, res) {
-    // Remove CORS headers from the Python server before adding our own
-    proxyRes.headers['access-control-allow-origin'] = null;
-    proxyRes.headers['access-control-allow-methods'] = null;
-    proxyRes.headers['access-control-allow-headers'] = null;
-    proxyRes.headers['access-control-allow-credentials'] = null;
   }
 }));
 
-// Add research WebSocket proxy route - use the same enhanced configuration
+// Add research WebSocket proxy route
 app.use('/research-ws', createProxyMiddleware({
   target: 'http://localhost:8001',
   changeOrigin: true,
   ws: true,
   pathRewrite: {
-    '^/research-ws': '/'  // Map to root path for compatibility
+    '^/research-ws': '/'
   },
-  // Add WebSocket-specific settings
-  websocket: true,
-  // Increase timeouts significantly for ngrok tunneling
-  timeout: 120000, // 2 minutes
-  proxyTimeout: 120000,
-  // Handle WebSocket-specific events
-  onProxyReqWs: (proxyReq, req, socket, options, head) => {
-    // Log WebSocket connection attempts
-    console.log(`Research WebSocket connection attempt from ${req.headers.origin || 'unknown origin'} to /research-ws`);
-    
-    // Preserve original headers that help with WebSocket protocol negotiation
-    if (req.headers['sec-websocket-protocol']) {
-      proxyReq.setHeader('Sec-WebSocket-Protocol', req.headers['sec-websocket-protocol']);
-    }
-    
-    // Make sure host header is set properly
-    proxyReq.setHeader('Host', 'localhost:8001');
-    
-    // Add client IP to headers for logging
-    proxyReq.setHeader('X-Forwarded-For', req.connection.remoteAddress);
-    
-    // Extract client_id if provided in query string
-    const url = new URL(`http://localhost${req.url}`);
-    const clientId = url.searchParams.get('client_id');
-    if (clientId) {
-      // Forward client_id in a header
-      proxyReq.setHeader('X-Client-ID', clientId);
-      console.log(`Forwarding client_id: ${clientId}`);
-    }
-  },
-  // Better error logging for WebSocket connections
   onError: (err, req, res) => {
-    console.error('Research WebSocket proxy error:', err.message || err);
-    
-    // Check if this is a WebSocket upgrade request
-    const isWebSocketRequest = req.headers.upgrade && 
-      req.headers.upgrade.toLowerCase() === 'websocket';
-      
-    if (isWebSocketRequest) {
-      // WebSocket errors can't use normal response methods
-      console.error(`Research WebSocket connection failed: ${err.message || 'Unknown error'}`);
-      // Try to close socket with error if possible
-      if (req.socket && !req.socket.destroyed) {
-        req.socket.end();
-      }
-      return;
-    }
-    
-    // Handle HTTP requests with proper error response
-    if (res && !res.headersSent) {
-      // Set CORS headers for error responses too
-      const origin = req.headers.origin || '*';
-      res.writeHead(502, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': origin,
-        'Access-Control-Allow-Credentials': 'true'
-      });
-      res.end(JSON.stringify({
-        error: "Research WebSocket service is currently unavailable",
-        message: err.message || 'Connection error',
-        code: "RESEARCH_WEBSOCKET_UNAVAILABLE"
-      }));
+    console.error('Research WebSocket proxy error:', err);
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("Research WebSocket service is currently unavailable");
     }
   }
-}))
+}));
 
 // Data Analysis endpoint for installing dependencies
 app.use('/install-data-analysis-deps', createProxyMiddleware({
@@ -713,24 +546,6 @@ async function initializeServices() {
 // Start the server
 server.listen(PORT, async () => {
   console.log(`Server Running on port ${PORT}`);
-  
-  // Add upgrade listener to better handle WebSocket connections
-  server.on('upgrade', (req, socket, head) => {
-    const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
-    console.log(`WebSocket upgrade request for path: ${pathname}`);
-    
-    // Log important headers for debugging
-    console.log('WebSocket Headers:', {
-      upgrade: req.headers.upgrade,
-      connection: req.headers.connection,
-      origin: req.headers.origin,
-      'sec-websocket-key': req.headers['sec-websocket-key'] ? '(present)' : '(missing)',
-      'sec-websocket-version': req.headers['sec-websocket-version']
-    });
-    
-    // Continue with normal processing - http-proxy-middleware will handle the rest
-  });
-  
   await initializeServices();
 });
 
