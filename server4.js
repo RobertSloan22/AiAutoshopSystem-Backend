@@ -7,9 +7,9 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import cors from "cors";
+import { Server } from "socket.io";
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
-import http from 'http';
 import swaggerUi from 'swagger-ui-express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { specs } from './swagger.js';
@@ -39,6 +39,7 @@ import diagramGenerateRoutes from './routes/diagram-generate.routes.js';
 import conversationRoutes from './routes/conversation.routes.js';
 import notesRoutes from './routes/notes.routes.js';
 import connectToMongoDB from "./db/connectToMongoDB.js";
+import { app, server } from "./socket/socket.js";
 import searchRoutes from './routes/search.routes.js';
 import serperRoutes from './routes/serper.routes.js';
 import imageRoutes from './routes/image.routes.js';
@@ -60,75 +61,11 @@ import serpRoutes from './routes/serp.routes.js';
 import { VectorService } from './services/VectorService.js';
 import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
-import { Server as SocketIOServer } from "socket.io";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 5000;
-
-// Create Express app and HTTP server
-const app = express();
-const server = http.createServer(app);
-
-// Initialize Socket.IO
-const io = new SocketIOServer(server, {
-  cors: {
-    origin: function(origin, callback) {
-      // Allow requests with no origin
-      if (!origin) return callback(null, true);
-
-      // Check origin against allowed list
-      if (allowedOrigins.includes(origin) ||
-          origin.includes('vercel.app') ||
-          origin.includes('ngrok.app') ||
-          origin.includes('ngrok-free.app') ||
-          origin.startsWith('http://localhost:') ||
-          origin.startsWith('https://localhost:') ||
-          origin.endsWith('noobtoolai.com')) {
-        return callback(null, true);
-      }
-
-      // For development
-      if (process.env.NODE_ENV === 'development') {
-        return callback(null, true);
-      }
-
-      callback(new Error('Not allowed by CORS'), false);
-    },
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
-
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
-
-  // Extract userId from handshake query
-  const userId = socket.handshake.query.userId;
-  if (userId) {
-    console.log(`User ${userId} connected`);
-    // Join a room with their userId to send them targeted messages
-    socket.join(userId);
-  }
-
-  // Handle chat messages
-  socket.on('message', (data) => {
-    console.log(`Message received:`, data);
-    // Broadcast to all or targeted to specific user
-    if (data.to) {
-      io.to(data.to).emit('message', data);
-    } else {
-      socket.broadcast.emit('message', data);
-    }
-  });
-
-  // Handle disconnection
-  socket.on('disconnect', () => {
-    console.log(`Client disconnected: ${socket.id}`);
-  });
-});
 
 // Connect to MongoDB first
 console.log('Connecting to MongoDB...');
@@ -338,102 +275,98 @@ app.use('/eliza', createProxyMiddleware({
     }
   }
 }));
-
-// First, add OPTIONS handler for the /ws route
+// OPTIONS handler for WebSocket endpoint
 app.options('/ws', (req, res) => {
   const origin = req.headers.origin;
-  res.header('Access-Control-Allow-Origin', origin || '*');
+  res.header('Access-Control-Allow-Origin', origin);
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Sec-WebSocket-Key, Sec-WebSocket-Protocol, Sec-WebSocket-Version, Sec-WebSocket-Extensions');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400');
   res.status(200).end();
 });
-
-// Add the corrected WebSocket proxy
+// research web socket for fastagent
+// research web socket for fastagent
 app.use('/ws', createProxyMiddleware({
-  target: 'http://localhost:8001', // Use http:// not ws:// for the target
+  target: 'http://localhost:8001',
   changeOrigin: true,
-  ws: true, // Enable WebSocket proxying
-
-  // Add these WebSocket-specific options
-  followRedirects: false,
-  ignorePath: false,
-
-  // Configure timeouts
-  timeout: 60000,
-  proxyTimeout: 60000,
-
-  // Handle WebSocket upgrade
+  ws: true,
+  pathRewrite: {
+    '^/ws': '/'  // Map to root path for compatibility
+  },
+  // Add WebSocket-specific settings
+  websocket: true,
+  // Increase timeouts significantly for ngrok tunneling
+  timeout: 120000, // 2 minutes
+  proxyTimeout: 120000,
+  // Handle WebSocket-specific events
   onProxyReqWs: (proxyReq, req, socket, options, head) => {
-    console.log('🔄 Research WebSocket Proxy: Upgrade request');
-    console.log('🔄 Origin:', req.headers.origin);
-    console.log('🔄 URL:', req.url);
+    // Log WebSocket connection attempts
+    console.log(`WebSocket connection attempt from ${req.headers.origin || 'unknown origin'} to /ws`);
 
-    // Set proper headers for the Python service
-    proxyReq.setHeader('Host', 'localhost:8001');
-    proxyReq.setHeader('Origin', req.headers.origin || 'http://localhost:5000');
-
-    // Forward WebSocket-specific headers
-    if (req.headers['sec-websocket-key']) {
-      proxyReq.setHeader('Sec-WebSocket-Key', req.headers['sec-websocket-key']);
-    }
-    if (req.headers['sec-websocket-version']) {
-      proxyReq.setHeader('Sec-WebSocket-Version', req.headers['sec-websocket-version']);
-    }
+    // Preserve original headers that help with WebSocket protocol negotiation
     if (req.headers['sec-websocket-protocol']) {
       proxyReq.setHeader('Sec-WebSocket-Protocol', req.headers['sec-websocket-protocol']);
     }
 
-    // Extract client_id from query params
+    // Make sure host header is set properly
+    proxyReq.setHeader('Host', 'localhost:8001');
+
+    // Add client IP to headers for logging
+    proxyReq.setHeader('X-Forwarded-For', req.connection.remoteAddress);
+
+    // Extract client_id if provided in query string
     const url = new URL(`http://localhost${req.url}`);
     const clientId = url.searchParams.get('client_id');
     if (clientId) {
-      console.log('🔄 Forwarding client_id:', clientId);
+      // Forward client_id in a header
+      proxyReq.setHeader('X-Client-ID', clientId);
+      console.log(`Forwarding client_id: ${clientId}`);
     }
   },
-
-  // Handle successful connection
-  onProxyReqWsComplete: () => {
-    console.log('✅ Research WebSocket proxy connection established');
-  },
-
-  // Handle errors
+  // Better error logging for WebSocket connections
   onError: (err, req, res) => {
-    console.error('❌ Research WebSocket Proxy Error:', err.message);
-    console.error('❌ Error details:', err);
+    console.error('WebSocket proxy error:', err.message || err);
 
-    // Check if this is a WebSocket request
-    const isWebSocket = req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket';
+    // Check if this is a WebSocket upgrade request
+    const isWebSocketRequest = req.headers.upgrade &&
+      req.headers.upgrade.toLowerCase() === 'websocket';
 
-    if (isWebSocket) {
-      console.error('❌ WebSocket connection failed');
-      // Can't send HTTP response for WebSocket errors
+    if (isWebSocketRequest) {
+      // WebSocket errors can't use normal response methods
+      console.error(`WebSocket connection failed: ${err.message || 'Unknown error'}`);
+      // Try to close socket with error if possible
+      if (req.socket && !req.socket.destroyed) {
+        req.socket.end();
+      }
       return;
     }
 
-    // Send error response for HTTP requests
+    // Handle HTTP requests with proper error response
     if (res && !res.headersSent) {
-      const origin = req.headers.origin;
+      // Set CORS headers for error responses too
+      const origin = req.headers.origin || '*';
       res.writeHead(502, {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': origin || '*',
+        'Access-Control-Allow-Origin': origin,
         'Access-Control-Allow-Credentials': 'true'
       });
       res.end(JSON.stringify({
-        error: 'Research WebSocket service unavailable',
-        message: err.message,
-        details: 'Make sure Python service is running on port 8001'
+        error: "WebSocket service is currently unavailable",
+        message: err.message || 'Connection error',
+        code: "WEBSOCKET_UNAVAILABLE"
       }));
     }
   },
-
-  // Handle regular HTTP responses
-  onProxyRes: (proxyRes, req, res) => {
+  // IMPORTANT: Fix CORS headers handling
+  onProxyRes: function(proxyRes, req, res) {
+    // For non-WebSocket responses, handle CORS properly
     const origin = req.headers.origin;
     if (origin) {
       proxyRes.headers['access-control-allow-origin'] = origin;
       proxyRes.headers['access-control-allow-credentials'] = 'true';
+      proxyRes.headers['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH';
+      proxyRes.headers['access-control-allow-headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin';
     }
   }
 }));
@@ -620,23 +553,6 @@ app.use('/api/license-plate', licensePlateRoutes);
 app.use('/api/plate-to-vin', plateToVinRoutes);
 app.use('/api/serp', serpRoutes);
 app.use('/api/memory-vector', memoryVectorRoutes);
-
-// Socket.IO status check endpoint
-app.get('/socket-status', (req, res) => {
-  const status = {
-    socketIO: {
-      running: true,
-      connections: io.engine.clientsCount,
-      rooms: Array.from(io.sockets.adapter.rooms.keys()).filter(room => !room.startsWith('/'))
-    },
-    server: {
-      uptime: process.uptime(),
-      hostname: req.hostname
-    }
-  };
-
-  res.json(status);
-});
 
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {

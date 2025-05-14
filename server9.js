@@ -77,23 +77,23 @@ const io = new SocketIOServer(server, {
     origin: function(origin, callback) {
       // Allow requests with no origin
       if (!origin) return callback(null, true);
-
+      
       // Check origin against allowed list
-      if (allowedOrigins.includes(origin) ||
-          origin.includes('vercel.app') ||
-          origin.includes('ngrok.app') ||
+      if (allowedOrigins.includes(origin) || 
+          origin.includes('vercel.app') || 
+          origin.includes('ngrok.app') || 
           origin.includes('ngrok-free.app') ||
-          origin.startsWith('http://localhost:') ||
+          origin.startsWith('http://localhost:') || 
           origin.startsWith('https://localhost:') ||
           origin.endsWith('noobtoolai.com')) {
         return callback(null, true);
       }
-
+      
       // For development
       if (process.env.NODE_ENV === 'development') {
         return callback(null, true);
       }
-
+      
       callback(new Error('Not allowed by CORS'), false);
     },
     methods: ["GET", "POST"],
@@ -104,7 +104,7 @@ const io = new SocketIOServer(server, {
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
-
+  
   // Extract userId from handshake query
   const userId = socket.handshake.query.userId;
   if (userId) {
@@ -112,7 +112,7 @@ io.on('connection', (socket) => {
     // Join a room with their userId to send them targeted messages
     socket.join(userId);
   }
-
+  
   // Handle chat messages
   socket.on('message', (data) => {
     console.log(`Message received:`, data);
@@ -123,7 +123,7 @@ io.on('connection', (socket) => {
       socket.broadcast.emit('message', data);
     }
   });
-
+  
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);
@@ -355,25 +355,25 @@ app.use('/ws', createProxyMiddleware({
   target: 'http://localhost:8001', // Use http:// not ws:// for the target
   changeOrigin: true,
   ws: true, // Enable WebSocket proxying
-
+  
   // Add these WebSocket-specific options
   followRedirects: false,
   ignorePath: false,
-
+  
   // Configure timeouts
   timeout: 60000,
   proxyTimeout: 60000,
-
+  
   // Handle WebSocket upgrade
   onProxyReqWs: (proxyReq, req, socket, options, head) => {
     console.log('🔄 Research WebSocket Proxy: Upgrade request');
     console.log('🔄 Origin:', req.headers.origin);
     console.log('🔄 URL:', req.url);
-
+    
     // Set proper headers for the Python service
     proxyReq.setHeader('Host', 'localhost:8001');
     proxyReq.setHeader('Origin', req.headers.origin || 'http://localhost:5000');
-
+    
     // Forward WebSocket-specific headers
     if (req.headers['sec-websocket-key']) {
       proxyReq.setHeader('Sec-WebSocket-Key', req.headers['sec-websocket-key']);
@@ -384,7 +384,7 @@ app.use('/ws', createProxyMiddleware({
     if (req.headers['sec-websocket-protocol']) {
       proxyReq.setHeader('Sec-WebSocket-Protocol', req.headers['sec-websocket-protocol']);
     }
-
+    
     // Extract client_id from query params
     const url = new URL(`http://localhost${req.url}`);
     const clientId = url.searchParams.get('client_id');
@@ -392,26 +392,26 @@ app.use('/ws', createProxyMiddleware({
       console.log('🔄 Forwarding client_id:', clientId);
     }
   },
-
+  
   // Handle successful connection
   onProxyReqWsComplete: () => {
     console.log('✅ Research WebSocket proxy connection established');
   },
-
+  
   // Handle errors
   onError: (err, req, res) => {
     console.error('❌ Research WebSocket Proxy Error:', err.message);
     console.error('❌ Error details:', err);
-
+    
     // Check if this is a WebSocket request
     const isWebSocket = req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket';
-
+    
     if (isWebSocket) {
       console.error('❌ WebSocket connection failed');
       // Can't send HTTP response for WebSocket errors
       return;
     }
-
+    
     // Send error response for HTTP requests
     if (res && !res.headersSent) {
       const origin = req.headers.origin;
@@ -427,7 +427,7 @@ app.use('/ws', createProxyMiddleware({
       }));
     }
   },
-
+  
   // Handle regular HTTP responses
   onProxyRes: (proxyRes, req, res) => {
     const origin = req.headers.origin;
@@ -634,7 +634,7 @@ app.get('/socket-status', (req, res) => {
       hostname: req.hostname
     }
   };
-
+  
   res.json(status);
 });
 
