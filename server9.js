@@ -293,6 +293,7 @@ app.use('/eliza', createProxyMiddleware({
     // If there's an origin header, ensure proper CORS headers are set
     if (origin) {
       // For preflight OPTIONS requests and regular requests
+      proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin, x-agent-id';
       proxyRes.headers['Access-Control-Allow-Origin'] = origin;
       proxyRes.headers['Access-Control-Allow-Credentials'] = 'true';
       proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH';

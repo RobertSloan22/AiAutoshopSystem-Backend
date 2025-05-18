@@ -61,6 +61,7 @@ import { VectorService } from './services/VectorService.js';
 import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import { Server as SocketIOServer } from "socket.io";
+import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -810,6 +811,30 @@ async function initializeServices() {
 // Start the server
 server.listen(PORT, async () => {
   console.log(`Server Running on port ${PORT}`);
+
+  // Start the Python robust_server.py in the agentdeploy venv
+  const pythonProcess = spawn(
+    path.join(__dirname, 'fastagent-server/examples/researcher/agentdeploy/Scripts/python'),
+    [path.join(__dirname, 'fastagent-server/examples/researcher/robust_server.py')],
+    {
+      cwd: path.join(__dirname, 'fastagent-server/examples/researcher'),
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  );
+
+  pythonProcess.stdout.on('data', (data) => {
+    console.log(`[robust_server.py stdout]: ${data}`);
+  });
+  pythonProcess.stderr.on('data', (data) => {
+    console.error(`[robust_server.py stderr]: ${data}`);
+  });
+  pythonProcess.on('close', (code) => {
+    console.log(`[robust_server.py] exited with code ${code}`);
+  });
+
+  // Optionally, unref so it doesn't block server exit
+  pythonProcess.unref();
 
   // Add upgrade listener to better handle WebSocket connections
   server.on('upgrade', (req, socket, head) => {

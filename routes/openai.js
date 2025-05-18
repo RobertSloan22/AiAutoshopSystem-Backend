@@ -1274,4 +1274,351 @@ router.get('/image-analysis/by-image', async (req, res) => {
  *         description: Rate limit exceeded
  */
 
+/**
+ * Image Generation and Editing Routes
+ */
+
+/**
+ * POST /api/openai/images/generate
+ * 
+ * Generates an image based on a prompt using DALL-E 3/2
+ * 
+ * Expects a JSON body containing:
+ *  - prompt: Description of the desired image
+ *  - model: (optional) "dall-e-3" or "dall-e-2", defaults to "dall-e-3"
+ *  - size: (optional) Image size like "1024x1024", "1792x1024", "1024x1792"
+ *  - quality: (optional) "standard" or "hd", defaults to "standard"
+ *  - n: (optional) Number of images to generate, defaults to 1
+ *  - conversationId: (optional) ID for tracking the conversation chain
+ * 
+ * Returns:
+ *  - { images: array, conversationId: string } on success
+ *  - { error: string } on failure
+ */
+router.post('/images/generate', async (req, res) => {
+  try {
+    const { 
+      prompt, 
+      model = 'dall-e-3', 
+      size = '1024x1024', 
+      quality = 'standard', 
+      n = 1, 
+      conversationId 
+    } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    console.log(`Generating image with prompt: "${prompt.substring(0, 50)}..."`);
+
+    // Generate image using OpenAI's API
+    const response = await openai.images.generate({
+      model,
+      prompt,
+      n,
+      size,
+      quality,
+      response_format: 'b64_json'
+    });
+
+    if (!response || !response.data || response.data.length === 0) {
+      throw new Error('No image generated from OpenAI');
+    }
+
+    // Process the response
+    const images = response.data.map(image => ({
+      url: image.url || `data:image/png;base64,${image.b64_json}`,
+      revisedPrompt: image.revised_prompt,
+      b64_json: image.b64_json
+    }));
+
+    // Store generated images with the given conversation ID if provided
+    // For a full implementation, consider adding a database model for storing these
+    const newConversationId = conversationId || `img-gen-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
+    return res.status(200).json({
+      images,
+      conversationId: newConversationId,
+      status: 'success'
+    });
+
+  } catch (error) {
+    console.error('Error generating image:', error);
+    
+    // Handle specific errors
+    if (error.response?.status === 429) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded. Please try again later.',
+        details: error.message
+      });
+    }
+
+    return res.status(500).json({ 
+      error: 'Failed to generate image',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/openai/images/edit
+ * 
+ * Edits an existing image based on a prompt using DALL-E 2
+ * 
+ * Expects a multipart form data with:
+ *  - image: Base64 data URI or uploaded image file
+ *  - prompt: Description of the desired edits
+ *  - mask: (optional) Base64 data URI or uploaded mask image file
+ *  - model: (optional) "dall-e-2" is the only supported model for edits
+ *  - size: (optional) Image size, defaults to "1024x1024"
+ *  - n: (optional) Number of images to generate, defaults to 1
+ *  - conversationId: (optional) ID for tracking the conversation chain
+ * 
+ * Returns:
+ *  - { images: array, conversationId: string } on success
+ *  - { error: string } on failure
+ */
+router.post('/images/edit', upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'mask', maxCount: 1 }
+]), async (req, res) => {
+  try {
+    const { prompt, model = 'dall-e-2', size = '1024x1024', n = 1, conversationId } = req.body;
+    let imageData, maskData;
+
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    // Handle image from form upload or base64 data URI
+    if (req.files && req.files.image && req.files.image[0]) {
+      // Get image from uploaded file
+      const imagePath = req.files.image[0].path;
+      imageData = await fs.promises.readFile(imagePath);
+    } else if (req.body.imageBase64) {
+      // Get image from base64 data
+      const base64Data = req.body.imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      imageData = Buffer.from(base64Data, 'base64');
+    } else {
+      return res.status(400).json({ error: 'An image file or base64 image data is required' });
+    }
+
+    // Handle optional mask from form upload or base64 data URI
+    if (req.files && req.files.mask && req.files.mask[0]) {
+      // Get mask from uploaded file
+      const maskPath = req.files.mask[0].path;
+      maskData = await fs.promises.readFile(maskPath);
+    } else if (req.body.maskBase64) {
+      // Get mask from base64 data
+      const base64Mask = req.body.maskBase64.replace(/^data:image\/\w+;base64,/, '');
+      maskData = Buffer.from(base64Mask, 'base64');
+    }
+
+    // Ensure images meet OpenAI requirements
+    // Resize and convert images as needed using sharp
+    imageData = await sharp(imageData)
+      .resize(1024, 1024, { fit: 'inside' }) // DALL-E 2 requires square images
+      .toFormat('png')
+      .toBuffer();
+
+    if (maskData) {
+      maskData = await sharp(maskData)
+        .resize(1024, 1024, { fit: 'inside' })
+        .toFormat('png')
+        .toBuffer();
+    }
+
+    console.log(`Editing image with prompt: "${prompt.substring(0, 50)}..."`);
+
+    // Edit image using OpenAI's API
+    const requestOptions = {
+      model,
+      image: imageData,
+      prompt,
+      n,
+      size,
+      response_format: 'b64_json'
+    };
+
+    // Add mask if provided
+    if (maskData) {
+      requestOptions.mask = maskData;
+    }
+
+    const response = await openai.images.edit(requestOptions);
+
+    if (!response || !response.data || response.data.length === 0) {
+      throw new Error('No image generated from OpenAI');
+    }
+
+    // Process the response
+    const images = response.data.map(image => ({
+      url: image.url || `data:image/png;base64,${image.b64_json}`,
+      b64_json: image.b64_json
+    }));
+
+    // Store edited images with the given conversation ID if provided
+    const newConversationId = conversationId || `img-edit-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
+    return res.status(200).json({
+      images,
+      conversationId: newConversationId,
+      status: 'success'
+    });
+
+  } catch (error) {
+    console.error('Error editing image:', error);
+    
+    // Handle specific errors
+    if (error.response?.status === 429) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded. Please try again later.',
+        details: error.message
+      });
+    }
+
+    if (error.response?.status === 400) {
+      return res.status(400).json({
+        error: 'Invalid request to AI service',
+        details: error.message
+      });
+    }
+
+    return res.status(500).json({ 
+      error: 'Failed to edit image',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/openai/images/variations
+ * 
+ * Creates variations of a given image using DALL-E 2
+ * 
+ * Expects a multipart form data with:
+ *  - image: Base64 data URI or uploaded image file 
+ *  - model: (optional) "dall-e-2" is the only supported model for variations
+ *  - n: (optional) Number of variations to generate, defaults to 1
+ *  - size: (optional) Image size, defaults to "1024x1024"
+ *  - conversationId: (optional) ID for tracking the conversation chain
+ * 
+ * Returns:
+ *  - { images: array, conversationId: string } on success
+ *  - { error: string } on failure  
+ */
+router.post('/images/variations', upload.single('image'), async (req, res) => {
+  try {
+    const { model = 'dall-e-2', n = 1, size = '1024x1024', conversationId } = req.body;
+    let imageData;
+
+    // Handle image from form upload or base64 data URI
+    if (req.file) {
+      // Get image from uploaded file
+      const imagePath = req.file.path;
+      imageData = await fs.promises.readFile(imagePath);
+    } else if (req.body.imageBase64) {
+      // Get image from base64 data
+      const base64Data = req.body.imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      imageData = Buffer.from(base64Data, 'base64');
+    } else {
+      return res.status(400).json({ error: 'An image file or base64 image data is required' });
+    }
+
+    // Ensure image meets OpenAI requirements (square, PNG)
+    imageData = await sharp(imageData)
+      .resize(1024, 1024, { fit: 'fill' }) // Make it square for DALL-E 2
+      .toFormat('png')
+      .toBuffer();
+
+    console.log('Generating image variations');
+
+    // Create variations using OpenAI's API
+    const response = await openai.images.createVariation({
+      model,
+      image: imageData,
+      n,
+      size,
+      response_format: 'b64_json'
+    });
+
+    if (!response || !response.data || response.data.length === 0) {
+      throw new Error('No variations generated from OpenAI');
+    }
+
+    // Process the response
+    const images = response.data.map(image => ({
+      url: image.url || `data:image/png;base64,${image.b64_json}`,
+      b64_json: image.b64_json
+    }));
+
+    // Store variations with the given conversation ID if provided
+    const newConversationId = conversationId || `img-var-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
+    return res.status(200).json({
+      images,
+      conversationId: newConversationId,
+      status: 'success'
+    });
+
+  } catch (error) {
+    console.error('Error creating image variations:', error);
+    
+    // Handle specific errors
+    if (error.response?.status === 429) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded. Please try again later.',
+        details: error.message
+      });
+    }
+
+    return res.status(500).json({ 
+      error: 'Failed to create image variations',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * GET /api/openai/images/conversation/:conversationId
+ * 
+ * Retrieves the conversation history for a given conversation ID
+ * 
+ * Path Parameters:
+ *  - conversationId: The ID of the conversation to retrieve
+ * 
+ * Returns:
+ *  - { conversation: object } on success
+ *  - { error: string } on failure
+ */
+router.get('/images/conversation/:conversationId', async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Conversation ID is required' });
+    }
+    
+    // Note: This is a placeholder. In a real implementation, you would
+    // retrieve the conversation history from your database
+    
+    // Placeholder response for now
+    return res.status(200).json({
+      conversation: {
+        id: conversationId,
+        images: [],
+        message: "Conversation history retrieval not yet implemented"
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error retrieving conversation:', error);
+    return res.status(500).json({ 
+      error: 'Failed to retrieve conversation',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
 export default router;
