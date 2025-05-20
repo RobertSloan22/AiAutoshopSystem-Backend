@@ -1,5 +1,5 @@
 import express from 'express';
-import { getElizaAgent } from '../eliza/elizaServer.js'; // Adjust path if needed
+import { getElizaAgent } from '../../../AutoAI-Elizaos/src/elizaServer.js'; // Adjust path if needed
 
 const router = express.Router();
 
