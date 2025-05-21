@@ -60,8 +60,6 @@ import serpRoutes from './routes/serp.routes.js';
 import { VectorService } from './services/VectorService.js';
 import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
-import { Server as SocketIOServer } from "socket.io";
-import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,65 +69,6 @@ const PORT = process.env.PORT || 5000;
 // Create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
-
-// Initialize Socket.IO
-const io = new SocketIOServer(server, {
-  cors: {
-    origin: function(origin, callback) {
-      // Allow requests with no origin
-      if (!origin) return callback(null, true);
-
-      // Check origin against allowed list
-      if (allowedOrigins.includes(origin) ||
-          origin.includes('vercel.app') ||
-          origin.includes('ngrok.app') ||
-          origin.includes('ngrok-free.app') ||
-          origin.startsWith('http://localhost:') ||
-          origin.startsWith('https://localhost:') ||
-          origin.endsWith('noobtoolai.com')) {
-        return callback(null, true);
-      }
-
-      // For development
-      if (process.env.NODE_ENV === 'development') {
-        return callback(null, true);
-      }
-
-      callback(new Error('Not allowed by CORS'), false);
-    },
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
-
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
-
-  // Extract userId from handshake query
-  const userId = socket.handshake.query.userId;
-  if (userId) {
-    console.log(`User ${userId} connected`);
-    // Join a room with their userId to send them targeted messages
-    socket.join(userId);
-  }
-
-  // Handle chat messages
-  socket.on('message', (data) => {
-    console.log(`Message received:`, data);
-    // Broadcast to all or targeted to specific user
-    if (data.to) {
-      io.to(data.to).emit('message', data);
-    } else {
-      socket.broadcast.emit('message', data);
-    }
-  });
-
-  // Handle disconnection
-  socket.on('disconnect', () => {
-    console.log(`Client disconnected: ${socket.id}`);
-  });
-});
 
 // Connect to MongoDB first
 console.log('Connecting to MongoDB...');
@@ -180,6 +119,8 @@ const allowedOrigins = [
   // ngrok domains - support all variations
   'https://b8a5-66-42-19-48.ngrok-free.app',
   'https://eliza.ngrok.app',
+  'https://dist-robertsloan22-robmit2023s-projects.vercel.app',
+  'https://dist-qag1jwj8y-robmit2023s-projects.vercel.app',
   'wss://eliza.ngrok.app',
   'http://eliza.ngrok.app',
   'https://eliza.ngrok-free.app',
@@ -339,8 +280,9 @@ app.use('/eliza', createProxyMiddleware({
     }
   }
 }));
+// CORRECTED WebSocket proxy - removes duplicate headers
 
-// First, add OPTIONS handler for the /ws route
+// OPTIONS handler for WebSocket endpoint
 app.options('/ws', (req, res) => {
   const origin = req.headers.origin;
   res.header('Access-Control-Allow-Origin', origin || '*');
@@ -351,69 +293,78 @@ app.options('/ws', (req, res) => {
   res.status(200).end();
 });
 
-// Add the corrected WebSocket proxy
+// FIXED WebSocket proxy - prevents header duplication
 app.use('/ws', createProxyMiddleware({
-  target: 'http://localhost:8001', // Use http:// not ws:// for the target
+  target: 'http://localhost:8001',
   changeOrigin: true,
-  ws: true, // Enable WebSocket proxying
-
-  // Add these WebSocket-specific options
+  ws: true,
   followRedirects: false,
   ignorePath: false,
-
-  // Configure timeouts
   timeout: 60000,
   proxyTimeout: 60000,
-
-  // Handle WebSocket upgrade
+  
+  // Handle WebSocket upgrade - FIXED to prevent header duplication
   onProxyReqWs: (proxyReq, req, socket, options, head) => {
-    console.log('🔄 Research WebSocket Proxy: Upgrade request');
-    console.log('🔄 Origin:', req.headers.origin);
-    console.log('🔄 URL:', req.url);
-
-    // Set proper headers for the Python service
+    console.log('��� Research WebSocket Proxy: Upgrade request');
+    console.log('��� Origin:', req.headers.origin);
+    console.log('��� URL:', req.url);
+    
+    // IMPORTANT: Remove any existing headers that might cause conflicts
+    // Let the proxy handle WebSocket headers automatically
+    
+    // Only set essential headers, don't duplicate WebSocket headers
     proxyReq.setHeader('Host', 'localhost:8001');
-    proxyReq.setHeader('Origin', req.headers.origin || 'http://localhost:5000');
-
-    // Forward WebSocket-specific headers
-    if (req.headers['sec-websocket-key']) {
-      proxyReq.setHeader('Sec-WebSocket-Key', req.headers['sec-websocket-key']);
+    
+    // Forward the origin without modification
+    if (req.headers.origin) {
+      proxyReq.setHeader('Origin', req.headers.origin);
     }
-    if (req.headers['sec-websocket-version']) {
-      proxyReq.setHeader('Sec-WebSocket-Version', req.headers['sec-websocket-version']);
-    }
-    if (req.headers['sec-websocket-protocol']) {
-      proxyReq.setHeader('Sec-WebSocket-Protocol', req.headers['sec-websocket-protocol']);
-    }
-
-    // Extract client_id from query params
+    
+    // Forward client information
+    proxyReq.setHeader('X-Forwarded-For', req.connection.remoteAddress || req.socket.remoteAddress);
+    proxyReq.setHeader('X-Real-IP', req.connection.remoteAddress || req.socket.remoteAddress);
+    
+    // Extract client_id from query params ONLY
     const url = new URL(`http://localhost${req.url}`);
     const clientId = url.searchParams.get('client_id');
     if (clientId) {
-      console.log('🔄 Forwarding client_id:', clientId);
+      proxyReq.setHeader('X-Client-ID', clientId);
+      console.log('��� Forwarding client_id:', clientId);
     }
+    
+    // DO NOT manually set WebSocket headers - let http-proxy-middleware handle them
+    // DO NOT set: Sec-WebSocket-Key, Sec-WebSocket-Version, etc.
+    
+    console.log('��� Headers being sent to Python service:', {
+      host: proxyReq.getHeader('Host'),
+      origin: proxyReq.getHeader('Origin'),
+      'x-forwarded-for': proxyReq.getHeader('X-Forwarded-For'),
+      'x-client-id': proxyReq.getHeader('X-Client-ID')
+    });
   },
-
+  
   // Handle successful connection
   onProxyReqWsComplete: () => {
-    console.log('✅ Research WebSocket proxy connection established');
+    console.log('✅ Research WebSocket proxy connection established successfully');
   },
-
-  // Handle errors
+  
+  // Handle errors with better logging
   onError: (err, req, res) => {
     console.error('❌ Research WebSocket Proxy Error:', err.message);
-    console.error('❌ Error details:', err);
-
-    // Check if this is a WebSocket request
+    console.error('❌ Error code:', err.code);
+    console.error('❌ Request headers:', req.headers);
+    
     const isWebSocket = req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket';
-
+    
     if (isWebSocket) {
-      console.error('❌ WebSocket connection failed');
-      // Can't send HTTP response for WebSocket errors
+      console.error('❌ WebSocket connection failed - likely header conflict');
+      if (req.socket && !req.socket.destroyed) {
+        req.socket.destroy();
+      }
       return;
     }
-
-    // Send error response for HTTP requests
+    
+    // Only handle HTTP errors
     if (res && !res.headersSent) {
       const origin = req.headers.origin;
       res.writeHead(502, {
@@ -424,21 +375,31 @@ app.use('/ws', createProxyMiddleware({
       res.end(JSON.stringify({
         error: 'Research WebSocket service unavailable',
         message: err.message,
-        details: 'Make sure Python service is running on port 8001'
+        details: 'Check for header conflicts or service availability',
+        target: 'http://localhost:8001'
       }));
     }
   },
-
-  // Handle regular HTTP responses
+  
+  // CRITICAL: Remove duplicate CORS headers from Python service response
   onProxyRes: (proxyRes, req, res) => {
+    // Remove any CORS headers that might be set by the Python service
+    // to prevent conflicts with our proxy's CORS headers
+    delete proxyRes.headers['access-control-allow-origin'];
+    delete proxyRes.headers['access-control-allow-credentials'];
+    delete proxyRes.headers['access-control-allow-methods'];
+    delete proxyRes.headers['access-control-allow-headers'];
+    
+    // Set our own CORS headers
     const origin = req.headers.origin;
     if (origin) {
       proxyRes.headers['access-control-allow-origin'] = origin;
       proxyRes.headers['access-control-allow-credentials'] = 'true';
     }
+    
+    console.log('��� Proxy response headers cleaned and set');
   }
 }));
-
 // Add research WebSocket proxy route - use the same enhanced configuration
 app.use('/research-ws', createProxyMiddleware({
   target: 'http://localhost:8001',
@@ -622,23 +583,6 @@ app.use('/api/plate-to-vin', plateToVinRoutes);
 app.use('/api/serp', serpRoutes);
 app.use('/api/memory-vector', memoryVectorRoutes);
 
-// Socket.IO status check endpoint
-app.get('/socket-status', (req, res) => {
-  const status = {
-    socketIO: {
-      running: true,
-      connections: io.engine.clientsCount,
-      rooms: Array.from(io.sockets.adapter.rooms.keys()).filter(room => !room.startsWith('/'))
-    },
-    server: {
-      uptime: process.uptime(),
-      hostname: req.hostname
-    }
-  };
-
-  res.json(status);
-});
-
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
   customSiteTitle: "Automotive AI Platform API Documentation",
@@ -705,7 +649,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <div class="container">
-        <div class="logo">🚗</div>
+        <div class="logo">���</div>
         <h1>Automotive AI Platform</h1>
         <p>Welcome to the Automotive AI Platform API the tool for noobs. This is the backend service for our automotive intelligence system.</p>
 
@@ -811,30 +755,6 @@ async function initializeServices() {
 // Start the server
 server.listen(PORT, async () => {
   console.log(`Server Running on port ${PORT}`);
-
-  // Start the Python robust_server.py in the agentdeploy venv
-  const pythonProcess = spawn(
-    path.join(__dirname, 'fastagent-server/examples/researcher/agentdeploy/Scripts/python'),
-    [path.join(__dirname, 'fastagent-server/examples/researcher/robust_server.py')],
-    {
-      cwd: path.join(__dirname, 'fastagent-server/examples/researcher'),
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe']
-    }
-  );
-
-  pythonProcess.stdout.on('data', (data) => {
-    console.log(`[robust_server.py stdout]: ${data}`);
-  });
-  pythonProcess.stderr.on('data', (data) => {
-    console.error(`[robust_server.py stderr]: ${data}`);
-  });
-  pythonProcess.on('close', (code) => {
-    console.log(`[robust_server.py] exited with code ${code}`);
-  });
-
-  // Optionally, unref so it doesn't block server exit
-  pythonProcess.unref();
 
   // Add upgrade listener to better handle WebSocket connections
   server.on('upgrade', (req, socket, head) => {
