@@ -305,9 +305,9 @@ app.use('/ws', createProxyMiddleware({
   
   // Handle WebSocket upgrade - FIXED to prevent header duplication
   onProxyReqWs: (proxyReq, req, socket, options, head) => {
-    console.log('ï¿½ï¿½ï¿½ Research WebSocket Proxy: Upgrade request');
-    console.log('ï¿½ï¿½ï¿½ Origin:', req.headers.origin);
-    console.log('ï¿½ï¿½ï¿½ URL:', req.url);
+    console.log('í´„ Research WebSocket Proxy: Upgrade request');
+    console.log('í´„ Origin:', req.headers.origin);
+    console.log('í´„ URL:', req.url);
     
     // IMPORTANT: Remove any existing headers that might cause conflicts
     // Let the proxy handle WebSocket headers automatically
@@ -329,13 +329,13 @@ app.use('/ws', createProxyMiddleware({
     const clientId = url.searchParams.get('client_id');
     if (clientId) {
       proxyReq.setHeader('X-Client-ID', clientId);
-      console.log('ï¿½ï¿½ï¿½ Forwarding client_id:', clientId);
+      console.log('í´„ Forwarding client_id:', clientId);
     }
     
     // DO NOT manually set WebSocket headers - let http-proxy-middleware handle them
     // DO NOT set: Sec-WebSocket-Key, Sec-WebSocket-Version, etc.
     
-    console.log('ï¿½ï¿½ï¿½ Headers being sent to Python service:', {
+    console.log('í³‹ Headers being sent to Python service:', {
       host: proxyReq.getHeader('Host'),
       origin: proxyReq.getHeader('Origin'),
       'x-forwarded-for': proxyReq.getHeader('X-Forwarded-For'),
@@ -397,7 +397,7 @@ app.use('/ws', createProxyMiddleware({
       proxyRes.headers['access-control-allow-credentials'] = 'true';
     }
     
-    console.log('ï¿½ï¿½ï¿½ Proxy response headers cleaned and set');
+    console.log('í³¬ Proxy response headers cleaned and set');
   }
 }));
 // Add research WebSocket proxy route - use the same enhanced configuration
@@ -649,7 +649,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <div class="container">
-        <div class="logo">ï¿½ï¿½ï¿½</div>
+        <div class="logo">íº—</div>
         <h1>Automotive AI Platform</h1>
         <p>Welcome to the Automotive AI Platform API the tool for noobs. This is the backend service for our automotive intelligence system.</p>
 

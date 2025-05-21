@@ -41,6 +41,7 @@
     "dotenv": "^16.4.7",
     "electron-fetch": "^1.9.1",
     "electron-squirrel-startup": "^1.0.1",
+    "elizaos": "0.25.6-alpha.1",
     "express": "^4.21.2",
     "express-async-handler": "^1.2.0",
     "helmet": "^8.0.0",
