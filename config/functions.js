@@ -5,9 +5,6 @@
 export const get_weather = async ({
     location,
     unit,
-  }: {
-    location: string;
-    unit: string;
   }) => {
     console.log("location", location);
     console.log("unit", unit);
