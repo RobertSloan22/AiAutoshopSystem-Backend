@@ -60,6 +60,8 @@ import serpRoutes from './routes/serp.routes.js';
 import { VectorService } from './services/VectorService.js';
 import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
+import responsesRoutes from './routes/responses.js';
+import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -541,10 +543,11 @@ app.use('/visualization', createProxyMiddleware({
 
 // API Routes
 app.use("/api/auth", authRoutes);
-app.use("/api/research", researchRoutes);
-app.use("/api/research", researchServiceRoutes);
-app.use("/api/research/o3", researchO3ServiceRoutes);
-app.use("/api/multiagent-research", multiagentResearchRoutes);
+// Research routes disabled to reduce vector service startup overhead
+// app.use("/api/research", researchRoutes);
+// app.use("/api/research", researchServiceRoutes);
+// app.use("/api/research/o3", researchO3ServiceRoutes);
+// app.use("/api/multiagent-research", multiagentResearchRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
@@ -556,7 +559,8 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/lmStudio', lmStudioRoutes);
 app.use(dtcRoutes);
 app.use("/api/vehicles", vehicleRoutes);
-app.use('/api/forum-crawler', forumCrawlerRoutes);
+// Forum crawler disabled to reduce vector service startup overhead
+// app.use('/api/forum-crawler', forumCrawlerRoutes);
 app.use("/api/services", serviceRoutes);
 app.use("/api/parts", partsRoutes);
 app.use("/api/technicians", technicianRoutes);
@@ -572,7 +576,8 @@ app.use('/api/researchl', localResearchRoutes);
 app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
 app.use('/api', supabaseRoutes);
-app.use('/api/vector-store', vectorStoreRoutes);
+// Vector store routes disabled to reduce startup overhead
+// app.use('/api/vector-store', vectorStoreRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);
@@ -581,7 +586,12 @@ app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 app.use('/api/license-plate', licensePlateRoutes);
 app.use('/api/plate-to-vin', plateToVinRoutes);
 app.use('/api/serp', serpRoutes);
-app.use('/api/memory-vector', memoryVectorRoutes);
+// Memory vector routes disabled to reduce startup overhead
+// app.use('/api/memory-vector', memoryVectorRoutes);
+app.use('/api/responses', responsesRoutes);
+
+// Register Eliza proxy router for direct communication with Eliza system
+app.use('/api/eliza-direct', elizaProxyRoutes);
 
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
@@ -710,42 +720,48 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Initialize VectorService
+// Initialize VectorService (DISABLED to reduce startup overhead)
 async function initializeServices() {
   try {
-    console.log('Initializing Vector Services...');
+    console.log('Vector Services initialization DISABLED to reduce startup overhead');
+    console.log('Vector services can be enabled by setting ENABLE_VECTOR_SERVICES=true');
+    
+    // Only initialize vector services if explicitly enabled
+    if (process.env.ENABLE_VECTOR_SERVICES === 'true') {
+      console.log('Initializing Vector Services...');
 
-    // Initialize persistent vector storage
-    await VectorService.initialize({
-      useLocal: process.env.USE_LOCAL_STORAGE !== 'false',
-      useOpenAI: process.env.USE_OPENAI_STORAGE === 'true',
-      useDualStorage: process.env.USE_DUAL_STORAGE === 'true',
-      chromaUrl: process.env.CHROMA_URL,
-      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
-      openaiApiKey: process.env.OPENAI_API_KEY
-    });
-    console.log('Persistent Vector Service initialized successfully');
+      // Initialize persistent vector storage
+      await VectorService.initialize({
+        useLocal: process.env.USE_LOCAL_STORAGE !== 'false',
+        useOpenAI: process.env.USE_OPENAI_STORAGE === 'true',
+        useDualStorage: process.env.USE_DUAL_STORAGE === 'true',
+        chromaUrl: process.env.CHROMA_URL,
+        localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+        openaiApiKey: process.env.OPENAI_API_KEY
+      });
+      console.log('Persistent Vector Service initialized successfully');
 
-    // Initialize memory vector storage
-    // Create default instance
-    await MemoryVectorService.initialize('default', {
-      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
-      useOpenAI: false // Default to local embeddings for memory store
-    });
+      // Initialize memory vector storage
+      // Create default instance
+      await MemoryVectorService.initialize('default', {
+        localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+        useOpenAI: false // Default to local embeddings for memory store
+      });
 
-    // Create a session-specific instance for temporary user interactions
-    await MemoryVectorService.initialize('user_sessions', {
-      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
-      useOpenAI: false
-    });
+      // Create a session-specific instance for temporary user interactions
+      await MemoryVectorService.initialize('user_sessions', {
+        localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+        useOpenAI: false
+      });
 
-    // Create a forum-crawler instance for temporary forum crawling
-    await MemoryVectorService.initialize('forum_crawler', {
-      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
-      useOpenAI: false
-    });
+      // Create a forum-crawler instance for temporary forum crawling
+      await MemoryVectorService.initialize('forum_crawler', {
+        localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+        useOpenAI: false
+      });
 
-    console.log('Memory Vector Service initialized successfully');
+      console.log('Memory Vector Service initialized successfully');
+    }
   } catch (error) {
     console.error('Error initializing Vector Services:', error);
     // Don't exit - the server should still start, but vector services might be limited
