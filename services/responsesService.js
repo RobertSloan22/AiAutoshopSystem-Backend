@@ -4,7 +4,6 @@ import MCPService from './mcpService.js';
 class ResponsesAPIService {
   constructor() {
     this.openai = new OpenAI({
-      apiKey: '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'
     });
     this.mcpService = new MCPService(process.env.MCP_SERVER_URL || 'http://localhost:3700');
     this.activeSessions = new Map();
