@@ -48,7 +48,6 @@ import localRoutes from './routes/local.routes.js';
 import localResearchRoutes from './routes/localResearch.routes.js';
 import localresearchServiceRoutes from './routes/localresearch.service.js';
 import embeddingsRoutes from './routes/embeddings.routes.js';
-import supabaseRoutes from './routes/supabase.routes.js';
 import vectorStoreRoutes from './routes/vectorStore.routes.js';
 import openaiRoutes from './routes/openai.js';
 import turnResponseRoutes from './routes/turnResponse.routes.js';
@@ -575,7 +574,6 @@ app.use('/api', proxyRoutes);
 app.use('/api/researchl', localResearchRoutes);
 app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
-app.use('/api', supabaseRoutes);
 // Vector store routes disabled to reduce startup overhead
 // app.use('/api/vector-store', vectorStoreRoutes);
 app.use('/api/openai', openaiRoutes);
