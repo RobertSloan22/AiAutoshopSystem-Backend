@@ -1,9 +1,18 @@
 import OpenAI from 'openai';
 import MCPService from './mcpService.js';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 class ResponsesAPIService {
   constructor() {
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('WARNING: OPENAI_API_KEY environment variable is not set');
+    }
+    
     this.openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
     });
     this.mcpService = new MCPService(process.env.MCP_SERVER_URL || 'http://localhost:3700');
     this.activeSessions = new Map();
