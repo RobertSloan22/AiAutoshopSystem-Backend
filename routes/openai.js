@@ -236,13 +236,15 @@ router.post('/dashboard-image', async (req, res) => {
  *  - imageUrl: URL of the image to analyze or base64 data URI
  *  - prompt: Specific question or instruction about the image
  *  - userId: (optional) ID of the user making the request
+ *  - stream: (optional) Boolean flag to request streaming response (default: false)
  * 
  * Returns:
- *  - { explanation: string, responseId: string, conversationId: string, status: string } on success
+ *  - For non-streaming: { explanation: string, responseId: string, conversationId: string, status: string } on success
+ *  - For streaming: Server-Sent Events stream with content chunks
  *  - { error: string, details?: string } on failure
  */
 router.post('/explain-image', async (req, res) => {
-  const { imageUrl, prompt, userId } = req.body;
+  const { imageUrl, prompt, userId, stream: shouldStream = false } = req.body;
 
   // Validate required fields
   if (!imageUrl || !prompt) {
@@ -254,25 +256,29 @@ router.post('/explain-image', async (req, res) => {
 
   try {
     console.log('Processing image explanation request...');
+    console.log(`Stream mode: ${shouldStream ? 'enabled' : 'disabled'}`);
     
-    // First, check if we already have this analysis in the database
-    const existingAnalysis = await ImageAnalysis.findOne({ 
-      imageUrl, 
-      prompt 
-    }).sort({ createdAt: -1 }).exec();
-
-    // If we have a recent analysis (less than 24 hours old), return it
-    if (existingAnalysis && 
-        (new Date() - new Date(existingAnalysis.createdAt)) < 24 * 60 * 60 * 1000) {
-      console.log(`Using cached analysis for image with ID: ${existingAnalysis._id}`);
-      
-      return res.status(200).json({
-        explanation: existingAnalysis.explanation,
-        responseId: existingAnalysis.responseId,
-        conversationId: existingAnalysis.conversationId,
-        status: 'success',
-        fromCache: true
-      });
+    // For streaming requests, don't check cache
+    if (!shouldStream) {
+      // First, check if we already have this analysis in the database
+      const existingAnalysis = await ImageAnalysis.findOne({ 
+        imageUrl, 
+        prompt 
+      }).sort({ createdAt: -1 }).exec();
+  
+      // If we have a recent analysis (less than 24 hours old), return it
+      if (existingAnalysis && 
+          (new Date() - new Date(existingAnalysis.createdAt)) < 24 * 60 * 60 * 1000) {
+        console.log(`Using cached analysis for image with ID: ${existingAnalysis._id}`);
+        
+        return res.status(200).json({
+          explanation: existingAnalysis.explanation,
+          responseId: existingAnalysis.responseId,
+          conversationId: existingAnalysis.conversationId,
+          status: 'success',
+          fromCache: true
+        });
+      }
     }
     
     // Create a system message for automotive technical advisor
@@ -306,11 +312,15 @@ router.post('/explain-image', async (req, res) => {
         content: [
           { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${cleanedPrompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
           { type: "input_image", image_url: imageUrl }
-        ],
-        
+        ]
       }],
       max_output_tokens: 1000
     };
+    
+    // Add streaming option if requested
+    if (shouldStream) {
+      requestPayload.stream = true;
+    }
     
     // Only add conversation_id if one was explicitly provided
     if (req.body.conversationId) {
@@ -320,7 +330,153 @@ router.post('/explain-image', async (req, res) => {
       console.log('No conversation ID provided, a new one will be generated');
     }
 
-    // Create a response using the Responses API
+    // Handle streaming response
+    if (shouldStream) {
+      // Set headers for Server-Sent Events
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+      
+      // Create streaming response
+      const stream = await openai.responses.create(requestPayload);
+      
+      // Generate a conversation ID for this analysis
+      const conversationId = stream.conversation_id || `img-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Send session ID first
+      res.write(`data: ${JSON.stringify({ 
+        type: 'session_started', 
+        sessionId: conversationId,
+        messageType: 'image_analysis'
+      })}\n\n`);
+      
+      // Setup content buffering
+      let contentBuffer = '';
+      let lastFlushTime = Date.now();
+      let flushTimeout = null;
+      let accumulationStartTime = Date.now();
+      let fullText = ''; // Keep track of the full response for saving to DB
+      
+      const flushContentBuffer = () => {
+        if (contentBuffer.length > 0) {
+          // Remove any leading/trailing whitespace for better display
+          const trimmedContent = contentBuffer.trim();
+          
+          if (trimmedContent.length > 0) {
+            res.write(`data: ${JSON.stringify({
+              type: 'content',
+              content: trimmedContent,
+              sessionId: conversationId
+            })}\n\n`);
+            
+            // Add the content to the full text
+            fullText += contentBuffer;
+            
+            // Deliberately add a small delay to let the client process
+            setTimeout(() => {}, 10);
+          }
+          
+          contentBuffer = '';
+          lastFlushTime = Date.now();
+          accumulationStartTime = Date.now();
+        }
+        
+        if (flushTimeout) {
+          clearTimeout(flushTimeout);
+          flushTimeout = null;
+        }
+      };
+      
+      try {
+        // Process the stream
+        for await (const chunk of stream) {
+          if (chunk.choices && chunk.choices.length > 0) {
+            const content = chunk.choices[0].text || '';
+            
+            if (content) {
+              // Buffer the content
+              contentBuffer += content;
+              
+              const now = Date.now();
+              const totalAccumulationTime = now - accumulationStartTime;
+              
+              // More sophisticated sentence boundary detection
+              const sentenceCompletionRegex = /[.!?]\s+[A-Z]|[.!?]$|\n\n/;
+              const hasCompleteSentence = sentenceCompletionRegex.test(contentBuffer);
+              
+              // Use larger thresholds for image analysis
+              const hasLargeContent = contentBuffer.length > 150; // Even larger chunks for image analysis
+              const hasBeenCollectingTooLong = totalAccumulationTime > 1200; // 1.2 second max collection
+              
+              if (hasCompleteSentence || hasLargeContent || hasBeenCollectingTooLong) {
+                flushContentBuffer();
+              } else {
+                if (!flushTimeout) {
+                  flushTimeout = setTimeout(flushContentBuffer, 600); // Longer timeout for image analysis
+                }
+              }
+            }
+            
+            // Handle completion
+            if (chunk.choices[0].finish_reason === 'stop') {
+              flushContentBuffer(); // Flush any remaining content
+              
+              // Save the analysis to the database
+              try {
+                const newAnalysis = new ImageAnalysis({
+                  imageUrl,
+                  prompt,
+                  explanation: fullText,
+                  responseId: stream.id || `id-${Date.now()}`,
+                  conversationId: conversationId,
+                  userId: userId || null,
+                  metadata: {
+                    model: requestPayload.model,
+                    timestamp: new Date().toISOString(),
+                    streamMode: true
+                  }
+                });
+                
+                await newAnalysis.save();
+                console.log(`Saved streamed image analysis to database with ID: ${newAnalysis._id}`);
+              } catch (dbError) {
+                console.error('Error saving to database:', dbError);
+              }
+              
+              // Send completion event
+              res.write(`data: ${JSON.stringify({
+                type: 'stream_complete',
+                sessionId: conversationId
+              })}\n\n`);
+              
+              // End the response
+              res.end();
+              break;
+            }
+          }
+        }
+      } catch (streamError) {
+        console.error('Stream processing error:', streamError);
+        
+        // Send error event
+        res.write(`data: ${JSON.stringify({
+          type: 'error',
+          error: streamError.message,
+          sessionId: conversationId
+        })}\n\n`);
+        
+        // End the response
+        res.end();
+      }
+      
+      return; // End function execution here for streaming
+    }
+    
+    // Regular non-streaming request handling
     const response = await openai.responses.create(requestPayload);
     
     console.log(`Response received with conversation ID: ${response.conversation_id}`);
@@ -1632,14 +1788,17 @@ router.get('/images/conversation/:conversationId', async (req, res) => {
  *  - conversationId: The conversation ID from the original analysis (required)
  *  - question: Specific question about the annotated areas (optional, has default)
  *  - context: (optional) Additional context like vehicle information
+ *  - stream: (optional) Boolean flag to request streaming response (default: false)
  * 
  * Returns:
- *  - { answer: string, responseId: string, conversationId: string, status: string } on success
+ *  - For non-streaming: { answer: string, responseId: string, conversationId: string, status: string } on success
+ *  - For streaming: Server-Sent Events stream with content chunks
  *  - { error: string, details?: string } on failure
  */
 router.post('/explain-image/annotated', upload.single('image'), async (req, res) => {
   try {
     const { conversationId, question, context } = req.body;
+    const shouldStream = req.body.stream === 'true' || req.body.stream === true;
 
     // Validate required fields
     if (!req.file) {
@@ -1660,6 +1819,7 @@ router.post('/explain-image/annotated', upload.single('image'), async (req, res)
     console.log(`Processing annotated image analysis for conversation: ${conversationId}`);
     console.log(`Uploaded file: ${req.file.filename} (${req.file.size} bytes)`);
     console.log(`Question: "${question || 'Default annotation analysis'}"`);
+    console.log(`Stream mode: ${shouldStream ? 'enabled' : 'disabled'}`);
 
     // Process the uploaded annotated image
     const imagePath = req.file.path;
@@ -1746,12 +1906,176 @@ This is a follow-up analysis to a previous conversation (ID: ${conversationId}),
       }],
       max_output_tokens: 1500
     };
+    
+    // Add streaming if requested
+    if (shouldStream) {
+      requestPayload.stream = true;
+    }
 
     console.log('Sending annotated image analysis request to OpenAI...');
     console.log(`System message length: ${systemMessage.length} characters`);
     console.log(`User message length: ${userMessage.length} characters`);
 
-    // Create a response using the Responses API
+    // Handle streaming response
+    if (shouldStream) {
+      // Set headers for Server-Sent Events
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+      
+      // Create streaming response
+      const stream = await openai.responses.create(requestPayload);
+      
+      // Generate a conversation ID for this annotated analysis
+      const responseConversationId = stream.conversation_id || `annotated-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Send session ID first
+      res.write(`data: ${JSON.stringify({ 
+        type: 'session_started', 
+        sessionId: responseConversationId,
+        originalConversationId: conversationId,
+        messageType: 'annotated_image_analysis'
+      })}\n\n`);
+      
+      // Setup content buffering
+      let contentBuffer = '';
+      let lastFlushTime = Date.now();
+      let flushTimeout = null;
+      let accumulationStartTime = Date.now();
+      let fullText = ''; // Keep track of the full response for saving to DB
+      
+      // Cleanup file after establishing the stream
+      try {
+        await fs.promises.unlink(imagePath);
+        console.log(`Cleaned up uploaded file: ${req.file.filename}`);
+      } catch (cleanupError) {
+        console.warn('Failed to clean up uploaded file:', cleanupError.message);
+      }
+      
+      const flushContentBuffer = () => {
+        if (contentBuffer.length > 0) {
+          // Remove any leading/trailing whitespace for better display
+          const trimmedContent = contentBuffer.trim();
+          
+          if (trimmedContent.length > 0) {
+            res.write(`data: ${JSON.stringify({
+              type: 'content',
+              content: trimmedContent,
+              sessionId: responseConversationId
+            })}\n\n`);
+            
+            // Add the content to the full text
+            fullText += contentBuffer;
+            
+            // Deliberately add a small delay to let the client process
+            setTimeout(() => {}, 10);
+          }
+          
+          contentBuffer = '';
+          lastFlushTime = Date.now();
+          accumulationStartTime = Date.now();
+        }
+        
+        if (flushTimeout) {
+          clearTimeout(flushTimeout);
+          flushTimeout = null;
+        }
+      };
+      
+      try {
+        // Process the stream
+        for await (const chunk of stream) {
+          if (chunk.choices && chunk.choices.length > 0) {
+            const content = chunk.choices[0].text || '';
+            
+            if (content) {
+              // Buffer the content
+              contentBuffer += content;
+              
+              const now = Date.now();
+              const totalAccumulationTime = now - accumulationStartTime;
+              
+              // More sophisticated sentence boundary detection
+              const sentenceCompletionRegex = /[.!?]\s+[A-Z]|[.!?]$|\n\n/;
+              const hasCompleteSentence = sentenceCompletionRegex.test(contentBuffer);
+              
+              // Use larger thresholds for image analysis
+              const hasLargeContent = contentBuffer.length > 150; // Even larger chunks for image analysis
+              const hasBeenCollectingTooLong = totalAccumulationTime > 1200; // 1.2 second max collection
+              
+              if (hasCompleteSentence || hasLargeContent || hasBeenCollectingTooLong) {
+                flushContentBuffer();
+              } else {
+                if (!flushTimeout) {
+                  flushTimeout = setTimeout(flushContentBuffer, 600); // Longer timeout for image analysis
+                }
+              }
+            }
+            
+            // Handle completion
+            if (chunk.choices[0].finish_reason === 'stop') {
+              flushContentBuffer(); // Flush any remaining content
+              
+              // Save the analysis to the database
+              try {
+                const annotatedAnalysis = new ImageAnalysis({
+                  imageUrl: dataUri, // Store the annotated image
+                  prompt: `ANNOTATED: ${analysisQuestion}`,
+                  explanation: fullText,
+                  responseId: stream.id || `id-${Date.now()}`,
+                  conversationId: responseConversationId,
+                  userId: req.body.userId || null,
+                  metadata: {
+                    model: requestPayload.model,
+                    timestamp: new Date().toISOString(),
+                    type: 'annotated_analysis',
+                    originalConversationId: conversationId,
+                    annotationContext: context || null,
+                    streamMode: true
+                  }
+                });
+                
+                await annotatedAnalysis.save();
+                console.log(`Saved streamed annotated analysis to database with ID: ${annotatedAnalysis._id}`);
+              } catch (dbError) {
+                console.error('Error saving to database:', dbError);
+              }
+              
+              // Send completion event
+              res.write(`data: ${JSON.stringify({
+                type: 'stream_complete',
+                sessionId: responseConversationId,
+                originalConversationId: conversationId
+              })}\n\n`);
+              
+              // End the response
+              res.end();
+              break;
+            }
+          }
+        }
+      } catch (streamError) {
+        console.error('Stream processing error:', streamError);
+        
+        // Send error event
+        res.write(`data: ${JSON.stringify({
+          type: 'error',
+          error: streamError.message,
+          sessionId: responseConversationId
+        })}\n\n`);
+        
+        // End the response
+        res.end();
+      }
+      
+      return; // End function execution here for streaming
+    }
+
+    // Non-streaming response
     const response = await openai.responses.create(requestPayload);
 
     // Generate a conversation ID for this annotated analysis

@@ -9,7 +9,7 @@ setInterval(() => {
   responsesService.cleanupOldSessions();
 }, 10 * 60 * 1000);
 
-// Create streaming chat session
+// Fixed streaming chat session endpoint with improved content buffering
 router.post('/chat/stream', async (req, res) => {
   try {
     const { message, vehicleContext, customerContext } = req.body;
@@ -37,21 +37,72 @@ router.post('/chat/stream', async (req, res) => {
     res.write(`data: ${JSON.stringify({ type: 'session_started', sessionId })}\n\n`);
 
     let toolCalls = [];
-    let currentToolCall = null;
+    
+    // IMPROVED BUFFERING STRATEGY
+    let contentBuffer = '';
+    let bufferTimeout = null;
+    const BUFFER_TIME = 100; // Much shorter buffer time (100ms)
+    const MIN_CHUNK_SIZE = 20; // Minimum characters before sending
+    const MAX_BUFFER_TIME = 500; // Maximum time to hold content
+    
+    const flushContentBuffer = () => {
+      if (contentBuffer.length > 0) {
+        const trimmedContent = contentBuffer.trim();
+        
+        if (trimmedContent.length > 0) {
+          res.write(`data: ${JSON.stringify({
+            type: 'content',
+            content: trimmedContent,
+            sessionId
+          })}\n\n`);
+        }
+        
+        contentBuffer = '';
+      }
+      
+      if (bufferTimeout) {
+        clearTimeout(bufferTimeout);
+        bufferTimeout = null;
+      }
+    };
+
+    // Schedule a flush with timeout
+    const scheduleFlush = (forceTime = BUFFER_TIME) => {
+      if (bufferTimeout) {
+        clearTimeout(bufferTimeout);
+      }
+      bufferTimeout = setTimeout(flushContentBuffer, forceTime);
+    };
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta;
       
       if (delta?.content) {
-        // Regular content
-        res.write(`data: ${JSON.stringify({
-          type: 'content',
-          content: delta.content,
-          sessionId
-        })}\n\n`);
+        contentBuffer += delta.content;
+        
+        // IMPROVED LOGIC: Send content more intelligently
+        const hasGoodBreakpoint = /[.!?]\s+|[.!?]$|\n/.test(contentBuffer);
+        const isLongEnough = contentBuffer.length >= MIN_CHUNK_SIZE;
+        const hasWordBoundary = /\s+\w+$/.test(contentBuffer); // Ends with complete word
+        
+        // Send immediately if we have a natural break and enough content
+        if (hasGoodBreakpoint && isLongEnough) {
+          flushContentBuffer();
+        }
+        // Send if we have a decent amount of content at word boundary
+        else if (contentBuffer.length >= 40 && hasWordBoundary) {
+          flushContentBuffer();
+        }
+        // Otherwise schedule a quick flush
+        else {
+          scheduleFlush(BUFFER_TIME);
+        }
       }
 
       if (delta?.tool_calls) {
+        // Flush any remaining content before tool calls
+        flushContentBuffer();
+        
         // Tool calls
         for (const toolCallDelta of delta.tool_calls) {
           if (toolCallDelta.index !== undefined) {
@@ -81,6 +132,9 @@ router.post('/chat/stream', async (req, res) => {
       }
 
       if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+        // Flush any remaining content before processing tool calls
+        flushContentBuffer();
+        
         // Process tool calls
         res.write(`data: ${JSON.stringify({
           type: 'tool_calls_started',
@@ -100,19 +154,34 @@ router.post('/chat/stream', async (req, res) => {
           // Continue stream with tool results
           const continuedStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
           
-          // Process continued stream
+          // Reset buffer for continued stream
+          contentBuffer = '';
+          
+          // Process continued stream with same improved buffering logic
           for await (const continueChunk of continuedStream) {
             const continueDelta = continueChunk.choices[0]?.delta;
             
             if (continueDelta?.content) {
-              res.write(`data: ${JSON.stringify({
-                type: 'content',
-                content: continueDelta.content,
-                sessionId
-              })}\n\n`);
+              contentBuffer += continueDelta.content;
+              
+              // Same improved buffering logic for continued content
+              const hasGoodBreakpoint = /[.!?]\s+|[.!?]$|\n/.test(contentBuffer);
+              const isLongEnough = contentBuffer.length >= MIN_CHUNK_SIZE;
+              const hasWordBoundary = /\s+\w+$/.test(contentBuffer);
+              
+              if (hasGoodBreakpoint && isLongEnough) {
+                flushContentBuffer();
+              } else if (contentBuffer.length >= 40 && hasWordBoundary) {
+                flushContentBuffer();
+              } else {
+                scheduleFlush(BUFFER_TIME);
+              }
             }
 
             if (continueChunk.choices[0]?.finish_reason === 'stop') {
+              // Flush any remaining content before completing
+              flushContentBuffer();
+              
               res.write(`data: ${JSON.stringify({
                 type: 'stream_complete',
                 sessionId
@@ -121,6 +190,9 @@ router.post('/chat/stream', async (req, res) => {
             }
           }
         } catch (toolError) {
+          // Flush any remaining content before error
+          flushContentBuffer();
+          
           res.write(`data: ${JSON.stringify({
             type: 'error',
             error: 'Tool execution failed: ' + toolError.message,
@@ -131,6 +203,9 @@ router.post('/chat/stream', async (req, res) => {
       }
 
       if (chunk.choices[0]?.finish_reason === 'stop') {
+        // Flush any remaining content before completing
+        flushContentBuffer();
+        
         res.write(`data: ${JSON.stringify({
           type: 'stream_complete',
           sessionId
@@ -139,6 +214,8 @@ router.post('/chat/stream', async (req, res) => {
       }
     }
 
+    // Final flush and cleanup
+    flushContentBuffer();
     res.end();
     responsesService.closeSession(sessionId);
 
