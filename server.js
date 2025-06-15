@@ -22,6 +22,7 @@ import researchRoutes from './routes/research.routes.js';
 import researchServiceRoutes from './routes/research.service.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
 import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
+import integratedResearchRoutes from './routes/integrated-research.routes.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import agentproxyRoutes from "./routes/agentproxy.routes.js"
@@ -65,7 +66,7 @@ import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5000; // Using 5002 to avoid conflicts
 
 // Create Express app and HTTP server
 const app = express();
@@ -542,11 +543,13 @@ app.use('/visualization', createProxyMiddleware({
 
 // API Routes
 app.use("/api/auth", authRoutes);
-// Research routes disabled to reduce vector service startup overhead
-// app.use("/api/research", researchRoutes);
-// app.use("/api/research", researchServiceRoutes);
-// app.use("/api/research/o3", researchO3ServiceRoutes);
-// app.use("/api/multiagent-research", multiagentResearchRoutes);
+// Enable research routes
+app.use("/api/research", researchRoutes);
+app.use("/api/research", researchServiceRoutes);
+app.use("/api/research/o3", researchO3ServiceRoutes);
+app.use("/api/multiagent-research", multiagentResearchRoutes);
+// Integrated research bot - direct endpoint
+app.use("/api/integrated-research", integratedResearchRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
@@ -766,6 +769,9 @@ async function initializeServices() {
   }
 }
 
+// Import the agent service starter
+import { startAgentService } from './services/agentService.js';
+
 // Start the server
 server.listen(PORT, async () => {
   console.log(`Server Running on port ${PORT}`);
@@ -788,6 +794,9 @@ server.listen(PORT, async () => {
   });
 
   await initializeServices();
+  
+  // Start the agent service
+  startAgentService();
 });
 
 // Handle graceful shutdown
