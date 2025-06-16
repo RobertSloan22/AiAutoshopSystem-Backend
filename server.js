@@ -493,7 +493,7 @@ app.use('/install-data-analysis-deps', createProxyMiddleware({
 }));
 
 // Research and Data Analysis REST API endpoints
-app.use('/research', createProxyMiddleware({
+app.use('/fastagent/research', createProxyMiddleware({
   target: 'http://localhost:8001',
   changeOrigin: true,
   onError: (err, req, res) => {
@@ -544,9 +544,9 @@ app.use('/visualization', createProxyMiddleware({
 // API Routes
 app.use("/api/auth", authRoutes);
 // Enable research routes
-app.use("/api/research", researchRoutes);
+app.use("/api/research1", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
-app.use("/api/research/o3", researchO3ServiceRoutes);
+app.use("/api/research03/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
 // Integrated research bot - direct endpoint
 app.use("/api/integrated-research", integratedResearchRoutes);
