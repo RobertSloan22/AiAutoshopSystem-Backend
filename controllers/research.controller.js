@@ -2,6 +2,7 @@
 // The research functionality is provided by the agent service running on port 3001
 
 import axios from 'axios';
+import ResearchResult from '../models/researchResult.model.js';
 
 // Agent service URL
 const AGENT_SERVICE_URL = 'http://localhost:3001';
@@ -27,8 +28,41 @@ export const performResearch = async (req, res) => {
       query
     });
 
-    // Return the response from the agent service
-    res.json(response.data);
+    // Save the research result to the database
+    try {
+      const researchData = response.data;
+      
+      // Create a new research result entry
+      const newResearchResult = new ResearchResult({
+        query,
+        result: researchData,
+        sources: researchData.sources || [],
+        metadata: {
+          timestamp: new Date().toISOString(),
+          source: 'agent_service'
+        },
+        userId: req.user?.id || null,
+        tags: ['agent-research'],
+        status: 'completed'
+      });
+      
+      // Save to database
+      await newResearchResult.save();
+      console.log(`[ResearchController] Saved research result with ID: ${newResearchResult._id}`);
+      
+      // Add the saved research ID to the response
+      const responseWithId = {
+        ...response.data,
+        savedResearchId: newResearchResult._id
+      };
+      
+      // Return the response from the agent service with saved ID
+      res.json(responseWithId);
+    } catch (saveError) {
+      console.error('[ResearchController] Error saving research result:', saveError);
+      // Still return the original response even if saving fails
+      res.json(response.data);
+    }
   } catch (error) {
     console.error('[ResearchController] Research error:', error);
     res.status(500).json({
@@ -62,6 +96,10 @@ export const performStreamingResearch = async (req, res) => {
 
     console.log(`[ResearchController] Starting streaming research for query: ${query}`);
 
+    // Store the complete result for saving when stream ends
+    let completeResult = '';
+    let finalResult = null;
+
     // Forward the request to the agent service
     // For streaming, we need to make a direct request and pipe the response
     try {
@@ -74,10 +112,64 @@ export const performStreamingResearch = async (req, res) => {
 
       // Pipe the agent service response directly to our response
       response.data.on('data', chunk => {
+        const chunkStr = chunk.toString();
+        completeResult += chunkStr;
         res.write(chunk);
+        
+        // Try to parse the last complete event as JSON to capture the final result
+        try {
+          // Look for data: JSON pattern in the chunk
+          const matches = chunkStr.match(/data: ({.*})/g);
+          if (matches && matches.length > 0) {
+            // Get the last match
+            const lastMatch = matches[matches.length - 1];
+            // Extract the JSON part
+            const jsonStr = lastMatch.replace('data: ', '');
+            // Parse JSON
+            const jsonData = JSON.parse(jsonStr);
+            // Update the final result if this is a complete result
+            if (jsonData && jsonData.result) {
+              finalResult = jsonData;
+            }
+          }
+        } catch (parseError) {
+          // Ignore parse errors - they're expected for partial chunks
+        }
       });
 
-      response.data.on('end', () => {
+      response.data.on('end', async () => {
+        // Save the complete research result to the database if we have a final result
+        if (finalResult) {
+          try {
+            // Create a new research result entry
+            const newResearchResult = new ResearchResult({
+              query,
+              result: finalResult,
+              sources: finalResult.sources || [],
+              metadata: {
+                timestamp: new Date().toISOString(),
+                source: 'agent_service_stream',
+                isStreamResult: true
+              },
+              userId: req.user?.id || null,
+              tags: ['agent-research', 'streaming'],
+              status: 'completed'
+            });
+            
+            // Save to database
+            await newResearchResult.save();
+            console.log(`[ResearchController] Saved streaming research result with ID: ${newResearchResult._id}`);
+            
+            // Send a final event with the saved ID
+            res.write(`event: saved\n`);
+            res.write(`data: ${JSON.stringify({
+              savedResearchId: newResearchResult._id
+            })}\n\n`);
+          } catch (saveError) {
+            console.error('[ResearchController] Error saving streaming research result:', saveError);
+          }
+        }
+        
         res.end();
       });
 

@@ -23,6 +23,7 @@ import researchServiceRoutes from './routes/research.service.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
 import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
 import integratedResearchRoutes from './routes/integrated-research.routes.js';
+import researchResultRoutes from './routes/researchResult.routes.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import agentproxyRoutes from "./routes/agentproxy.routes.js"
@@ -550,6 +551,8 @@ app.use("/api/research/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
 // Integrated research bot - direct endpoint
 app.use("/api/integrated-research", integratedResearchRoutes);
+// Research results endpoints
+app.use("/api/research-results", researchResultRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
@@ -771,6 +774,8 @@ async function initializeServices() {
 
 // Import the agent service starter
 import { startAgentService } from './services/agentService.js';
+// Import the RealtimeRelay
+import { RealtimeRelay } from './services/RealtimeRelay.js';
 
 // Start the server
 server.listen(PORT, async () => {
@@ -797,6 +802,19 @@ server.listen(PORT, async () => {
   
   // Start the agent service
   startAgentService();
+  
+  // Initialize the OpenAI Realtime API relay
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const realtimeRelay = new RealtimeRelay(process.env.OPENAI_API_KEY, server);
+      realtimeRelay.initialize();
+      console.log('OpenAI Realtime API relay initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize OpenAI Realtime API relay:', error);
+    }
+  } else {
+    console.warn('OPENAI_API_KEY not provided, Realtime API relay not initialized');
+  }
 });
 
 // Handle graceful shutdown
