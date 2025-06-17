@@ -551,6 +551,10 @@ app.use("/api/research/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
 // Integrated research bot - direct endpoint
 app.use("/api/integrated-research", integratedResearchRoutes);
+
+// Research progress tracking
+import researchProgressRoutes from './routes/researchProgress.routes.js';
+app.use("/api/research-progress", researchProgressRoutes);
 // Research results endpoints
 app.use("/api/research-results", researchResultRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);

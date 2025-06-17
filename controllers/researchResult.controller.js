@@ -32,13 +32,17 @@ export const saveResearchResult = async (req, res) => {
     // Save to database
     await newResearchResult.save();
 
+    // Format the result for the response
+    const formattedResult = formatResearchResult(newResearchResult);
+
     res.status(201).json({
       success: true,
       message: 'Research result saved successfully',
       data: {
         id: newResearchResult._id,
         query: newResearchResult.query,
-        createdAt: newResearchResult.createdAt
+        createdAt: newResearchResult.createdAt,
+        formattedResult // Include the formatted result for immediate use
       }
     });
   } catch (error) {
@@ -71,9 +75,12 @@ export const getResearchResultById = async (req, res) => {
       });
     }
 
+    // Format the research result for frontend display
+    const formattedResult = formatResearchResult(researchResult);
+
     res.status(200).json({
       success: true,
-      data: researchResult
+      data: formattedResult
     });
   } catch (error) {
     console.error('[ResearchResultController] GetById error:', error);
@@ -86,13 +93,107 @@ export const getResearchResultById = async (req, res) => {
 };
 
 /**
+ * Helper function to format research results for better frontend display
+ * @param {Object} rawResult - The raw research result from the database
+ * @returns {Object} Formatted research result
+ */
+function formatResearchResult(rawResult) {
+  try {
+    // Convert to plain object if it's a Mongoose document
+    const result = rawResult.toObject ? rawResult.toObject() : { ...rawResult };
+    
+    // Create a more structured format for frontend rendering
+    const formatted = {
+      id: result._id,
+      query: result.query,
+      createdAt: result.createdAt,
+      updatedAt: result.updatedAt,
+      status: result.status,
+      metadata: result.metadata || {},
+      sources: result.sources || [],
+      sections: []
+    };
+
+    // Check if result contains structured data we can format
+    if (result.result) {
+      // Add short summary if available
+      if (result.result.report && result.result.report.shortSummary) {
+        formatted.summary = result.result.report.shortSummary;
+      }
+
+      // Add search plan if available
+      if (result.result.searchPlan && result.result.searchPlan.searches) {
+        formatted.searchPlan = {
+          title: "Research Approach",
+          searches: result.result.searchPlan.searches.map(search => ({
+            query: search.query,
+            reason: search.reason
+          }))
+        };
+      }
+
+      // Add search results if available
+      if (result.result.searchResults && result.result.searchResults.length > 0) {
+        formatted.searchResults = {
+          title: "Research Sources",
+          results: result.result.searchResults.map((result, index) => ({
+            id: index + 1,
+            content: result
+          }))
+        };
+      }
+
+      // Process markdown report if available
+      if (result.result.report && result.result.report.markdownReport) {
+        // Parse markdown to extract sections
+        const markdown = result.result.report.markdownReport;
+        
+        // Extract main sections (h1 and h2 headings)
+        const sectionRegex = /^(#{1,2})\s+(.+)$([^#]*)/gm;
+        let match;
+        let sections = [];
+        
+        while ((match = sectionRegex.exec(markdown)) !== null) {
+          const level = match[1].length;
+          const title = match[2].trim();
+          const content = match[3].trim();
+          
+          sections.push({
+            level,
+            title,
+            content,
+            id: title.toLowerCase().replace(/[^\w]+/g, '-')
+          });
+        }
+        
+        formatted.reportSections = sections;
+        
+        // Include full markdown for clients that want to render it directly
+        formatted.fullMarkdown = markdown;
+      }
+
+      // Add follow-up questions if available
+      if (result.result.report && result.result.report.followUpQuestions) {
+        formatted.followUpQuestions = result.result.report.followUpQuestions;
+      }
+    }
+
+    return formatted;
+  } catch (error) {
+    console.error('[formatResearchResult] Error formatting research result:', error);
+    // Return the original result if formatting fails
+    return rawResult;
+  }
+}
+
+/**
  * Get all research results with pagination and filtering
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
 export const getResearchResults = async (req, res) => {
   try {
-    const { page = 1, limit = 10, userId, tags, search, startDate, endDate, status } = req.query;
+    const { page = 1, limit = 10, userId, tags, search, startDate, endDate, status, format = 'full' } = req.query;
     
     // Build query based on filters
     const query = {};
@@ -143,9 +244,44 @@ export const getResearchResults = async (req, res) => {
     // Get total count for pagination
     const total = await ResearchResult.countDocuments(query);
     
+    // Format results based on the request
+    let formattedResults;
+    
+    if (format === 'summary') {
+      // Provide just summary information for list views
+      formattedResults = results.map(result => ({
+        id: result._id,
+        query: result.query,
+        createdAt: result.createdAt,
+        updatedAt: result.updatedAt,
+        status: result.status,
+        summary: result.result?.report?.shortSummary || '',
+        tags: result.tags || []
+      }));
+    } else if (format === 'compact') {
+      // Provide a compact version with essential information
+      formattedResults = results.map(result => {
+        const formatted = {
+          id: result._id,
+          query: result.query,
+          createdAt: result.createdAt,
+          status: result.status,
+          summary: result.result?.report?.shortSummary || '',
+          hasReport: !!result.result?.report?.markdownReport,
+          hasSearchResults: !!(result.result?.searchResults?.length > 0),
+          followUpQuestionsCount: result.result?.report?.followUpQuestions?.length || 0
+        };
+        
+        return formatted;
+      });
+    } else {
+      // Full formatting for each result
+      formattedResults = results.map(result => formatResearchResult(result));
+    }
+    
     res.status(200).json({
       success: true,
-      data: results,
+      data: formattedResults,
       pagination: {
         total,
         page: pageNum,
