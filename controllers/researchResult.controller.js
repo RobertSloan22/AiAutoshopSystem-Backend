@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import ResearchResult from '../models/researchResult.model.js';
 
 /**
@@ -7,7 +8,30 @@ import ResearchResult from '../models/researchResult.model.js';
  */
 export const saveResearchResult = async (req, res) => {
   try {
-    const { query, result, sources, metadata, userId, tags } = req.body;
+    const { 
+      query, 
+      result, 
+      sources, 
+      metadata, 
+      userId, 
+      tags,
+      // Additional fields for cross-referencing
+      researchId,
+      uuid,
+      originalId,
+      sessionId,
+      traceId,
+      // Vehicle context
+      vehicle,
+      dtcCode
+    } = req.body;
+
+    console.log('[ResearchResultController] Saving research result:', { 
+      query, 
+      researchId, 
+      uuid,
+      traceId
+    });
 
     // Validate required fields
     if (!query || !result) {
@@ -26,8 +50,48 @@ export const saveResearchResult = async (req, res) => {
       metadata: metadata || {},
       userId: userId || null,
       tags: tags || [],
-      status: 'completed'
+      status: 'completed',
+      // Add ID fields if provided
+      ...(researchId && { researchId }),
+      ...(uuid && { uuid }),
+      ...(originalId && { originalId }),
+      ...(sessionId && { sessionId }),
+      ...(traceId && { traceId }),
+      // Add vehicle info if provided
+      ...(vehicle && { vehicle }),
+      ...(dtcCode && { dtcCode })
     });
+
+    // Handle traceId from result object if not directly provided
+    if (!traceId && result.traceId) {
+      newResearchResult.traceId = result.traceId;
+    }
+
+    // Extract potential UUID from result if not directly provided
+    if (!uuid && !researchId) {
+      // Check various places where UUID might be stored
+      const possibleUuids = [
+        result.uuid,
+        result.researchId,
+        result.id,
+        result.sessionId,
+        result.traceId,
+        metadata?.uuid,
+        metadata?.researchId,
+        metadata?.sessionId,
+        metadata?.traceId
+      ];
+
+      // Use the first UUID-like string we find
+      const foundUuid = possibleUuids.find(id => 
+        id && typeof id === 'string' && 
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+      );
+
+      if (foundUuid) {
+        newResearchResult.uuid = foundUuid;
+      }
+    }
 
     // Save to database
     await newResearchResult.save();
@@ -42,6 +106,9 @@ export const saveResearchResult = async (req, res) => {
         id: newResearchResult._id,
         query: newResearchResult.query,
         createdAt: newResearchResult.createdAt,
+        researchId: newResearchResult.researchId,
+        uuid: newResearchResult.uuid,
+        traceId: newResearchResult.traceId,
         formattedResult // Include the formatted result for immediate use
       }
     });
@@ -63,9 +130,31 @@ export const saveResearchResult = async (req, res) => {
 export const getResearchResultById = async (req, res) => {
   try {
     const { id } = req.params;
-
-    // Find the research result by ID
-    const researchResult = await ResearchResult.findById(id);
+    let researchResult = null;
+    
+    console.log(`[ResearchResultController] Looking up research result with ID: ${id}`);
+    
+    // Check if this is a valid MongoDB ObjectId
+    if (mongoose.Types.ObjectId.isValid(id) && /^[0-9a-fA-F]{24}$/.test(id)) {
+      console.log('[ResearchResultController] Using direct ObjectId lookup');
+      researchResult = await ResearchResult.findById(id);
+    } 
+    
+    // If not found by direct ID or not a valid ObjectId, try alternative fields
+    if (!researchResult) {
+      console.log('[ResearchResultController] Using alternative field lookup');
+      
+      // Try different possible ID fields
+      researchResult = await ResearchResult.findOne({
+        $or: [
+          { researchId: id },
+          { uuid: id },
+          { originalId: id },
+          { sessionId: id },
+          { traceId: id }
+        ]
+      });
+    }
 
     if (!researchResult) {
       return res.status(404).json({
@@ -97,7 +186,7 @@ export const getResearchResultById = async (req, res) => {
  * @param {Object} rawResult - The raw research result from the database
  * @returns {Object} Formatted research result
  */
-function formatResearchResult(rawResult) {
+export function formatResearchResult(rawResult) {
   try {
     // Convert to plain object if it's a Mongoose document
     const result = rawResult.toObject ? rawResult.toObject() : { ...rawResult };
@@ -391,7 +480,7 @@ export const deleteResearchResult = async (req, res) => {
  */
 export const searchResearchResults = async (req, res) => {
   try {
-    const { query, limit = 10 } = req.query;
+    const { query, limit = 10, format = 'full' } = req.query;
     
     if (!query) {
       return res.status(400).json({
@@ -401,17 +490,99 @@ export const searchResearchResults = async (req, res) => {
       });
     }
     
-    // Search using MongoDB text index
-    const results = await ResearchResult.find(
-      { $text: { $search: query } },
-      { score: { $meta: "textScore" } }
-    )
-    .sort({ score: { $meta: "textScore" }, createdAt: -1 })
-    .limit(parseInt(limit));
+    console.log(`[ResearchResultController] Searching for: ${query}`);
+    
+    // Enhanced search with multiple fields
+    const searchCriteria = {
+      $or: [
+        // Text search in query field
+        { query: { $regex: query, $options: 'i' } },
+        
+        // Check if query matches any ID fields exactly
+        { researchId: query },
+        { uuid: query },
+        { originalId: query },
+        { sessionId: query },
+        { traceId: query },
+        
+        // Search in DTC code
+        { dtcCode: { $regex: query, $options: 'i' } },
+        
+        // Search in vehicle info
+        { "vehicle.make": { $regex: query, $options: 'i' } },
+        { "vehicle.model": { $regex: query, $options: 'i' } },
+        { "vehicle.vin": { $regex: query, $options: 'i' } },
+        
+        // Search in tags
+        { tags: { $regex: query, $options: 'i' } },
+        
+        // Search in result content if possible
+        { "result.summary": { $regex: query, $options: 'i' } },
+        { "result.shortSummary": { $regex: query, $options: 'i' } },
+        { "result.report.shortSummary": { $regex: query, $options: 'i' } },
+      ]
+    };
+    
+    // If text index is available, add it to the search
+    try {
+      const textSearchResults = await ResearchResult.find(
+        { $text: { $search: query } },
+        { score: { $meta: "textScore" } }
+      )
+      .sort({ score: { $meta: "textScore" } })
+      .limit(parseInt(limit));
+      
+      // Get IDs from text search results
+      const textSearchIds = textSearchResults.map(result => result._id);
+      
+      // Add text search results to the OR conditions
+      if (textSearchIds.length > 0) {
+        searchCriteria.$or.push({ _id: { $in: textSearchIds } });
+      }
+    } catch (textSearchError) {
+      // If text search fails (e.g., no text index), just continue with regex search
+      console.warn('[ResearchResultController] Text search failed:', textSearchError.message);
+    }
+    
+    // Execute the search
+    const results = await ResearchResult.find(searchCriteria)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+    
+    // Format results based on requested format
+    let formattedResults;
+    
+    if (format === 'summary') {
+      // Simplified results for list views
+      formattedResults = results.map(result => ({
+        _id: result._id,
+        query: result.query,
+        summary: result.result?.report?.shortSummary || result.result?.shortSummary || '',
+        createdAt: result.createdAt,
+        tags: result.tags || [],
+        vehicle: result.vehicle,
+        dtcCode: result.dtcCode,
+        researchId: result.researchId,
+        uuid: result.uuid,
+        traceId: result.traceId
+      }));
+    } else if (format === 'compact') {
+      // Very minimal results
+      formattedResults = results.map(result => ({
+        _id: result._id,
+        query: result.query,
+        createdAt: result.createdAt,
+        researchId: result.researchId,
+        uuid: result.uuid
+      }));
+    } else {
+      // Full formatting for detailed results
+      formattedResults = results.map(result => formatResearchResult(result));
+    }
     
     res.status(200).json({
       success: true,
-      data: results,
+      data: formattedResults,
       count: results.length
     });
   } catch (error) {

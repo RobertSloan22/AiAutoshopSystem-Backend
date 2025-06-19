@@ -52,6 +52,7 @@ import localresearchServiceRoutes from './routes/localresearch.service.js';
 import embeddingsRoutes from './routes/embeddings.routes.js';
 import vectorStoreRoutes from './routes/vectorStore.routes.js';
 import openaiRoutes from './routes/openai.js';
+import assistantsRoutes from './routes/assistants.routes.js';
 import turnResponseRoutes from './routes/turnResponse.routes.js';
 import functionRoutes from './routes/functions.routes.js';
 import responseImageRoutes from './routes/responseImage.routes.js';
@@ -530,6 +531,7 @@ app.use('/analysis', createProxyMiddleware({
   }
 }));
 
+
 app.use('/visualization', createProxyMiddleware({
   target: 'http://localhost:8001',
   changeOrigin: true,
@@ -545,15 +547,20 @@ app.use('/visualization', createProxyMiddleware({
 // API Routes
 app.use("/api/auth", authRoutes);
 // Enable research routes
-app.use("/api/research", researchRoutes);
+//app.use("/api/research", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
-app.use("/api/research/o3", researchO3ServiceRoutes);
+app.use("/api/researcho3/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
 // Integrated research bot - direct endpoint
 app.use("/api/integrated-research", integratedResearchRoutes);
 
 // Research progress tracking
 import researchProgressRoutes from './routes/researchProgress.routes.js';
+import apiRoutes from './routes/api.routes.js';
+
+// Add the new API routes
+app.use("/api", apiRoutes);
+
 app.use("/api/research-progress", researchProgressRoutes);
 // Research results endpoints
 app.use("/api/research-results", researchResultRoutes);
@@ -586,6 +593,7 @@ app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
 // Vector store routes disabled to reduce startup overhead
 // app.use('/api/vector-store', vectorStoreRoutes);
+app.use('/api/openai/assistants', assistantsRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);

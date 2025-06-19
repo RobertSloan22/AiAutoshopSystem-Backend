@@ -33,6 +33,24 @@ const researchResultSchema = new mongoose.Schema(
       enum: ["pending", "in-progress", "completed", "failed"],
       default: "completed"
     },
+    // Vehicle context information
+    vehicle: {
+      year: String,
+      make: String,
+      model: String,
+      vin: String,
+      engine: String,
+      transmission: String
+    },
+    dtcCode: String,
+    
+    // Add these UUID fields to handle different ID formats
+    researchId: { type: String, index: true }, // UUID from research system
+    uuid: { type: String, index: true },       // Alternative UUID field
+    originalId: { type: String, index: true }, // Original ID from request
+    sessionId: { type: String, index: true },  // Session ID if available
+    traceId: { type: String, index: true },    // Trace ID for debugging
+    
     createdAt: {
       type: Date,
       default: Date.now
@@ -53,6 +71,12 @@ researchResultSchema.index({ tags: 1 });
 researchResultSchema.index({ userId: 1 });
 researchResultSchema.index({ status: 1 });
 researchResultSchema.index({ createdAt: -1 });
+researchResultSchema.index({ researchId: 1 });
+researchResultSchema.index({ uuid: 1 });
+researchResultSchema.index({ originalId: 1 });
+researchResultSchema.index({ traceId: 1 });
+researchResultSchema.index({ "vehicle.vin": 1 });
+researchResultSchema.index({ dtcCode: 1 });
 
 const ResearchResult = mongoose.model("ResearchResult", researchResultSchema);
 

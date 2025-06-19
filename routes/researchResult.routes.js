@@ -7,6 +7,7 @@ import {
   deleteResearchResult,
   searchResearchResults
 } from '../controllers/researchResult.controller.js';
+import additionalRoutes from './researchResult.additional.routes.js';
 
 // Import auth middleware if needed
 // import { protect } from '../middleware/auth.middleware.js';
@@ -52,6 +53,34 @@ const router = express.Router();
  *           type: string
  *           enum: [pending, in-progress, completed, failed]
  *           description: The status of the research
+ *         vehicle:
+ *           type: object
+ *           properties:
+ *             year:
+ *               type: string
+ *             make:
+ *               type: string
+ *             model:
+ *               type: string
+ *             vin:
+ *               type: string
+ *             engine:
+ *               type: string
+ *             transmission:
+ *               type: string
+ *           description: Vehicle information
+ *         dtcCode:
+ *           type: string
+ *           description: DTC code related to the research
+ *         researchId:
+ *           type: string
+ *           description: UUID assigned by the research service
+ *         uuid:
+ *           type: string
+ *           description: Alternative UUID format
+ *         traceId:
+ *           type: string
+ *           description: Trace ID for debugging
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -94,6 +123,16 @@ const router = express.Router();
  *                 type: array
  *                 items:
  *                   type: string
+ *               vehicle:
+ *                 type: object
+ *               dtcCode:
+ *                 type: string
+ *               researchId:
+ *                 type: string
+ *               uuid:
+ *                 type: string
+ *               traceId:
+ *                 type: string
  *     responses:
  *       201:
  *         description: Research result saved successfully
@@ -103,6 +142,12 @@ const router = express.Router();
  *         description: Server error
  */
 router.post('/', saveResearchResult);
+
+// Special search endpoints (need to come before /:id to avoid path conflicts)
+router.get('/search', searchResearchResults);
+
+// Add the additional search route endpoints
+router.use('/', additionalRoutes);
 
 /**
  * @swagger
@@ -116,7 +161,7 @@ router.post('/', saveResearchResult);
  *         required: true
  *         schema:
  *           type: string
- *         description: The research result ID
+ *         description: The research result ID (accepts MongoDB ID, UUID, researchId, traceId)
  *     responses:
  *       200:
  *         description: Research result found
@@ -183,6 +228,12 @@ router.get('/:id', getResearchResultById);
  *           type: string
  *           enum: [pending, in-progress, completed, failed]
  *         description: Filter by status
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [full, summary, compact]
+ *         description: Format of the response data
  *     responses:
  *       200:
  *         description: List of research results
@@ -252,34 +303,5 @@ router.put('/:id', updateResearchResult);
  *         description: Server error
  */
 router.delete('/:id', deleteResearchResult);
-
-/**
- * @swagger
- * /api/research-results/search:
- *   get:
- *     summary: Search research results by query text
- *     tags: [ResearchResults]
- *     parameters:
- *       - in: query
- *         name: query
- *         required: true
- *         schema:
- *           type: string
- *         description: The search query
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
- *         description: Maximum number of results to return
- *     responses:
- *       200:
- *         description: Search results
- *       400:
- *         description: Missing required parameters
- *       500:
- *         description: Server error
- */
-router.get('/search', searchResearchResults);
 
 export default router;

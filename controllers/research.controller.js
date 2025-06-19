@@ -218,6 +218,11 @@ async function processResearch(researchId, query, userId) {
     
     // Save the research result to the database
     try {
+      // Extract the text content from the research data
+      const textContent = typeof researchData === 'object' ? 
+        (researchData.finalReport || researchData.result || JSON.stringify(researchData)) : 
+        String(researchData);
+        
       // Create a new research result entry
       const newResearchResult = new ResearchResult({
         researchId,
@@ -226,7 +231,8 @@ async function processResearch(researchId, query, userId) {
         sources: researchData.sources || [],
         metadata: {
           timestamp: new Date().toISOString(),
-          source: 'agent_service'
+          source: 'agent_service',
+          textContent: textContent // Store plain text version for easy frontend usage
         },
         userId: userId || null,
         tags: ['agent-research'],
@@ -241,7 +247,8 @@ async function processResearch(researchId, query, userId) {
       await updateProgress(researchId, {
         status: 'completed',
         message: 'Research completed successfully',
-        result: researchData
+        result: researchData,
+        textContent: textContent // Include plain text in progress update
       });
       
       return newResearchResult;

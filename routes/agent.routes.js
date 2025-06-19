@@ -25,7 +25,7 @@ router.post('/realtime/sessions', async (req, res) => {
     }
 
     const response = await fetch(
-      `https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17`,
+      `https://api.openai.com/v1/realtime?model=gpt-4o-realtime`,
       {
         method: "POST",
         headers: {
@@ -84,7 +84,7 @@ router.post('/realtime', async (req, res) => {
     console.log('Sending SDP to OpenAI:', sdp);
     
     const response = await fetch(
-      `https://api.openai.com/v1/realtime?model=${model}`,
+      `https://api.openai.com/v1/realtime?model=${model || "gpt-4o-realtime"}`,
       {
         method: "POST",
         headers: {
@@ -126,7 +126,7 @@ router.get('/realtime/sessions', async (req, res) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "whisper-1",
+          model: "gpt-4o-realtime",
         }),
       }
     );
@@ -139,6 +139,35 @@ router.get('/realtime/sessions', async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error("Error in /session:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+router.get('/realtime/sessions', async (req, res) => {
+  try {
+    const response = await fetch(
+      "https://api.openai.com/v1/realtime/sessions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-realtime",
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API responded with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error("Error in GET /realtime/sessions:", error);
     res.status(500).json({ error: error.message });
   }
 });
