@@ -62,6 +62,7 @@ import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
+import obd2Routes from './routes/obd2.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -594,6 +595,9 @@ app.use('/api/responses', responsesRoutes);
 // Register Eliza proxy router for direct communication with Eliza system
 app.use('/api/eliza-direct', elizaProxyRoutes);
 
+// Register OBD2 data routes
+app.use('/api/obd2', obd2Routes);
+
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
   customSiteTitle: "Automotive AI Platform API Documentation",
@@ -771,6 +775,7 @@ async function initializeServices() {
 
 // Import the agent service starter
 import { startAgentService } from './services/agentService.js';
+import obd2WebSocketService from './services/obd2WebSocketService.js';
 
 // Start the server
 server.listen(PORT, async () => {
@@ -794,6 +799,15 @@ server.listen(PORT, async () => {
   });
 
   await initializeServices();
+  
+  // Initialize OBD2 WebSocket service
+  obd2WebSocketService.initialize(server);
+  obd2WebSocketService.startHealthCheck();
+  
+  // Start periodic cleanup of old sessions
+  setInterval(() => {
+    obd2WebSocketService.cleanupOldSessions(24); // Clean up sessions older than 24 hours
+  }, 60 * 60 * 1000); // Run every hour
   
   // Start the agent service
   startAgentService();

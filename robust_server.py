@@ -29,6 +29,14 @@ except ImportError:
     print("ERROR: mcp_agent module not found. Make sure to install it with: pip install mcp-agent")
     raise
 
+# Import OBD2 analysis agent
+try:
+    from obd2_analysis_agent import analyze_obd2_data
+    obd2_analysis_available = True
+except ImportError as e:
+    print(f"WARNING: OBD2 analysis agent not available: {e}")
+    obd2_analysis_available = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1488,6 +1496,66 @@ async def create_research(request: ResearchRequest, background_tasks: Background
         client_id,
         output_file
     )
+
+@app.post("/analysis")
+async def perform_obd2_analysis(request: AnalysisRequest):
+    """REST endpoint for OBD2 data analysis."""
+    try:
+        if not obd2_analysis_available:
+            raise HTTPException(
+                status_code=503, 
+                detail="OBD2 analysis service is not available. Please check system dependencies."
+            )
+        
+        # Extract data from request
+        analysis_type = request.analysis_type
+        data = request.options.get('data', {})
+        options = request.options
+        
+        if not data:
+            raise HTTPException(status_code=400, detail="No OBD2 data provided for analysis")
+        
+        # Perform analysis
+        logger.info(f"Starting OBD2 analysis: {analysis_type}")
+        result = await analyze_obd2_data(analysis_type, data, options)
+        
+        # Store result for potential retrieval
+        result_id = str(uuid.uuid4())
+        app.state.completed_analysis[result_id] = {
+            'result': result,
+            'timestamp': time.time(),
+            'analysis_type': analysis_type
+        }
+        
+        return {
+            "status": "success",
+            "result_id": result_id,
+            "result": result,
+            "analysis_type": analysis_type,
+            "processing_time": result.get('processing_time', 0)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in OBD2 analysis: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@app.get("/analysis/{result_id}")
+async def get_analysis_result(result_id: str):
+    """Get previously completed analysis result."""
+    if result_id not in app.state.completed_analysis:
+        raise HTTPException(status_code=404, detail="Analysis result not found")
+    
+    analysis_data = app.state.completed_analysis[result_id]
+    return {
+        "status": "success",
+        "result_id": result_id,
+        "result": analysis_data['result'],
+        "analysis_type": analysis_data['analysis_type'],
+        "timestamp": analysis_data['timestamp']
+    }
 
     return {
         "status": "started",
