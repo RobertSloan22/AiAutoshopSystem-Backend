@@ -23,6 +23,7 @@ import researchServiceRoutes from './routes/research.service.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
 import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
 import integratedResearchRoutes from './routes/integrated-research.routes.js';
+import researchResultRoutes from './routes/researchResult.routes.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import agentproxyRoutes from "./routes/agentproxy.routes.js"
@@ -51,6 +52,7 @@ import localresearchServiceRoutes from './routes/localresearch.service.js';
 import embeddingsRoutes from './routes/embeddings.routes.js';
 import vectorStoreRoutes from './routes/vectorStore.routes.js';
 import openaiRoutes from './routes/openai.js';
+import assistantsRoutes from './routes/assistants.routes.js';
 import turnResponseRoutes from './routes/turnResponse.routes.js';
 import functionRoutes from './routes/functions.routes.js';
 import responseImageRoutes from './routes/responseImage.routes.js';
@@ -529,6 +531,7 @@ app.use('/analysis', createProxyMiddleware({
   }
 }));
 
+
 app.use('/visualization', createProxyMiddleware({
   target: 'http://localhost:8001',
   changeOrigin: true,
@@ -544,12 +547,23 @@ app.use('/visualization', createProxyMiddleware({
 // API Routes
 app.use("/api/auth", authRoutes);
 // Enable research routes
-app.use("/api/research", researchRoutes);
+//app.use("/api/research", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
-app.use("/api/research/o3", researchO3ServiceRoutes);
+app.use("/api/researcho3/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
 // Integrated research bot - direct endpoint
 app.use("/api/integrated-research", integratedResearchRoutes);
+
+// Research progress tracking
+import researchProgressRoutes from './routes/researchProgress.routes.js';
+import apiRoutes from './routes/api.routes.js';
+
+// Add the new API routes
+app.use("/api", apiRoutes);
+
+app.use("/api/research-progress", researchProgressRoutes);
+// Research results endpoints
+app.use("/api/research-results", researchResultRoutes);
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
@@ -579,6 +593,7 @@ app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
 // Vector store routes disabled to reduce startup overhead
 // app.use('/api/vector-store', vectorStoreRoutes);
+app.use('/api/openai/assistants', assistantsRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);
@@ -771,6 +786,8 @@ async function initializeServices() {
 
 // Import the agent service starter
 import { startAgentService } from './services/agentService.js';
+// Import the RealtimeRelay
+import { RealtimeRelay } from './services/RealtimeRelay.js';
 
 // Start the server
 server.listen(PORT, async () => {
@@ -797,6 +814,19 @@ server.listen(PORT, async () => {
   
   // Start the agent service
   startAgentService();
+  
+  // Initialize the OpenAI Realtime API relay
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const realtimeRelay = new RealtimeRelay(process.env.OPENAI_API_KEY, server);
+      realtimeRelay.initialize();
+      console.log('OpenAI Realtime API relay initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize OpenAI Realtime API relay:', error);
+    }
+  } else {
+    console.warn('OPENAI_API_KEY not provided, Realtime API relay not initialized');
+  }
 });
 
 // Handle graceful shutdown

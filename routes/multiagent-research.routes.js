@@ -264,9 +264,28 @@ async function processResearch(researchId, query) {
   try {
     // Update status to in-progress
     await updateResearchStatus(researchId, 'in-progress');
+    
+    // Import socket.io if available
+    let io;
+    try {
+      const socketModule = await import('../socket/socket.js');
+      io = socketModule.io;
+    } catch (err) {
+      console.log('Socket.io not available for progress reporting');
+    }
+    
+    // Notify clients that research is starting
+    if (io) {
+      io.emit("research_status_update", {
+        researchId,
+        status: 'in-progress',
+        message: 'Research is starting',
+        timestamp: new Date().toISOString()
+      });
+    }
 
-    // Run the multi-agent research workflow
-    const result = await ResearchAgentSystem.runResearch(query);
+    // Run the multi-agent research workflow with researchId as sessionId
+    const result = await ResearchAgentSystem.runResearch(query, researchId);
 
     // Update the research with results
     await updateResearchResults(researchId, {
@@ -279,6 +298,16 @@ async function processResearch(researchId, query) {
       finalReport: result.finalReport,
       completedAt: new Date().toISOString()
     });
+    
+    // Notify clients that research is complete
+    if (io) {
+      io.emit("research_status_update", {
+        researchId,
+        status: 'completed',
+        message: 'Research completed successfully',
+        timestamp: new Date().toISOString()
+      });
+    }
 
     console.log(`Research ${researchId} completed successfully`);
   } catch (error) {
@@ -286,6 +315,17 @@ async function processResearch(researchId, query) {
     
     // Update status to failed
     await updateResearchStatus(researchId, 'failed', error.message);
+    
+    // Notify clients of failure
+    if (io) {
+      io.emit("research_status_update", {
+        researchId,
+        status: 'failed',
+        message: `Research failed: ${error.message}`,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
   }
 }
 

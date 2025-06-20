@@ -154,8 +154,32 @@ Your response should be authoritative, balanced, and accessible to someone with 
 `;
 
 // Step 1: Question Decomposer Node
-const questionDecomposer = async ({ originalQuestion }) => {
+const questionDecomposer = async ({ originalQuestion, sessionId }) => {
   try {
+    // Import io if available - use dynamic import to avoid circular dependencies
+    let io;
+    try {
+      const socketModule = await import('../socket/socket.js');
+      io = socketModule.io;
+    } catch (err) {
+      console.log('Socket.io not available for progress reporting');
+    }
+    
+    // Emit progress for decomposition starting
+    if (io) {
+      io.emit("research_agent_status", {
+        status: "in_progress",
+        agentId: "decomposer",
+        message: "Breaking down research question into sub-questions",
+        progress: {
+          current: 0,
+          total: 1,
+          percentage: 0
+        },
+        sessionId: sessionId
+      });
+    }
+    
     const promptTemplate = new PromptTemplate({
       template: questionDecomposerTemplate,
       inputVariables: ['originalQuestion'],
@@ -167,9 +191,41 @@ const questionDecomposer = async ({ originalQuestion }) => {
     // Parse the result as JSON
     const decomposedQuestions = JSON.parse(result);
     
+    // Emit progress for decomposition completion with the questions
+    if (io) {
+      io.emit("research_agent_status", {
+        status: "in_progress",
+        agentId: "decomposer",
+        message: "Research question broken down into sub-questions",
+        progress: {
+          current: 1,
+          total: 1,
+          percentage: 100
+        },
+        questions: decomposedQuestions,
+        sessionId: sessionId
+      });
+    }
+    
     return { decomposedQuestions };
   } catch (error) {
     console.error('Error in question decomposer:', error);
+    
+    // Emit error if available
+    try {
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "error",
+          agentId: "decomposer",
+          message: `Error in question decomposition: ${error.message}`,
+          error: error.message,
+          sessionId: sessionId
+        });
+      }
+    } catch (emitError) {
+      console.error('Error emitting error status:', emitError);
+    }
+    
     throw error;
   }
 };
@@ -177,7 +233,8 @@ const questionDecomposer = async ({ originalQuestion }) => {
 // Step 2: Vehicle Systems Research Node
 const vehicleSystemsResearcher = async ({ 
   decomposedQuestions, 
-  originalQuestion 
+  originalQuestion,
+  sessionId
 }) => {
   try {
     // Filter questions for vehicle systems category
@@ -190,9 +247,35 @@ const vehicleSystemsResearcher = async ({
     }
 
     let allFindings = '';
+    const totalQuestions = vehicleQuestions.length;
+    let completedQuestions = 0;
+    
+    // Import io if available - use dynamic import to avoid circular dependencies
+    let io;
+    try {
+      const socketModule = await import('../socket/socket.js');
+      io = socketModule.io;
+    } catch (err) {
+      console.log('Socket.io not available for progress reporting');
+    }
     
     // Research each vehicle question
     for (const question of vehicleQuestions) {
+      // Emit progress before processing
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "in_progress",
+          agentId: "vehicle_systems",
+          message: `Researching: ${question.question}`,
+          progress: {
+            current: completedQuestions,
+            total: totalQuestions,
+            percentage: Math.round((completedQuestions/totalQuestions)*100)
+          },
+          sessionId: sessionId
+        });
+      }
+      
       const promptTemplate = new PromptTemplate({
         template: vehicleSystemsTemplate,
         inputVariables: ['subQuestion'],
@@ -209,6 +292,23 @@ const vehicleSystemsResearcher = async ({
         decomposedQuestions[index].completed = true;
         decomposedQuestions[index].findings = finding;
       }
+      
+      completedQuestions++;
+      
+      // Emit progress after processing
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "in_progress",
+          agentId: "vehicle_systems",
+          message: `Completed: ${question.question}`,
+          progress: {
+            current: completedQuestions,
+            total: totalQuestions,
+            percentage: Math.round((completedQuestions/totalQuestions)*100)
+          },
+          sessionId: sessionId
+        });
+      }
     }
     
     return { 
@@ -224,7 +324,8 @@ const vehicleSystemsResearcher = async ({
 // Step 3: Compliance Research Node
 const complianceResearcher = async ({ 
   decomposedQuestions, 
-  originalQuestion 
+  originalQuestion,
+  sessionId
 }) => {
   try {
     // Filter questions for compliance category
@@ -237,9 +338,35 @@ const complianceResearcher = async ({
     }
 
     let allFindings = '';
+    const totalQuestions = complianceQuestions.length;
+    let completedQuestions = 0;
+    
+    // Import io if available - use dynamic import to avoid circular dependencies
+    let io;
+    try {
+      const socketModule = await import('../socket/socket.js');
+      io = socketModule.io;
+    } catch (err) {
+      console.log('Socket.io not available for progress reporting');
+    }
     
     // Research each compliance question
     for (const question of complianceQuestions) {
+      // Emit progress before processing
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "in_progress",
+          agentId: "compliance",
+          message: `Researching: ${question.question}`,
+          progress: {
+            current: completedQuestions,
+            total: totalQuestions,
+            percentage: Math.round((completedQuestions/totalQuestions)*100)
+          },
+          sessionId: sessionId
+        });
+      }
+      
       const promptTemplate = new PromptTemplate({
         template: complianceTemplate,
         inputVariables: ['subQuestion'],
@@ -256,6 +383,23 @@ const complianceResearcher = async ({
         decomposedQuestions[index].completed = true;
         decomposedQuestions[index].findings = finding;
       }
+      
+      completedQuestions++;
+      
+      // Emit progress after processing
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "in_progress",
+          agentId: "compliance",
+          message: `Completed: ${question.question}`,
+          progress: {
+            current: completedQuestions,
+            total: totalQuestions,
+            percentage: Math.round((completedQuestions/totalQuestions)*100)
+          },
+          sessionId: sessionId
+        });
+      }
     }
     
     return { 
@@ -271,7 +415,8 @@ const complianceResearcher = async ({
 // Step 4: OEM Data Research Node
 const oemDataResearcher = async ({ 
   decomposedQuestions, 
-  originalQuestion 
+  originalQuestion,
+  sessionId
 }) => {
   try {
     // Filter questions for OEM data category
@@ -284,9 +429,35 @@ const oemDataResearcher = async ({
     }
 
     let allFindings = '';
+    const totalQuestions = oemQuestions.length;
+    let completedQuestions = 0;
+    
+    // Import io if available - use dynamic import to avoid circular dependencies
+    let io;
+    try {
+      const socketModule = await import('../socket/socket.js');
+      io = socketModule.io;
+    } catch (err) {
+      console.log('Socket.io not available for progress reporting');
+    }
     
     // Research each OEM question
     for (const question of oemQuestions) {
+      // Emit progress before processing
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "in_progress",
+          agentId: "oem_data",
+          message: `Researching: ${question.question}`,
+          progress: {
+            current: completedQuestions,
+            total: totalQuestions,
+            percentage: Math.round((completedQuestions/totalQuestions)*100)
+          },
+          sessionId: sessionId
+        });
+      }
+      
       const promptTemplate = new PromptTemplate({
         template: oemDataTemplate,
         inputVariables: ['subQuestion'],
@@ -303,6 +474,23 @@ const oemDataResearcher = async ({
         decomposedQuestions[index].completed = true;
         decomposedQuestions[index].findings = finding;
       }
+      
+      completedQuestions++;
+      
+      // Emit progress after processing
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "in_progress",
+          agentId: "oem_data",
+          message: `Completed: ${question.question}`,
+          progress: {
+            current: completedQuestions,
+            total: totalQuestions,
+            percentage: Math.round((completedQuestions/totalQuestions)*100)
+          },
+          sessionId: sessionId
+        });
+      }
     }
     
     return { 
@@ -318,7 +506,8 @@ const oemDataResearcher = async ({
 // Step 5: Forum Community Research Node
 const forumResearcher = async ({ 
   decomposedQuestions, 
-  originalQuestion 
+  originalQuestion,
+  sessionId
 }) => {
   try {
     // Filter questions for forum/community category
@@ -331,9 +520,35 @@ const forumResearcher = async ({
     }
 
     let allFindings = '';
+    const totalQuestions = forumQuestions.length;
+    let completedQuestions = 0;
+    
+    // Import io if available - use dynamic import to avoid circular dependencies
+    let io;
+    try {
+      const socketModule = await import('../socket/socket.js');
+      io = socketModule.io;
+    } catch (err) {
+      console.log('Socket.io not available for progress reporting');
+    }
     
     // Research each forum question
     for (const question of forumQuestions) {
+      // Emit progress before processing
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "in_progress",
+          agentId: "community_forums",
+          message: `Researching: ${question.question}`,
+          progress: {
+            current: completedQuestions,
+            total: totalQuestions,
+            percentage: Math.round((completedQuestions/totalQuestions)*100)
+          },
+          sessionId: sessionId
+        });
+      }
+      
       const promptTemplate = new PromptTemplate({
         template: forumDataTemplate,
         inputVariables: ['subQuestion'],
@@ -349,6 +564,23 @@ const forumResearcher = async ({
       if (index !== -1) {
         decomposedQuestions[index].completed = true;
         decomposedQuestions[index].findings = finding;
+      }
+      
+      completedQuestions++;
+      
+      // Emit progress after processing
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "in_progress",
+          agentId: "community_forums",
+          message: `Completed: ${question.question}`,
+          progress: {
+            current: completedQuestions,
+            total: totalQuestions,
+            percentage: Math.round((completedQuestions/totalQuestions)*100)
+          },
+          sessionId: sessionId
+        });
       }
     }
     
@@ -368,9 +600,34 @@ const responseSynthesizer = async ({
   vehicleFindings,
   complianceFindings,
   oemFindings,
-  forumFindings
+  forumFindings,
+  sessionId
 }) => {
   try {
+    // Import io if available - use dynamic import to avoid circular dependencies
+    let io;
+    try {
+      const socketModule = await import('../socket/socket.js');
+      io = socketModule.io;
+    } catch (err) {
+      console.log('Socket.io not available for progress reporting');
+    }
+    
+    // Emit progress for synthesis starting
+    if (io) {
+      io.emit("research_agent_status", {
+        status: "in_progress",
+        agentId: "synthesis",
+        message: "Starting synthesis of research findings",
+        progress: {
+          current: 0,
+          total: 1,
+          percentage: 0
+        },
+        sessionId: sessionId
+      });
+    }
+    
     const promptTemplate = new PromptTemplate({
       template: synthesisTemplate,
       inputVariables: [
@@ -391,12 +648,43 @@ const responseSynthesizer = async ({
       forumFindings: forumFindings || "No community forum research was conducted."
     });
     
+    // Emit progress for synthesis completion
+    if (io) {
+      io.emit("research_agent_status", {
+        status: "complete",
+        agentId: "synthesis",
+        message: "Research synthesis completed",
+        progress: {
+          current: 1,
+          total: 1,
+          percentage: 100
+        },
+        sessionId: sessionId
+      });
+    }
+    
     return { 
       finalReport,
       isComplete: true
     };
   } catch (error) {
     console.error('Error in response synthesizer:', error);
+    
+    // Emit error if available
+    try {
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "error",
+          agentId: "synthesis",
+          message: `Error in synthesis: ${error.message}`,
+          error: error.message,
+          sessionId: sessionId
+        });
+      }
+    } catch (emitError) {
+      console.error('Error emitting error status:', emitError);
+    }
+    
     throw error;
   }
 };
@@ -458,22 +746,61 @@ export async function createResearchAgentSystem() {
 }
 
 // Function to run the research workflow
-export async function runResearchWorkflow(question) {
+export async function runResearchWorkflow(question, sessionId = null) {
   try {
+    // Generate a session ID if not provided
+    if (!sessionId) {
+      sessionId = `research-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    }
+    
+    // Import io if available - use dynamic import to avoid circular dependencies
+    let io;
+    try {
+      const socketModule = await import('../socket/socket.js');
+      io = socketModule.io;
+    } catch (err) {
+      console.log('Socket.io not available for progress reporting');
+    }
+    
+    // Emit overall research starting event
+    if (io) {
+      io.emit("research_agent_status", {
+        status: "starting",
+        agentId: "main",
+        message: "Starting multi-agent research workflow",
+        originalQuestion: question,
+        sessionId: sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
     // Create the research agent system
     const researchWorkflow = await createResearchAgentSystem();
     
-    // Initial state with the original question
+    // Initial state with the original question and sessionId
     const initialState = {
       originalQuestion: question,
+      sessionId: sessionId,
       isComplete: false
     };
     
     // Execute the workflow
     const finalState = await researchWorkflow.invoke(initialState);
     
+    // Emit completion event
+    if (io) {
+      io.emit("research_agent_status", {
+        status: "complete",
+        agentId: "main",
+        message: "Research completed successfully",
+        sessionId: sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
     // Return the final result
     return {
+      sessionId,
       originalQuestion: question,
       finalReport: finalState.finalReport,
       decomposedQuestions: finalState.decomposedQuestions,
@@ -484,6 +811,23 @@ export async function runResearchWorkflow(question) {
     };
   } catch (error) {
     console.error('Error running research workflow:', error);
+    
+    // Emit error event
+    try {
+      if (io) {
+        io.emit("research_agent_status", {
+          status: "error",
+          agentId: "main",
+          message: `Research failed: ${error.message}`,
+          error: error.message,
+          sessionId: sessionId,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (emitError) {
+      console.error('Error emitting error status:', emitError);
+    }
+    
     throw error;
   }
 }
