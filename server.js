@@ -596,6 +596,7 @@ app.use('/api/embeddings', embeddingsRoutes);
 app.use('/api/openai/assistants', assistantsRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
+app.use('/api/turn_response', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);
 app.use('/api', responseImageRoutes);
 app.use("/api/vehicle-questions", vehicleQuestionsRoutes);

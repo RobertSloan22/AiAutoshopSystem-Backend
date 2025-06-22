@@ -11,6 +11,91 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// FINAL CORRECTED Tool formatting function
+function formatToolsForOpenAI(tools) {
+  if (!Array.isArray(tools)) {
+    console.warn('Tools is not an array:', typeof tools);
+    return [];
+  }
+
+  return tools.map(tool => {
+    if (!tool || typeof tool !== 'object') {
+      console.warn('Invalid tool object:', tool);
+      return null;
+    }
+
+    // Handle different tool types correctly
+    switch (tool.type) {
+      case 'web_search':
+        // Web search tools should NOT have a name property
+        return {
+          type: 'web_search'
+        };
+
+      case 'code_interpreter':
+        // Code interpreter tools should NOT have a name property
+        return {
+          type: 'code_interpreter'
+        };
+
+      case 'file_search':
+        // File search tools should NOT have a name property
+        return {
+          type: 'file_search',
+          vector_store_ids: tool.vector_store_ids || []
+        };
+
+      case 'function':
+        // Function tools NEED BOTH top-level name AND nested function.name
+        if (tool.function) {
+          // Already in correct format - ensure both names match
+          return {
+            type: 'function',
+            name: tool.function.name, // ✅ TOP-LEVEL NAME REQUIRED
+            function: {
+              name: tool.function.name,
+              description: tool.function.description,
+              parameters: tool.function.parameters,
+              ...(tool.function.strict !== undefined && { strict: tool.function.strict })
+            }
+          };
+        } else {
+          // Legacy format - convert to correct structure with both names
+          return {
+            type: 'function',
+            name: tool.name, // ✅ TOP-LEVEL NAME REQUIRED
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters,
+              ...(tool.strict !== undefined && { strict: tool.strict })
+            }
+          };
+        }
+
+      default:
+        // If it's a function tool without explicit type but has name/description
+        if (tool.name && (tool.description || tool.parameters)) {
+          console.warn('Converting legacy function tool:', tool.name);
+          return {
+            type: 'function',
+            name: tool.name, // ✅ TOP-LEVEL NAME REQUIRED
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters,
+              ...(tool.strict !== undefined && { strict: tool.strict })
+            }
+          };
+        }
+
+        // Unknown tool type - log error and skip
+        console.error('Unknown or malformed tool type:', tool);
+        return null;
+    }
+  }).filter(Boolean); // Remove any null/undefined tools
+}
+
 export const handleTurnResponse = async (req, res) => {
   try {
     console.log("Turn response handler called");
@@ -37,16 +122,38 @@ export const handleTurnResponse = async (req, res) => {
     console.log("Making OpenAI API call with model:", model || MODEL);
 
     try {
+      // FINAL CORRECTED: Process tools to ensure they have the correct format
+      console.log("Processing tools for OpenAI API:", JSON.stringify(tools, null, 2));
+      
+      const formattedTools = formatToolsForOpenAI(tools || []);
+      
+      // Final validation check
+      formattedTools.forEach((tool, index) => {
+        if (tool.type === 'function') {
+          if (!('name' in tool)) {
+            console.error(`❌ Function tool at index ${index} missing top-level name:`, JSON.stringify(tool, null, 2));
+          }
+          if (tool.name !== tool.function?.name) {
+            console.error(`❌ Function tool at index ${index} names don't match. Top: "${tool.name}", Function: "${tool.function?.name}"`);
+          }
+        }
+        if (tool.type !== 'function' && 'name' in tool) {
+          console.error(`❌ Non-function tool at index ${index} has name property:`, JSON.stringify(tool, null, 2));
+        }
+      });
+      
+      console.log("Formatted tools:", JSON.stringify(formattedTools, null, 2));
+      
       // Create the response with web search enabled
       const response = await openai.responses.create({
         model: model || MODEL,
         input: messages[messages.length - 1].content,
-        tools: tools,
-        stream: stream || true,
+        tools: formattedTools,
+        stream: stream !== undefined ? stream : true,
         temperature: temperature || 0.7,
         max_output_tokens: 1000,
-        parallel_tool_calls: parallel_tool_calls || true,
-        store: store || true,
+        parallel_tool_calls: parallel_tool_calls !== undefined ? parallel_tool_calls : true,
+        store: store !== undefined ? store : true,
         previous_response_id: previous_response_id
       });
 
@@ -131,4 +238,4 @@ export const handleTurnResponse = async (req, res) => {
     res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
     res.end();
   }
-}; 
+};
