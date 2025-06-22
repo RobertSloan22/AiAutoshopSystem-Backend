@@ -100,16 +100,122 @@ router.get('/functions/get_weather', async (req, res) => {
   }
 });
 
+// FINAL CORRECTED Tool formatting function
+function formatToolsForOpenAI(tools) {
+  if (!Array.isArray(tools)) {
+    console.warn('Tools is not an array:', typeof tools);
+    return [];
+  }
+
+  return tools.map(tool => {
+    if (!tool || typeof tool !== 'object') {
+      console.warn('Invalid tool object:', tool);
+      return null;
+    }
+
+    // Handle different tool types correctly
+    switch (tool.type) {
+      case 'web_search':
+        // Web search tools should NOT have a name property
+        return {
+          type: 'web_search'
+        };
+
+      case 'code_interpreter':
+        // Code interpreter tools should NOT have a name property
+        return {
+          type: 'code_interpreter'
+        };
+
+      case 'file_search':
+        // File search tools should NOT have a name property
+        return {
+          type: 'file_search',
+          vector_store_ids: tool.vector_store_ids || []
+        };
+
+      case 'function':
+        // Function tools NEED BOTH top-level name AND nested function.name
+        if (tool.function) {
+          // Already in correct format - ensure both names match
+          return {
+            type: 'function',
+            name: tool.function.name, // ✅ TOP-LEVEL NAME REQUIRED
+            function: {
+              name: tool.function.name,
+              description: tool.function.description,
+              parameters: tool.function.parameters,
+              ...(tool.function.strict !== undefined && { strict: tool.function.strict })
+            }
+          };
+        } else {
+          // Legacy format - convert to correct structure with both names
+          return {
+            type: 'function',
+            name: tool.name, // ✅ TOP-LEVEL NAME REQUIRED
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters,
+              ...(tool.strict !== undefined && { strict: tool.strict })
+            }
+          };
+        }
+
+      default:
+        // If it's a function tool without explicit type but has name/description
+        if (tool.name && (tool.description || tool.parameters)) {
+          console.warn('Converting legacy function tool:', tool.name);
+          return {
+            type: 'function',
+            name: tool.name, // ✅ TOP-LEVEL NAME REQUIRED
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters,
+              ...(tool.strict !== undefined && { strict: tool.strict })
+            }
+          };
+        }
+
+        // Unknown tool type - log error and skip
+        console.error('Unknown or malformed tool type:', tool);
+        return null;
+    }
+  }).filter(Boolean); // Remove any null/undefined tools
+}
+
 // API route for POST /api/turn_response
 router.post('/turn_response', async (req, res) => {
   try {
     const { messages, tools } = req.body;
     console.log("Received messages:", messages);
+    console.log("Received tools:", tools);
+    
+    // FINAL CORRECTED: Format tools for OpenAI API
+    const formattedTools = formatToolsForOpenAI(tools || []);
+    
+    // Final validation check
+    formattedTools.forEach((tool, index) => {
+      if (tool.type === 'function') {
+        if (!('name' in tool)) {
+          console.error(`❌ Function tool at index ${index} missing top-level name:`, JSON.stringify(tool, null, 2));
+        }
+        if (tool.name !== tool.function?.name) {
+          console.error(`❌ Function tool at index ${index} names don't match. Top: "${tool.name}", Function: "${tool.function?.name}"`);
+        }
+      }
+      if (tool.type !== 'function' && 'name' in tool) {
+        console.error(`❌ Non-function tool at index ${index} has name property:`, JSON.stringify(tool, null, 2));
+      }
+    });
+    
+    console.log("Formatted tools:", JSON.stringify(formattedTools, null, 2));
 
     const events = await openai.responses.create({
       model: MODEL,
       input: messages,
-      tools,
+      tools: formattedTools,
       stream: true,
       parallel_tool_calls: false,
     });

@@ -7,7 +7,7 @@ import ResearchProgress from '../models/researchProgress.model.js';
 import crypto from 'crypto';
 
 // Agent service URL
-const AGENT_SERVICE_URL = 'http://localhost:3001';
+const AGENT_SERVICE_URL = 'http://localhost:3003';
 
 /**
  * Handle regular research requests

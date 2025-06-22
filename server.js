@@ -64,6 +64,7 @@ import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
+import obd2Routes from './routes/obd2.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -306,60 +307,60 @@ app.use('/ws', createProxyMiddleware({
   ignorePath: false,
   timeout: 60000,
   proxyTimeout: 60000,
-  
+
   // Handle WebSocket upgrade - FIXED to prevent header duplication
   onProxyReqWs: (proxyReq, req, socket, options, head) => {
-    console.log('��� Research WebSocket Proxy: Upgrade request');
-    console.log('��� Origin:', req.headers.origin);
-    console.log('��� URL:', req.url);
-    
+    console.log('🚀 Research WebSocket Proxy: Upgrade request');
+    console.log('🌐 Origin:', req.headers.origin);
+    console.log('📡 URL:', req.url);
+
     // IMPORTANT: Remove any existing headers that might cause conflicts
     // Let the proxy handle WebSocket headers automatically
-    
+
     // Only set essential headers, don't duplicate WebSocket headers
     proxyReq.setHeader('Host', 'localhost:8001');
-    
+
     // Forward the origin without modification
     if (req.headers.origin) {
       proxyReq.setHeader('Origin', req.headers.origin);
     }
-    
+
     // Forward client information
     proxyReq.setHeader('X-Forwarded-For', req.connection.remoteAddress || req.socket.remoteAddress);
     proxyReq.setHeader('X-Real-IP', req.connection.remoteAddress || req.socket.remoteAddress);
-    
+
     // Extract client_id from query params ONLY
     const url = new URL(`http://localhost${req.url}`);
     const clientId = url.searchParams.get('client_id');
     if (clientId) {
       proxyReq.setHeader('X-Client-ID', clientId);
-      console.log('��� Forwarding client_id:', clientId);
+      console.log('🔑 Forwarding client_id:', clientId);
     }
-    
+
     // DO NOT manually set WebSocket headers - let http-proxy-middleware handle them
     // DO NOT set: Sec-WebSocket-Key, Sec-WebSocket-Version, etc.
-    
-    console.log('��� Headers being sent to Python service:', {
+
+    console.log('📝 Headers being sent to Python service:', {
       host: proxyReq.getHeader('Host'),
       origin: proxyReq.getHeader('Origin'),
       'x-forwarded-for': proxyReq.getHeader('X-Forwarded-For'),
       'x-client-id': proxyReq.getHeader('X-Client-ID')
     });
   },
-  
+
   // Handle successful connection
   onProxyReqWsComplete: () => {
     console.log('✅ Research WebSocket proxy connection established successfully');
   },
-  
+
   // Handle errors with better logging
   onError: (err, req, res) => {
     console.error('❌ Research WebSocket Proxy Error:', err.message);
     console.error('❌ Error code:', err.code);
     console.error('❌ Request headers:', req.headers);
-    
+
     const isWebSocket = req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket';
-    
+
     if (isWebSocket) {
       console.error('❌ WebSocket connection failed - likely header conflict');
       if (req.socket && !req.socket.destroyed) {
@@ -367,7 +368,7 @@ app.use('/ws', createProxyMiddleware({
       }
       return;
     }
-    
+
     // Only handle HTTP errors
     if (res && !res.headersSent) {
       const origin = req.headers.origin;
@@ -384,7 +385,7 @@ app.use('/ws', createProxyMiddleware({
       }));
     }
   },
-  
+
   // CRITICAL: Remove duplicate CORS headers from Python service response
   onProxyRes: (proxyRes, req, res) => {
     // Remove any CORS headers that might be set by the Python service
@@ -393,15 +394,15 @@ app.use('/ws', createProxyMiddleware({
     delete proxyRes.headers['access-control-allow-credentials'];
     delete proxyRes.headers['access-control-allow-methods'];
     delete proxyRes.headers['access-control-allow-headers'];
-    
+
     // Set our own CORS headers
     const origin = req.headers.origin;
     if (origin) {
       proxyRes.headers['access-control-allow-origin'] = origin;
       proxyRes.headers['access-control-allow-credentials'] = 'true';
     }
-    
-    console.log('��� Proxy response headers cleaned and set');
+
+    console.log('🔧 Proxy response headers cleaned and set');
   }
 }));
 // Add research WebSocket proxy route - use the same enhanced configuration
@@ -495,7 +496,7 @@ app.use('/install-data-analysis-deps', createProxyMiddleware({
 }));
 
 // Research and Data Analysis REST API endpoints
-app.use('/research', createProxyMiddleware({
+app.use('/fastagent/research', createProxyMiddleware({
   target: 'http://localhost:8001',
   changeOrigin: true,
   onError: (err, req, res) => {
@@ -547,7 +548,7 @@ app.use('/visualization', createProxyMiddleware({
 // API Routes
 app.use("/api/auth", authRoutes);
 // Enable research routes
-//app.use("/api/research", researchRoutes);
+app.use("/api/research1", researchRoutes);
 app.use("/api/research", researchServiceRoutes);
 app.use("/api/researcho3/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
@@ -596,6 +597,7 @@ app.use('/api/embeddings', embeddingsRoutes);
 app.use('/api/openai/assistants', assistantsRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
+app.use('/api/turn_response', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);
 app.use('/api', responseImageRoutes);
 app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
@@ -608,6 +610,9 @@ app.use('/api/responses', responsesRoutes);
 
 // Register Eliza proxy router for direct communication with Eliza system
 app.use('/api/eliza-direct', elizaProxyRoutes);
+
+// Register OBD2 data routes
+app.use('/api/obd2', obd2Routes);
 
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
@@ -675,7 +680,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <div class="container">
-        <div class="logo">���</div>
+        <div class="logo">🚗</div>
         <h1>Automotive AI Platform</h1>
         <p>Welcome to the Automotive AI Platform API the tool for noobs. This is the backend service for our automotive intelligence system.</p>
 
@@ -741,7 +746,7 @@ async function initializeServices() {
   try {
     console.log('Vector Services initialization DISABLED to reduce startup overhead');
     console.log('Vector services can be enabled by setting ENABLE_VECTOR_SERVICES=true');
-    
+
     // Only initialize vector services if explicitly enabled
     if (process.env.ENABLE_VECTOR_SERVICES === 'true') {
       console.log('Initializing Vector Services...');
@@ -786,6 +791,7 @@ async function initializeServices() {
 
 // Import the agent service starter
 import { startAgentService } from './services/agentService.js';
+import obd2WebSocketService from './services/obd2WebSocketService.js';
 // Import the RealtimeRelay
 import { RealtimeRelay } from './services/RealtimeRelay.js';
 
@@ -811,10 +817,19 @@ server.listen(PORT, async () => {
   });
 
   await initializeServices();
-  
+
+  // Initialize OBD2 WebSocket service
+  obd2WebSocketService.initialize(server);
+  obd2WebSocketService.startHealthCheck();
+
+  // Start periodic cleanup of old sessions
+  setInterval(() => {
+    obd2WebSocketService.cleanupOldSessions(24); // Clean up sessions older than 24 hours
+  }, 60 * 60 * 1000); // Run every hour
+
   // Start the agent service
   startAgentService();
-  
+
   // Initialize the OpenAI Realtime API relay
   if (process.env.OPENAI_API_KEY) {
     try {
