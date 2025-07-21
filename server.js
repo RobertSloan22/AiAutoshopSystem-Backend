@@ -593,7 +593,7 @@ app.use('/api/researchl', localResearchRoutes);
 app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
 // Vector store routes disabled to reduce startup overhead
-// app.use('/api/vector-store', vectorStoreRoutes);
+app.use('/api/vector-store', vectorStoreRoutes);
 app.use('/api/openai/assistants', assistantsRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
@@ -603,7 +603,7 @@ app.use('/api', responseImageRoutes);
 app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 app.use('/api/license-plate', licensePlateRoutes);
 app.use('/api/plate-to-vin', plateToVinRoutes);
-app.use('/api/serp', serpRoutes);
+app.use('/api/serp', serperRoutes);
 // Memory vector routes disabled to reduce startup overhead
 // app.use('/api/memory-vector', memoryVectorRoutes);
 app.use('/api/responses', responsesRoutes);

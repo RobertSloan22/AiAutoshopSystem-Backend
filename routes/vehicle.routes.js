@@ -10,7 +10,6 @@ import {
     getVehiclesByCustomerName,
     getRecentVehicles,
 } from '../controllers/vehicleController.js';
-import { verifyToken } from '../middleware/auth.middleware.js';
 import protectRoute from "../middleware/protectRoute.js";
 import Vehicle from "../models/vehicle.model.js";
 const router = express.Router();

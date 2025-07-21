@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.post('/diagram-search', protectRoute, async (req, res) => {
   try {
-    const { query, apiKey, cx } = req.body;
+    const { query, apiKey, cx, vehicleInfo } = req.body;
     
     if (!query || !apiKey || !cx) {
       return res.status(400).json({
@@ -15,13 +15,22 @@ router.post('/diagram-search', protectRoute, async (req, res) => {
       });
     }
 
-    console.log('Searching for diagram:', query);
+    // Build search query based on whether vehicle info is provided
+    let searchQuery = query;
+    if (vehicleInfo && vehicleInfo.year && vehicleInfo.make && vehicleInfo.model) {
+      // Prepend vehicle information to the query
+      const vehicleString = `${vehicleInfo.year} ${vehicleInfo.make} ${vehicleInfo.model}`;
+      const engineInfo = vehicleInfo.engine ? ` ${vehicleInfo.engine}` : '';
+      searchQuery = `${vehicleString}${engineInfo} ${query}`;
+    }
+
+    console.log('Searching for diagram:', searchQuery);
 
     const response = await fetch(
       `https://www.googleapis.com/customsearch/v1?` +
       `key=${apiKey}` +
       `&cx=${cx}` +
-      `&q=${encodeURIComponent(query)}` +
+      `&q=${encodeURIComponent(searchQuery)}` +
       `&searchType=image` +
       `&num=1` +
       `&fileType=jpg,png,gif` +

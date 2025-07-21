@@ -223,16 +223,32 @@ async function processResearch(researchId, query, userId) {
         (researchData.finalReport || researchData.result || JSON.stringify(researchData)) : 
         String(researchData);
         
+      // Process sources to ensure they are strings
+      let processedSources = [];
+      if (researchData.sources && Array.isArray(researchData.sources)) {
+        processedSources = researchData.sources.map(source => {
+          // If source is an object, convert it to a formatted string
+          if (typeof source === 'object' && source !== null) {
+            // Create a meaningful string representation
+            return source.summary || source.query || JSON.stringify(source);
+          }
+          // If it's already a string, use it as is
+          return String(source);
+        });
+      }
+        
       // Create a new research result entry
       const newResearchResult = new ResearchResult({
         researchId,
         query,
         result: researchData,
-        sources: researchData.sources || [],
+        sources: processedSources,
         metadata: {
           timestamp: new Date().toISOString(),
           source: 'agent_service',
-          textContent: textContent // Store plain text version for easy frontend usage
+          textContent: textContent, // Store plain text version for easy frontend usage
+          // Store the original sources structure in metadata if needed
+          originalSources: researchData.sources
         },
         userId: userId || null,
         tags: ['agent-research'],
@@ -351,15 +367,31 @@ export const performStreamingResearch = async (req, res) => {
         // Save the complete research result to the database if we have a final result
         if (finalResult) {
           try {
+            // Process sources to ensure they are strings
+            let processedSources = [];
+            if (finalResult.sources && Array.isArray(finalResult.sources)) {
+              processedSources = finalResult.sources.map(source => {
+                // If source is an object, convert it to a formatted string
+                if (typeof source === 'object' && source !== null) {
+                  // Create a meaningful string representation
+                  return source.summary || source.query || JSON.stringify(source);
+                }
+                // If it's already a string, use it as is
+                return String(source);
+              });
+            }
+            
             // Create a new research result entry
             const newResearchResult = new ResearchResult({
               query,
               result: finalResult,
-              sources: finalResult.sources || [],
+              sources: processedSources,
               metadata: {
                 timestamp: new Date().toISOString(),
                 source: 'agent_service_stream',
-                isStreamResult: true
+                isStreamResult: true,
+                // Store the original sources structure in metadata if needed
+                originalSources: finalResult.sources
               },
               userId: req.user?.id || null,
               tags: ['agent-research', 'streaming'],
