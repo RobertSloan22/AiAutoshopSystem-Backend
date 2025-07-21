@@ -10,6 +10,55 @@ const openai = new OpenAI();
 
 
 
+  // Session route - GET /api/session
+  router.get('/api/session', async (req, res) => {
+    try {
+      const response = await fetch(
+        "https://api.openai.com/v1/realtime/sessions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-realtime-preview-2025-06-03",
+          }),
+        }
+      );
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error("Error in /session:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  // Responses route - POST /api/responses
+  router.post('/api/responses', async (req, res) => {
+    const body = req.body;
+
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    try {
+      if (body.text?.format?.type === 'json_schema') {
+        const response = await openai.responses.parse({
+          ...body,
+          stream: false,
+        });
+        res.json(response);
+      } else {
+        const response = await openai.responses.create({
+          ...body,
+          stream: false,
+        });
+        res.json(response);
+      }
+    } catch (err) {
+      console.error('responses proxy error', err);
+      res.status(500).json({ error: 'failed' });
+    }
+  });
 
 router.post('/realtime/sessions', async (req, res) => {
   try {

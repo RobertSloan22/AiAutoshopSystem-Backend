@@ -17,19 +17,19 @@ const router = express.Router();
 router.use(protectRoute);
 
 // Create a new note
-router.post('/', protectRoute, createNote);
+router.post('/', createNote);
 
 // Get all notes for the authenticated user
-router.get('/', protectRoute, getNotes);
+router.get('/', getNotes);
 
 // Get notes for a specific conversation
-router.get('/conversation/:conversationId', protectRoute, getNotesByConversation);
+router.get('/conversation/:conversationId', getNotesByConversation);
 
 // Delete a specific note
-router.delete('/:noteId', protectRoute, deleteNote);
+router.delete('/:noteId', deleteNote);
 
 // Add these routes before the export
-router.get('/search', protectRoute, searchNotes);
-router.get('/recent', protectRoute, getRecentNotes);
+router.get('/search', searchNotes);
+router.get('/recent', getRecentNotes);
 
 export default router;

@@ -22,7 +22,7 @@ export const createAssistant = async (req, res) => {
       name, 
       description, 
       instructions, 
-      model = "gpt-4o", 
+      model = "gpt-4o-mini", 
       tools = [], 
       file_ids = [] 
     } = req.body;

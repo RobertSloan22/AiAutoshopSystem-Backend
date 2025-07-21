@@ -77,31 +77,40 @@ export const searchImages = async (req, res) => {
   try {
     const { query, num = 100, vehicleInfo } = req.body;
     
-    if (!vehicleInfo || !vehicleInfo.year || !vehicleInfo.make || !vehicleInfo.model) {
-      return res.status(400).json({ error: 'Vehicle information is required' });
+    if (!query) {
+      return res.status(400).json({ error: 'Search query is required' });
     }
 
-    // Build a basic search query
-    const vehicleString = `${vehicleInfo.year} ${vehicleInfo.make} ${vehicleInfo.model}`;
-    const engineInfo = vehicleInfo.engine ? ` ${vehicleInfo.engine}` : '';
+    // Build search query based on whether vehicle info is provided
+    let refinedQuery;
+    let isPartQuery = false;
     
-    // Determine if the query is for a specific part/component
-    const commonPartTerms = ['pump', 'sensor', 'belt', 'module', 'routing', 'circuit', 'filter', 'motor', 'valve', 'relay', 'switch', 'harness'];
-    const isPartQuery = query.toLowerCase().split(' ').some(word => commonPartTerms.includes(word));
-    
-    // Construct final search query based on query type
-    let technicalTerms;
-    if (isPartQuery) {
-      // For part queries, focus on diagrams and locations
-      technicalTerms = `"${query}" (diagram OR schematic OR "parts diagram" OR "exploded view" OR "repair diagram")`;
-    } else if (query.toLowerCase().includes('diagram') || query.toLowerCase().includes('manual')) {
-      technicalTerms = query;  // If query already contains technical terms, don't add more
+    if (vehicleInfo && vehicleInfo.year && vehicleInfo.make && vehicleInfo.model) {
+      // Vehicle information is provided
+      const vehicleString = `${vehicleInfo.year} ${vehicleInfo.make} ${vehicleInfo.model}`;
+      const engineInfo = vehicleInfo.engine ? ` ${vehicleInfo.engine}` : '';
+      
+      // Determine if the query is for a specific part/component
+      const commonPartTerms = ['pump', 'sensor', 'belt', 'module', 'routing', 'circuit', 'filter', 'motor', 'valve', 'relay', 'switch', 'harness'];
+      isPartQuery = query.toLowerCase().split(' ').some(word => commonPartTerms.includes(word));
+      
+      // Construct final search query based on query type
+      let technicalTerms;
+      if (isPartQuery) {
+        // For part queries, focus on diagrams and locations
+        technicalTerms = `"${query}" (diagram OR schematic OR "parts diagram" OR "exploded view" OR "repair diagram")`;
+      } else if (query.toLowerCase().includes('diagram') || query.toLowerCase().includes('manual')) {
+        technicalTerms = query;  // If query already contains technical terms, don't add more
+      } else {
+        technicalTerms = `${query} (diagram OR schematic OR "repair manual" OR "service manual")`;
+      }
+      
+      // Ensure vehicle specificity in the query
+      refinedQuery = `"${vehicleString}"${engineInfo} ${technicalTerms}`;
     } else {
-      technicalTerms = `${query} (diagram OR schematic OR "repair manual" OR "service manual")`;
+      // No vehicle information - just use the query as is
+      refinedQuery = query;
     }
-    
-    // Ensure vehicle specificity in the query
-    const refinedQuery = `"${vehicleString}"${engineInfo} ${technicalTerms}`;
 
     console.log('Refined search query:', refinedQuery);
 
@@ -159,27 +168,36 @@ export const searchImages = async (req, res) => {
         if (!image.imageUrl || !hasValidImageExtension(image.imageUrl)) return null;
 
         const imageText = `${image.title} ${image.link} ${image.source}`.toLowerCase();
-        const vehicleTerms = [vehicleInfo.year.toString(), vehicleInfo.make.toLowerCase(), vehicleInfo.model.toLowerCase()];
         const isDiagram = isDiagramImage(imageText, image.imageUrl);
 
         if (!isDiagram) return null;
 
         image.relevanceScore = 3;
 
-        const hasMake = imageText.includes(vehicleInfo.make.toLowerCase());
-        const hasModel = imageText.includes(vehicleInfo.model.toLowerCase());
-        const hasYear = imageText.includes(vehicleInfo.year.toString());
-        const hasEngine = vehicleInfo.engine && imageText.includes(vehicleInfo.engine.toLowerCase());
-        const hasPart = query.toLowerCase().split(' ').some(word => imageText.includes(word));
+        // If vehicle info is provided, apply vehicle-specific filtering
+        if (vehicleInfo && vehicleInfo.year && vehicleInfo.make && vehicleInfo.model) {
+          const vehicleTerms = [vehicleInfo.year.toString(), vehicleInfo.make.toLowerCase(), vehicleInfo.model.toLowerCase()];
+          const hasMake = imageText.includes(vehicleInfo.make.toLowerCase());
+          const hasModel = imageText.includes(vehicleInfo.model.toLowerCase());
+          const hasYear = imageText.includes(vehicleInfo.year.toString());
+          const hasEngine = vehicleInfo.engine && imageText.includes(vehicleInfo.engine.toLowerCase());
+          const hasPart = query.toLowerCase().split(' ').some(word => imageText.includes(word));
 
-        if (isPartQuery) {
-          if (!(hasMake && hasModel && hasPart)) return null;
-          image.relevanceScore += (hasYear ? 2 : 0) + (hasEngine ? 1 : 0);
-          image.relevanceScore += hasPart ? 2 : 0;
+          if (isPartQuery) {
+            if (!(hasMake && hasModel && hasPart)) return null;
+            image.relevanceScore += (hasYear ? 2 : 0) + (hasEngine ? 1 : 0);
+            image.relevanceScore += hasPart ? 2 : 0;
+          } else {
+            const hasModelOrYear = vehicleTerms.slice(0, 2).some(term => imageText.includes(term));
+            if (!hasMake || !hasModelOrYear) return null;
+            image.relevanceScore += vehicleTerms.filter(term => imageText.includes(term)).length;
+          }
         } else {
-          const hasModelOrYear = vehicleTerms.slice(0, 2).some(term => imageText.includes(term));
-          if (!hasMake || !hasModelOrYear) return null;
-          image.relevanceScore += vehicleTerms.filter(term => imageText.includes(term)).length;
+          // No vehicle info - score based on query match only
+          const queryTerms = query.toLowerCase().split(' ');
+          const matchingTerms = queryTerms.filter(term => imageText.includes(term));
+          if (matchingTerms.length === 0) return null;
+          image.relevanceScore += matchingTerms.length * 2;
         }
 
         const diagramTypes = ['exploded view', 'parts diagram', 'assembly diagram', 'technical drawing', 'repair diagram', 'service diagram'];

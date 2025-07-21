@@ -15,16 +15,16 @@ export const startAgentService = () => {
     console.log('Starting Agent Research Service...');
     
     // Path to the agent server script (TypeScript)
-    const agentServerPath = path.join(__dirname, '../agents/server.ts');
+    const agentServerPath = path.join(__dirname, '../agent-service/server.js');
     
-    // Create a new agent process using tsx to run TypeScript directly
-    agentProcess = spawn('npx', ['tsx', agentServerPath], {
+    // Create a new agent process using node to run JavaScript directly
+    agentProcess = spawn('node', [agentServerPath], {
       env: { 
         ...process.env,
         NODE_OPTIONS: '--no-warnings' // Suppress TypeScript warnings
       },
       stdio: ['ignore', 'pipe', 'pipe'],
-      cwd: path.join(__dirname, '../agents') // Make sure we're in the agents directory
+      cwd: path.join(__dirname, '../agent-service') // Make sure we're in the agent-service directory
     });
     
     // Handle output from the agent process

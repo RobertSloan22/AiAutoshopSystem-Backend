@@ -14,71 +14,82 @@ export class ResearchManager {
   }
 
   async run(query) {
-    await withTrace('Research workflow', async (trace) => {
+    return await withTrace('Automotive Research workflow', async (trace) => {
       console.log(
         `[trace_id] View trace: https://platform.openai.com/traces/trace?trace_id=${trace.traceId}`,
       );
-      console.log(`[starting] Starting research...`);
+      console.log(`[starting] Starting automotive research...`);
       const searchPlan = await this._planSearches(query);
       const searchResults = await this._performSearches(searchPlan);
       const report = await this._writeReport(query, searchResults);
 
-      const finalReport = `Report summary\n\n${report.shortSummary}`;
+      const finalReport = `Automotive Research Report\n\n${report.shortSummary}`;
       console.log(`[final_report] ${finalReport}`);
-      console.log('Research complete.');
-
-      console.log('\n\n=====REPORT=====\n\n');
-      console.log(`Report: ${report.markdownReport}`);
-      console.log('\n\n=====FOLLOW UP QUESTIONS=====\n\n');
-      const followUpQuestions = report.followUpQuestions.join('\n');
-      console.log(`Follow up questions: ${followUpQuestions}`);
-    });
-  }
-
-  async performResearch(query) {
-    return await withTrace('Research workflow', async (trace) => {
-      console.log(
-        `[trace_id] View trace: https://platform.openai.com/traces/trace?trace_id=${trace.traceId}`,
-      );
-      console.log(`[starting] Starting research...`);
-      const searchPlan = await this._planSearches(query);
-      const searchResults = await this._performSearches(searchPlan);
-      const report = await this._writeReport(query, searchResults);
-
-      const finalReport = `Report summary\n\n${report.shortSummary}`;
-      console.log(`[final_report] ${finalReport}`);
-      console.log('Research complete.');
+      console.log('Automotive research complete.');
 
       return {
         searchPlan,
         searchResults,
         report,
         traceId: trace.traceId,
+        success: true,
+        message: 'Research completed successfully'
+      };
+    });
+  }
+
+  async performResearch(query) {
+    return await withTrace('Automotive Research workflow', async (trace) => {
+      console.log(
+        `[trace_id] View trace: https://platform.openai.com/traces/trace?trace_id=${trace.traceId}`,
+      );
+      console.log(`[starting] Starting automotive research...`);
+      const searchPlan = await this._planSearches(query);
+      const searchResults = await this._performSearches(searchPlan);
+      const report = await this._writeReport(query, searchResults);
+
+      const finalReport = `Automotive Research Report\n\n${report.shortSummary}`;
+      console.log(`[final_report] ${finalReport}`);
+      console.log('Automotive research complete.');
+
+      return {
+        searchPlan,
+        searchResults,
+        report,
+        traceId: trace.traceId,
+        success: true,
+        message: 'Research completed successfully',
+        result: report, // Send the full report object
+        sources: searchResults.map((result, index) => ({
+          id: index + 1,
+          query: searchPlan.searches[index]?.query || `Search ${index + 1}`,
+          summary: result
+        }))
       };
     });
   }
 
   async performResearchWithProgress(query, onProgress) {
-    return await withTrace('Research workflow', async (trace) => {
+    return await withTrace('Automotive Research workflow', async (trace) => {
       console.log(
         `[trace_id] View trace: https://platform.openai.com/traces/trace?trace_id=${trace.traceId}`,
       );
 
-      onProgress('status', {
+      onProgress?.('status', {
         stage: 'starting',
-        message: 'Starting research...',
+        message: 'Starting automotive research...',
       });
 
-      console.log(`[starting] Starting research...`);
-      onProgress('status', {
+      console.log(`[starting] Starting automotive research...`);
+      onProgress?.('status', {
         stage: 'planning',
-        message: 'Planning searches...',
+        message: 'Planning automotive research searches...',
       });
       const searchPlan = await this._planSearches(query);
 
-      onProgress('plan', {
+      onProgress?.('plan', {
         searchPlan,
-        message: `Will perform ${searchPlan.searches.length} searches`,
+        message: `Will perform ${searchPlan.searches.length} automotive searches`,
       });
 
       const searchResults = await this._performSearchesWithProgress(
@@ -86,37 +97,45 @@ export class ResearchManager {
         onProgress,
       );
 
-      onProgress('status', {
+      onProgress?.('status', {
         stage: 'writing',
-        message: 'Generating comprehensive report...',
+        message: 'Generating comprehensive automotive repair report...',
       });
       const report = await this._writeReport(query, searchResults);
 
-      const finalReport = `Report summary\n\n${report.shortSummary}`;
+      const finalReport = `Automotive Research Report\n\n${report.shortSummary}`;
       console.log(`[final_report] ${finalReport}`);
-      console.log('Research complete.');
+      console.log('Automotive research complete.');
 
       return {
         searchPlan,
         searchResults,
         report,
         traceId: trace.traceId,
+        success: true,
+        message: 'Research completed successfully',
+        result: report, // Send the full report object
+        sources: searchResults.map((result, index) => ({
+          id: index + 1,
+          query: searchPlan.searches[index]?.query || `Search ${index + 1}`,
+          summary: result
+        }))
       };
     });
   }
 
   async _planSearches(query) {
-    console.log('[planning] Planning searches...');
-    const result = await this.runner.run(plannerAgent, `Query: ${query}`);
+    console.log('[planning] Planning automotive searches...');
+    const result = await this.runner.run(plannerAgent, `Automotive Query: ${query}`);
     const parsed = webSearchPlan.parse(result.finalOutput);
-    console.log(`[planning] Will perform ${parsed.searches.length} searches`);
+    console.log(`[planning] Will perform ${parsed.searches.length} automotive searches`);
     return parsed;
   }
 
   async _performSearches(searchPlan) {
     return await withCustomSpan(
       async (_span) => {
-        console.log('[searching] Searching...');
+        console.log('[searching] Searching automotive information...');
         let numCompleted = 0;
         const tasks = searchPlan.searches.map((item) =>
           this._search(item),
@@ -126,20 +145,20 @@ export class ResearchManager {
           if (result != null) results.push(result);
           numCompleted++;
           console.log(
-            `[searching] Searching... ${numCompleted}/${tasks.length} completed`,
+            `[searching] Automotive searching... ${numCompleted}/${tasks.length} completed`,
           );
         }
-        console.log('[searching] done');
+        console.log('[searching] Automotive searches done');
         return results;
       },
-      { data: { name: 'Search the web' } },
+      { data: { name: 'Search automotive information' } },
     );
   }
 
   async _performSearchesWithProgress(searchPlan, onProgress) {
     return await withCustomSpan(
       async (_span) => {
-        console.log('[searching] Searching...');
+        console.log('[searching] Searching automotive information...');
         let numCompleted = 0;
         const results = [];
 
@@ -147,11 +166,11 @@ export class ResearchManager {
         for (let i = 0; i < searchPlan.searches.length; i++) {
           const item = searchPlan.searches[i];
 
-          onProgress('search', {
+          onProgress?.('search', {
             currentSearch: i,
             totalSearches: searchPlan.searches.length,
             searchItem: item,
-            message: `Searching: ${item.query}`,
+            message: `Searching automotive info: ${item.query}`,
           });
 
           try {
@@ -161,37 +180,37 @@ export class ResearchManager {
             }
             numCompleted++;
 
-            onProgress('searchComplete', {
+            onProgress?.('searchComplete', {
               currentSearch: i,
               totalSearches: searchPlan.searches.length,
               completed: numCompleted,
-              message: `Completed ${numCompleted}/${searchPlan.searches.length} searches`,
+              message: `Completed ${numCompleted}/${searchPlan.searches.length} automotive searches`,
             });
 
             console.log(
-              `[searching] Searching... ${numCompleted}/${searchPlan.searches.length} completed`,
+              `[searching] Automotive searching... ${numCompleted}/${searchPlan.searches.length} completed`,
             );
           } catch (error) {
             console.error(
-              `[searching] Error searching for "${item.query}":`,
+              `[searching] Error searching automotive info for "${item.query}":`,
               error,
             );
-            onProgress('searchError', {
+            onProgress?.('searchError', {
               currentSearch: i,
               searchItem: item,
-              error: error instanceof Error ? error.message : 'Search failed',
+              error: error instanceof Error ? error.message : 'Automotive search failed',
             });
           }
         }
-        console.log('[searching] done');
+        console.log('[searching] Automotive searches done');
         return results;
       },
-      { data: { name: 'Search the web' } },
+      { data: { name: 'Search automotive information' } },
     );
   }
 
   async _search(item) {
-    const input = `Search term: ${item.query}\nReason for searching: ${item.reason}`;
+    const input = `Automotive search term: ${item.query}\nReason for searching: ${item.reason}`;
     try {
       const result = await this.runner.run(searchAgent, input);
       return String(result.finalOutput);
@@ -201,11 +220,10 @@ export class ResearchManager {
   }
 
   async _writeReport(query, searchResults) {
-    console.log('[writing] Thinking about report...');
-    const input = `Original query: ${query}\nSummarized search results: ${searchResults}`;
+    console.log('[writing] Writing automotive repair report...');
+    const input = `Original automotive query: ${query}\nAutomotive research results: ${searchResults}`;
     const result = await this.runner.run(writerAgent, input);
-    // Simulate streaming updates (could be implemented with events if needed)
-    console.log('[writing] done');
+    console.log('[writing] Automotive report complete');
     return reportData.parse(result.finalOutput);
   }
 }
