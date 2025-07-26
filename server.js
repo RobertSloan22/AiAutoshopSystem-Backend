@@ -64,7 +64,7 @@ import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
-import obd2Routes from './routes/obd2.routes.js';
+import obd2Routes, { initializeOBD2WebSocket } from './routes/obd2.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -140,7 +140,11 @@ const allowedOrigins = [
   // App protocols
   'app://*',
   'file://*',
-  'electron://*'
+  'electron://*',
+  
+  // OBD2-specific origins (if needed)
+  // Add any specific OBD2 frontend URLs here
+  // 'https://your-obd2-frontend.vercel.app',
 ];
 
 // Single CORS middleware configuration
@@ -545,6 +549,23 @@ app.use('/visualization', createProxyMiddleware({
   }
 }));
 
+// =====================================================
+// OBD2 WebSocket Integration
+// =====================================================
+
+// Initialize OBD2 WebSocket service
+let obd2Namespace;
+try {
+  obd2Namespace = initializeOBD2WebSocket(server);
+  console.log('✅ OBD2 WebSocket service initialized');
+} catch (error) {
+  console.error('❌ Failed to initialize OBD2 WebSocket service:', error);
+}
+
+// =====================================================
+// End OBD2 WebSocket Integration
+// =====================================================
+
 // API Routes
 app.use("/api/auth", authRoutes);
 // Enable research routes
@@ -827,6 +848,44 @@ server.listen(PORT, async () => {
     obd2WebSocketService.cleanupOldSessions(24); // Clean up sessions older than 24 hours
   }, 60 * 60 * 1000); // Run every hour
 
+  // =====================================================
+  // OBD2 Data Cleanup Job
+  // =====================================================
+  
+  // Cleanup old OBD2 data periodically (optional)
+  if (process.env.ENABLE_OBD2_CLEANUP === 'true') {
+    const OBD2_CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+    const OBD2_DATA_RETENTION_DAYS = parseInt(process.env.OBD2_DATA_RETENTION_DAYS) || 365;
+
+    setInterval(async () => {
+      try {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - OBD2_DATA_RETENTION_DAYS);
+        
+        // Import the models (you may need to adjust the import path)
+        const { DiagnosticSession, OBD2DataPoint, DTCEvent } = await import('./routes/obd2.routes.js');
+        
+        // Delete old completed sessions and their data
+        const oldSessions = await DiagnosticSession.find({
+          status: 'completed',
+          startTime: { $lt: cutoffDate }
+        }).select('_id');
+        
+        const sessionIds = oldSessions.map(s => s._id);
+        
+        if (sessionIds.length > 0) {
+          await OBD2DataPoint.deleteMany({ sessionId: { $in: sessionIds } });
+          await DTCEvent.deleteMany({ sessionId: { $in: sessionIds } });
+          await DiagnosticSession.deleteMany({ _id: { $in: sessionIds } });
+          
+          console.log(`🧹 Cleaned up ${sessionIds.length} old OBD2 sessions`);
+        }
+      } catch (error) {
+        console.error('❌ OBD2 cleanup error:', error);
+      }
+    }, OBD2_CLEANUP_INTERVAL);
+  }
+
   // Start the agent service
   startAgentService();
 
@@ -846,12 +905,18 @@ server.listen(PORT, async () => {
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
+  console.log('SIGTERM received, cleaning up OBD2 services...');
+  if (obd2Namespace) {
+    obd2Namespace.disconnectSockets();
+  }
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
+  console.log('SIGINT received, cleaning up OBD2 services...');
+  if (obd2Namespace) {
+    obd2Namespace.disconnectSockets();
+  }
   process.exit(0);
 });
 
