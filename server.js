@@ -65,6 +65,7 @@ import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 import obd2Routes, { initializeOBD2WebSocket } from './routes/obd2.routes.js';
+import obd2RealtimeService from './services/OBD2RealtimeService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -557,7 +558,7 @@ app.use('/visualization', createProxyMiddleware({
 let obd2Namespace;
 try {
   obd2Namespace = initializeOBD2WebSocket(server);
-  console.log('✅ OBD2 WebSocket service initialized');
+  console.log('✅ OBD2 WebSocket service initialized on /obd2-socket.io path');
 } catch (error) {
   console.error('❌ Failed to initialize OBD2 WebSocket service:', error);
 }
