@@ -64,7 +64,7 @@ import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
-import obd2Routes, { initializeOBD2WebSocket } from './routes/obd2.routes.js';
+import obd2Routes from './routes/obd2.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -551,27 +551,20 @@ app.use('/visualization', createProxyMiddleware({
 }));
 
 // =====================================================
-// OBD2 WebSocket Integration
+// OBD2 HTTP Service Integration
 // =====================================================
 
-// Initialize OBD2 WebSocket service
-let obd2Namespace;
-try {
-  obd2Namespace = initializeOBD2WebSocket(server);
-  console.log('✅ OBD2 WebSocket service initialized on /obd2-socket.io path');
-} catch (error) {
-  console.error('❌ Failed to initialize OBD2 WebSocket service:', error);
-}
+console.log('✅ OBD2 HTTP-based service integrated');
 
 // =====================================================
-// End OBD2 WebSocket Integration
+// End OBD2 HTTP Service Integration
 // =====================================================
 
 // API Routes
 app.use("/api/auth", authRoutes);
 // Enable research routes
-app.use("/api/research1", researchRoutes);
-app.use("/api/research", researchServiceRoutes);
+app.use("/api/research", researchRoutes);
+app.use("/api/research1", researchServiceRoutes);
 app.use("/api/researcho3/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
 // Integrated research bot - direct endpoint
@@ -906,18 +899,14 @@ server.listen(PORT, async () => {
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, cleaning up OBD2 services...');
-  if (obd2Namespace) {
-    obd2Namespace.disconnectSockets();
-  }
+  console.log('SIGTERM received, cleaning up services...');
+  obd2RealtimeService.shutdown();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('SIGINT received, cleaning up OBD2 services...');
-  if (obd2Namespace) {
-    obd2Namespace.disconnectSockets();
-  }
+  console.log('SIGINT received, cleaning up services...');
+  obd2RealtimeService.shutdown();
   process.exit(0);
 });
 
