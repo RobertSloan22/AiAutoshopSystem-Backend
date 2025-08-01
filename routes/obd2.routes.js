@@ -1,7 +1,6 @@
-// routes/obd2.routes.js - Add this new route file to your existing routes folder
+// routes/obd2.routes.js - HTTP-based OBD2 diagnostic routes
 
 import express from 'express';
-import { Server as SocketIOServer } from 'socket.io';
 import mongoose from 'mongoose';
 import obd2RealtimeService from '../services/OBD2RealtimeService.js';
 
@@ -205,7 +204,7 @@ OBD2DataPointSchema.index({ sessionId: 1, timestamp: -1 });
 DTCEventSchema.index({ sessionId: 1, timestamp: -1 });
 DTCEventSchema.index({ dtcCode: 1, dtcStatus: 1 });
 
-// New Schema for Session Sharing
+// Schema for Session Sharing (HTTP-based)
 const SharedSessionSchema = new mongoose.Schema({
   shareCode: { type: String, unique: true, index: true }, // 6-character code
   diagnosticSessionId: { 
@@ -213,8 +212,11 @@ const SharedSessionSchema = new mongoose.Schema({
     ref: 'DiagnosticSession',
     required: true
   },
-  hostSocketId: String, // Tablet's socket ID
-  clientSocketIds: [String], // Office computers connected
+  hostUserId: String, // Host user identifier
+  connectedClients: [{
+    clientId: String,
+    lastSeen: { type: Date, default: Date.now }
+  }],
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now, expires: 86400 } // 24 hour expiry
 });
@@ -297,332 +299,272 @@ function generateShareCode() {
   return result;
 }
 
-// Enhanced WebSocket initialization
-export function initializeOBD2WebSocket(server) {
-  // Create dedicated Socket.IO instance for OBD2 with unique path
-  const io = new SocketIOServer(server, {
-    cors: {
-      origin: function(origin, callback) {
-        callback(null, true);
-      },
-      methods: ["GET", "POST"]
-    },
-    path: '/obd2-socket.io',
-    transports: ['websocket', 'polling'],
-    allowEIO3: true,
-    pingTimeout: 60000,
-    pingInterval: 25000,
-    upgradeTimeout: 30000,
-    allowUpgrades: true,
-    cookie: false,
-    serveClient: false
-  });
+// HTTP-Based Session Management Routes
 
-  const obd2Namespace = io.of('/obd2');
-
-  // Store active sharing sessions
-  const activeSharingSessions = new Map();
-
-  // Add connection error handling
-  io.engine.on("connection_error", (err) => {
-    console.error("🚨 OBD2 Socket.IO connection error:", {
-      code: err.code,
-      message: err.message,
-      context: err.context,
-      req: err.req?.url
-    });
-  });
-
-  obd2Namespace.on('connection', (socket) => {
-    console.log(`🔌 OBD2 Client connected: ${socket.id}`);
-    console.log(`🌐 Origin: ${socket.handshake.headers.origin}`);
-    console.log(`📡 Transport: ${socket.conn.transport.name}`);
+// Start a new diagnostic session
+router.post('/sessions', async (req, res) => {
+  try {
+    const { userId, vehicleId, sessionName, vehicleInfo, sessionNotes, tags } = req.body;
     
-    let currentSessionId = null;
-    let currentShareCode = null;
-    let isHost = false;
+    const session = new DiagnosticSession({
+      userId: userId || null,
+      vehicleId: vehicleId || null,
+      sessionName: sessionName || null,
+      startTime: new Date(),
+      vehicleInfo: vehicleInfo || {},
+      sessionNotes: sessionNotes || null,
+      tags: tags || []
+    });
 
-    // Existing session start handler
-    socket.on('start-session', async (data) => {
-      try {
-        const session = new DiagnosticSession({
-          userId: data.userId || null,
-          vehicleId: data.vehicleId || null,
-          sessionName: data.sessionName || null,
-          startTime: new Date(),
-          vehicleInfo: data.vehicleInfo || {},
-          sessionNotes: data.sessionNotes || null,
-          tags: data.tags || []
-        });
-
-        const savedSession = await session.save();
-        currentSessionId = savedSession._id;
-        
-        socket.emit('session-started', {
-          sessionId: currentSessionId,
-          startTime: savedSession.startTime
-        });
-
-        console.log(`📊 New OBD2 diagnostic session started: ${currentSessionId}`);
-      } catch (error) {
-        console.error('❌ Failed to start session:', error);
-        socket.emit('error', { message: 'Failed to start diagnostic session' });
+    const savedSession = await session.save();
+    
+    res.status(201).json({
+      success: true,
+      session: {
+        sessionId: savedSession._id,
+        startTime: savedSession.startTime,
+        status: savedSession.status
       }
     });
 
-    // NEW: Create sharing session (for tablet)
-    socket.on('create-share-session', async (data) => {
-      if (!currentSessionId) {
-        socket.emit('error', { message: 'No active diagnostic session to share' });
-        return;
-      }
+    console.log(`📊 New OBD2 diagnostic session started: ${savedSession._id}`);
+  } catch (error) {
+    console.error('❌ Failed to start session:', error);
+    res.status(500).json({ error: 'Failed to start diagnostic session' });
+  }
+});
 
-      try {
-        // Generate unique 6-character code
-        const shareCode = generateShareCode();
-        
-        const sharedSession = new SharedSession({
-          shareCode,
-          diagnosticSessionId: currentSessionId,
-          hostSocketId: socket.id
-        });
+// End a diagnostic session
+router.put('/sessions/:sessionId/end', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    // Force flush any buffered data
+    await dataAggregator.forceFlush(sessionId);
 
-        await sharedSession.save();
-        
-        currentShareCode = shareCode;
-        isHost = true;
-        
-        // Store in memory for quick access
-        activeSharingSessions.set(shareCode, {
-          hostSocketId: socket.id,
-          clientSocketIds: new Set(),
-          diagnosticSessionId: currentSessionId
-        });
+    const endTime = new Date();
+    const session = await DiagnosticSession.findById(sessionId);
+    
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
 
-        socket.emit('share-session-created', {
-          shareCode,
-          sessionId: currentSessionId
-        });
+    if (session.status !== 'active') {
+      return res.status(400).json({ error: 'Session is not active' });
+    }
 
-        console.log(`🔗 Share session created: ${shareCode} for diagnostic session: ${currentSessionId}`);
-      } catch (error) {
-        console.error('❌ Failed to create share session:', error);
-        socket.emit('error', { message: 'Failed to create sharing session' });
-      }
-    });
+    const duration = Math.floor((endTime - session.startTime) / 1000);
 
-    // NEW: Join sharing session (for office computer)
-    socket.on('join-share-session', async (data) => {
-      const { shareCode } = data;
-      
-      try {
-        const sharedSession = await SharedSession.findOne({ 
-          shareCode, 
-          isActive: true 
-        }).populate('diagnosticSessionId');
+    const updatedSession = await DiagnosticSession.findByIdAndUpdate(
+      sessionId,
+      {
+        endTime,
+        duration,
+        status: 'completed',
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
 
-        if (!sharedSession) {
-          socket.emit('error', { message: 'Share code not found or expired' });
-          return;
-        }
+    // End any associated sharing sessions
+    await SharedSession.updateMany(
+      { diagnosticSessionId: sessionId },
+      { isActive: false }
+    );
 
-        // Add client to the sharing session
-        const sharingSession = activeSharingSessions.get(shareCode);
-        if (sharingSession) {
-          sharingSession.clientSocketIds.add(socket.id);
-          
-          // Update database
-          await SharedSession.findOneAndUpdate(
-            { shareCode },
-            { $addToSet: { clientSocketIds: socket.id } }
-          );
-
-          socket.emit('share-session-joined', {
-            shareCode,
-            sessionId: sharedSession.diagnosticSessionId._id,
-            sessionInfo: sharedSession.diagnosticSessionId
-          });
-
-          // Notify host about new client
-          const hostSocket = obd2Namespace.sockets.get(sharingSession.hostSocketId);
-          if (hostSocket) {
-            hostSocket.emit('client-joined-share', {
-              clientSocketId: socket.id,
-              clientCount: sharingSession.clientSocketIds.size
-            });
-          }
-
-          console.log(`👥 Client ${socket.id} joined share session: ${shareCode}`);
-        } else {
-          socket.emit('error', { message: 'Sharing session not active' });
-        }
-      } catch (error) {
-        console.error('❌ Failed to join share session:', error);
-        socket.emit('error', { message: 'Failed to join sharing session' });
+    res.json({
+      success: true,
+      session: {
+        sessionId: updatedSession._id,
+        endTime: updatedSession.endTime,
+        duration: updatedSession.duration,
+        dataPointCount: updatedSession.dataPointCount,
+        status: updatedSession.status
       }
     });
 
-    // Enhanced OBD2 data handler with sharing
-    socket.on('obd2-data', async (data) => {
-      if (!currentSessionId) {
-        socket.emit('error', { message: 'No active session. Please start a session first.' });
-        return;
+    console.log(`📊 OBD2 diagnostic session ended: ${sessionId}`);
+  } catch (error) {
+    console.error('❌ Failed to end session:', error);
+    res.status(500).json({ error: 'Failed to end diagnostic session' });
+  }
+});
+
+// Update session status
+router.put('/sessions/:sessionId/status', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { status } = req.body;
+    
+    if (!['active', 'paused', 'error', 'cancelled'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const updatedSession = await DiagnosticSession.findByIdAndUpdate(
+      sessionId,
+      { status, updatedAt: new Date() },
+      { new: true }
+    );
+
+    if (!updatedSession) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json({
+      success: true,
+      session: {
+        sessionId: updatedSession._id,
+        status: updatedSession.status
       }
+    });
+  } catch (error) {
+    console.error('❌ Failed to update session status:', error);
+    res.status(500).json({ error: 'Failed to update session status' });
+  }
+});
 
-      try {
-        const dataPoint = {
-          sessionId: currentSessionId,
-          timestamp: new Date(data.timestamp || Date.now()),
-          ...data
-        };
+// Create sharing session
+router.post('/sessions/:sessionId/share', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { hostUserId } = req.body;
+    
+    // Validate session exists and is active
+    const session = await DiagnosticSession.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    
+    if (session.status !== 'active') {
+      return res.status(400).json({ error: 'Can only share active sessions' });
+    }
 
-        // Add to aggregation buffer (existing functionality)
-        dataAggregator.addDataPoint(currentSessionId, dataPoint);
+    // Generate unique 6-character code
+    const shareCode = generateShareCode();
+    
+    const sharedSession = new SharedSession({
+      shareCode,
+      diagnosticSessionId: sessionId,
+      hostUserId: hostUserId || null
+    });
 
-        // NEW: Store in Redis for real-time access
-        await obd2RealtimeService.storeDataPoint(currentSessionId, dataPoint);
+    await sharedSession.save();
+    
+    res.status(201).json({
+      success: true,
+      shareCode,
+      sessionId,
+      expiresAt: sharedSession.createdAt
+    });
 
-        // NEW: Share data with connected clients if this is a host
-        if (isHost && currentShareCode) {
-          const sharingSession = activeSharingSessions.get(currentShareCode);
-          if (sharingSession) {
-            // Send to all connected clients
-            sharingSession.clientSocketIds.forEach(clientSocketId => {
-              const clientSocket = obd2Namespace.sockets.get(clientSocketId);
-              if (clientSocket) {
-                clientSocket.emit('shared-obd2-data', {
-                  shareCode: currentShareCode,
-                  data: dataPoint,
-                  timestamp: dataPoint.timestamp
-                });
-              }
-            });
-          }
-        }
+    console.log(`🔗 Share session created: ${shareCode} for diagnostic session: ${sessionId}`);
+  } catch (error) {
+    console.error('❌ Failed to create share session:', error);
+    res.status(500).json({ error: 'Failed to create sharing session' });
+  }
+});
 
-        // Send acknowledgment
-        socket.emit('data-received', { timestamp: dataPoint.timestamp });
+// Join sharing session
+router.post('/share/:shareCode/join', async (req, res) => {
+  try {
+    const { shareCode } = req.params;
+    const { clientId } = req.body;
+    
+    const sharedSession = await SharedSession.findOne({ 
+      shareCode, 
+      isActive: true 
+    }).populate('diagnosticSessionId');
 
-      } catch (error) {
-        console.error('❌ Failed to process OBD2 data:', error);
-        socket.emit('error', { message: 'Failed to process data point' });
+    if (!sharedSession) {
+      return res.status(404).json({ error: 'Share code not found or expired' });
+    }
+
+    // Add client to the sharing session
+    await SharedSession.findOneAndUpdate(
+      { shareCode },
+      { 
+        $addToSet: { 
+          connectedClients: { 
+            clientId: clientId || `client_${Date.now()}`,
+            lastSeen: new Date()
+          } 
+        } 
+      }
+    );
+
+    res.json({
+      success: true,
+      shareCode,
+      sessionId: sharedSession.diagnosticSessionId._id,
+      sessionInfo: {
+        sessionName: sharedSession.diagnosticSessionId.sessionName,
+        startTime: sharedSession.diagnosticSessionId.startTime,
+        vehicleInfo: sharedSession.diagnosticSessionId.vehicleInfo,
+        status: sharedSession.diagnosticSessionId.status
       }
     });
 
-    socket.on('end-session', async () => {
-      if (!currentSessionId) {
-        socket.emit('error', { message: 'No active session to end' });
-        return;
+    console.log(`👥 Client joined share session: ${shareCode}`);
+  } catch (error) {
+    console.error('❌ Failed to join share session:', error);
+    res.status(500).json({ error: 'Failed to join sharing session' });
+  }
+});
+
+// Update client activity in sharing session
+router.put('/share/:shareCode/ping', async (req, res) => {
+  try {
+    const { shareCode } = req.params;
+    const { clientId } = req.body;
+    
+    const result = await SharedSession.findOneAndUpdate(
+      { 
+        shareCode, 
+        isActive: true,
+        'connectedClients.clientId': clientId 
+      },
+      { 
+        $set: { 'connectedClients.$.lastSeen': new Date() }
       }
+    );
 
-      try {
-        await dataAggregator.forceFlush(currentSessionId);
+    if (!result) {
+      return res.status(404).json({ error: 'Share session or client not found' });
+    }
 
-        const endTime = new Date();
-        const session = await DiagnosticSession.findById(currentSessionId);
-        const duration = Math.floor((endTime - session.startTime) / 1000);
+    res.json({ success: true, timestamp: new Date() });
+  } catch (error) {
+    console.error('❌ Failed to update client activity:', error);
+    res.status(500).json({ error: 'Failed to update client activity' });
+  }
+});
 
-        const updatedSession = await DiagnosticSession.findByIdAndUpdate(
-          currentSessionId,
-          {
-            endTime,
-            duration,
-            status: 'completed',
-            updatedAt: new Date()
-          },
-          { new: true }
-        );
+// Get active session for a user (helper endpoint)
+router.get('/sessions/active', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    
+    let query = { status: 'active' };
+    if (userId) {
+      query.userId = userId;
+    }
+    
+    const activeSessions = await DiagnosticSession
+      .find(query)
+      .sort({ startTime: -1 })
+      .limit(10)
+      .lean();
 
-        socket.emit('session-ended', {
-          sessionId: currentSessionId,
-          endTime: updatedSession.endTime,
-          duration: updatedSession.duration,
-          dataPointCount: updatedSession.dataPointCount
-        });
-
-        // End sharing session if active
-        if (currentShareCode) {
-          await SharedSession.findOneAndUpdate(
-            { shareCode: currentShareCode },
-            { isActive: false }
-          );
-          activeSharingSessions.delete(currentShareCode);
-        }
-
-        console.log(`📊 OBD2 diagnostic session ended: ${currentSessionId}`);
-        currentSessionId = null;
-        currentShareCode = null;
-        isHost = false;
-
-      } catch (error) {
-        console.error('❌ Failed to end session:', error);
-        socket.emit('error', { message: 'Failed to end diagnostic session' });
-      }
+    res.json({
+      activeSessions,
+      count: activeSessions.length,
+      message: activeSessions.length === 0 ? 'No active sessions found. Create one using POST /api/obd2/sessions' : undefined
     });
-
-    // Enhanced disconnect handler
-    socket.on('disconnect', async () => {
-      console.log(`🔌 OBD2 Client disconnected: ${socket.id}`);
-      
-      // Handle sharing session cleanup
-      if (isHost && currentShareCode) {
-        // Host disconnected - notify all clients
-        const sharingSession = activeSharingSessions.get(currentShareCode);
-        if (sharingSession) {
-          sharingSession.clientSocketIds.forEach(clientSocketId => {
-            const clientSocket = obd2Namespace.sockets.get(clientSocketId);
-            if (clientSocket) {
-              clientSocket.emit('host-disconnected', {
-                shareCode: currentShareCode
-              });
-            }
-          });
-          
-          // Mark sharing session as inactive
-          await SharedSession.findOneAndUpdate(
-            { shareCode: currentShareCode },
-            { isActive: false }
-          );
-          
-          activeSharingSessions.delete(currentShareCode);
-        }
-      } else if (currentShareCode) {
-        // Client disconnected - remove from sharing session
-        const sharingSession = activeSharingSessions.get(currentShareCode);
-        if (sharingSession) {
-          sharingSession.clientSocketIds.delete(socket.id);
-          
-          // Notify host
-          const hostSocket = obd2Namespace.sockets.get(sharingSession.hostSocketId);
-          if (hostSocket) {
-            hostSocket.emit('client-left-share', {
-              clientSocketId: socket.id,
-              clientCount: sharingSession.clientSocketIds.size
-            });
-          }
-        }
-      }
-      
-      // Auto-end diagnostic session if host disconnects (existing functionality)
-      if (currentSessionId && isHost) {
-        try {
-          await dataAggregator.forceFlush(currentSessionId);
-          await DiagnosticSession.findByIdAndUpdate(currentSessionId, {
-            endTime: new Date(),
-            status: 'completed',
-            updatedAt: new Date()
-          });
-          
-          console.log(`📊 Auto-ended OBD2 session due to host disconnect: ${currentSessionId}`);
-        } catch (error) {
-          console.error('❌ Failed to auto-end session:', error);
-        }
-      }
-    });
-  });
-
-  return obd2Namespace;
-}
+  } catch (error) {
+    console.error('❌ Failed to fetch active sessions:', error);
+    res.status(500).json({ error: 'Failed to fetch active sessions' });
+  }
+});
 
 // REST API Routes
 
@@ -911,6 +853,15 @@ router.get('/sessions/:sessionId/updates', async (req, res) => {
     const { sessionId } = req.params;
     const { since = '0', limit = '50' } = req.query;
     
+    // Validate sessionId parameter
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
+      return res.status(400).json({ 
+        error: 'Invalid session ID', 
+        message: 'You must create a session first using POST /api/obd2/sessions',
+        received: sessionId
+      });
+    }
+    
     const updates = await obd2RealtimeService.getRecentUpdates(
       sessionId, 
       parseInt(since), 
@@ -1046,10 +997,23 @@ router.post('/sessions/:sessionId/data', async (req, res) => {
     const { sessionId } = req.params;
     const dataPoint = req.body;
     
+    // Validate sessionId parameter
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
+      return res.status(400).json({ 
+        error: 'Invalid session ID', 
+        message: 'You must create a session first using POST /api/obd2/sessions',
+        received: sessionId
+      });
+    }
+    
     // Validate session exists
     const session = await DiagnosticSession.findById(sessionId);
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+      return res.status(404).json({ 
+        error: 'Session not found',
+        message: 'The specified session does not exist. Create a new session first.',
+        sessionId
+      });
     }
     
     // Store in MongoDB (existing functionality)

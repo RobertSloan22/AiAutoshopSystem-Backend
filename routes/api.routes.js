@@ -341,10 +341,14 @@ router.get('/vector_stores/retrieve_store', async (req, res) => {
 router.get('/vector_stores/list_files', async (req, res) => {
   const vectorStoreId = req.query.vector_store_id;
 
+  if (!vectorStoreId || !vectorStoreId.startsWith('vs_')) {
+    return res.status(400).json({ 
+      error: "Invalid or missing vector_store_id. Expected an ID that begins with 'vs_'." 
+    });
+  }
+
   try {
-    const vectorStore = await openai.vectorStores.files.list(
-      vectorStoreId || ""
-    );
+    const vectorStore = await openai.vectorStores.files.list(vectorStoreId);
     return res.status(200).json(vectorStore);
   } catch (error) {
     console.error("Error fetching files:", error);
