@@ -555,10 +555,16 @@ router.get('/sessions/active', async (req, res) => {
       .limit(10)
       .lean();
 
+    // Map MongoDB _id to id for frontend compatibility
+    const mappedActiveSessions = activeSessions.map(session => ({
+      ...session,
+      id: session._id.toString()
+    }));
+
     res.json({
-      activeSessions,
-      count: activeSessions.length,
-      message: activeSessions.length === 0 ? 'No active sessions found. Create one using POST /api/obd2/sessions' : undefined
+      activeSessions: mappedActiveSessions,
+      count: mappedActiveSessions.length,
+      message: mappedActiveSessions.length === 0 ? 'No active sessions found. Create one using POST /api/obd2/sessions' : undefined
     });
   } catch (error) {
     console.error('❌ Failed to fetch active sessions:', error);
@@ -585,10 +591,16 @@ router.get('/sessions', async (req, res) => {
       .skip(parseInt(offset))
       .lean();
 
+    // Map MongoDB _id to id for frontend compatibility
+    const mappedSessions = sessions.map(session => ({
+      ...session,
+      id: session._id.toString()
+    }));
+
     const total = await DiagnosticSession.countDocuments(query);
     
     res.json({
-      sessions,
+      sessions: mappedSessions,
       total
     });
   } catch (error) {
@@ -608,7 +620,13 @@ router.get('/sessions/:sessionId', async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    res.json({ session });
+    // Map MongoDB _id to id for frontend compatibility
+    const mappedSession = {
+      ...session,
+      id: session._id.toString()
+    };
+
+    res.json({ session: mappedSession });
   } catch (error) {
     console.error('❌ Failed to fetch session:', error);
     res.status(500).json({ error: 'Failed to fetch session' });
@@ -619,6 +637,25 @@ router.get('/sessions/:sessionId', async (req, res) => {
 router.get('/sessions/:sessionId/data', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    
+    // Validate sessionId parameter
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
+      return res.status(400).json({ 
+        error: 'Invalid session ID', 
+        message: 'You must provide a valid session ID',
+        received: sessionId
+      });
+    }
+    
+    // Validate MongoDB ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ 
+        error: 'Invalid session ID format', 
+        message: 'Session ID must be a valid MongoDB ObjectId',
+        received: sessionId
+      });
+    }
+    
     const { 
       startTime, 
       endTime, 
@@ -628,7 +665,8 @@ router.get('/sessions/:sessionId/data', async (req, res) => {
       aggregate = 'false'
     } = req.query;
 
-    let query = { sessionId };
+    // Convert string sessionId to MongoDB ObjectId for query
+    let query = { sessionId: new mongoose.Types.ObjectId(sessionId) };
 
     // Add time range filters
     if (startTime || endTime) {

@@ -19,7 +19,7 @@ import blenderRoutes from './routes/blenderRoutes.js';
 import { initializeBlender } from './blender.js';
 import authRoutes from "./routes/auth.routes.js";
 import researchRoutes from './routes/research.routes.js';
-import researchServiceRoutes from './routes/research.service.js';
+import researchServiceRoutes from './routes/research.service.simple.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
 import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
 import integratedResearchRoutes from './routes/integrated-research.routes.js';
