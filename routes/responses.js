@@ -318,6 +318,7 @@ router.post('/chat/stream', async (req, res) => {
     res.write(`data: ${JSON.stringify({ type: 'session_started', sessionId })}\n\n`);
 
     let toolCalls = [];
+    let fullResponse = ''; // Track full response content for assistant message
     
     // IMPROVED BUFFERING STRATEGY
     let contentBuffer = '';
@@ -360,6 +361,7 @@ router.post('/chat/stream', async (req, res) => {
       
       if (delta?.content) {
         contentBuffer += delta.content;
+        fullResponse += delta.content; // Track full response for tool calls
         
         // IMPROVED LOGIC: Send content more intelligently
         const hasGoodBreakpoint = /[.!?]\s+|[.!?]$|\n/.test(contentBuffer);
@@ -416,6 +418,18 @@ router.post('/chat/stream', async (req, res) => {
         // Flush any remaining content before processing tool calls
         flushContentBuffer();
         
+        // Get the session to add the assistant message with tool_calls
+        const session = responsesService.getSession(sessionId);
+        if (session) {
+          // Add the assistant message with tool_calls to the conversation
+          const assistantMessage = {
+            role: 'assistant',
+            content: fullResponse || null,  // Content accumulated so far
+            tool_calls: toolCalls
+          };
+          session.messages.push(assistantMessage);
+        }
+        
         // Process tool calls
         res.write(`data: ${JSON.stringify({
           type: 'tool_calls_started',
@@ -444,6 +458,7 @@ router.post('/chat/stream', async (req, res) => {
             
             if (continueDelta?.content) {
               contentBuffer += continueDelta.content;
+              fullResponse += continueDelta.content; // Also track in full response
               
               // Same improved buffering logic for continued content
               const hasGoodBreakpoint = /[.!?]\s+|[.!?]$|\n/.test(contentBuffer);
@@ -557,6 +572,17 @@ router.post('/chat', async (req, res) => {
       }
 
       if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+        // Add the assistant message with tool_calls to conversation
+        const session = responsesService.getSession(sessionId);
+        if (session) {
+          const assistantMessage = {
+            role: 'assistant',
+            content: fullResponse || null,
+            tool_calls: toolCalls
+          };
+          session.messages.push(assistantMessage);
+        }
+        
         const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
         const continuedStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
         
@@ -602,13 +628,54 @@ router.get('/mcp/status', async (req, res) => {
   }
 });
 
+// PYTHON CODE EXECUTION ENDPOINT
+router.post('/execute/python', async (req, res) => {
+  try {
+    const { code, save_plots = true, plot_filename } = req.body;
+
+    if (!code) {
+      return res.status(400).json({ error: 'Code is required' });
+    }
+
+    console.log('Executing Python code via API endpoint');
+    
+    const result = await responsesService.pythonService.executeCode(code, {
+      save_plots,
+      plot_filename
+    });
+
+    // If plots were generated, convert them to base64
+    if (result.plots && result.plots.length > 0) {
+      result.plots_data = [];
+      for (const plotPath of result.plots) {
+        const base64Data = await responsesService.pythonService.getPlotAsBase64(plotPath);
+        if (base64Data) {
+          result.plots_data.push({
+            path: plotPath,
+            data: base64Data
+          });
+        }
+      }
+    }
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('Python execution error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Python execution failed' 
+    });
+  }
+});
+
 // HEALTH CHECK ENDPOINT
 router.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
     openai_configured: !!process.env.OPENAI_API_KEY,
-    mcp_server_url: process.env.MCP_SERVER_URL || 'http://localhost:3700'
+    mcp_server_url: process.env.MCP_SERVER_URL || 'http://localhost:3700',
+    python_execution: true
   });
 });
 
