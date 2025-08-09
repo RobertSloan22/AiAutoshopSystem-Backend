@@ -66,6 +66,7 @@ import responsesRoutes from './routes/responses.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 import obd2Routes from './routes/obd2.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
+import diagnosticAgentsRoutes from './routes/diagnostic-agents.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -628,6 +629,9 @@ app.use('/api/eliza-direct', elizaProxyRoutes);
 
 // Register OBD2 data routes
 app.use('/api/obd2', obd2Routes);
+
+// Register diagnostic agents routes
+app.use('/api/diagnostic-agents', diagnosticAgentsRoutes);
 
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {

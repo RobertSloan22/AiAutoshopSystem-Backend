@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import MCPService from './mcpService.js';
+import PythonExecutionService from './pythonExecutionService.js';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -15,9 +16,17 @@ class ResponsesAPIService {
       apiKey: process.env.OPENAI_API_KEY
     });
     this.mcpService = new MCPService(process.env.MCP_SERVER_URL || 'http://localhost:3700');
+    this.pythonService = new PythonExecutionService();
     this.activeSessions = new Map();
     this.fallbackModels = ['gpt-3.5-turbo', 'claude-3-haiku-20240307'];
     this.primaryModel = 'gpt-4o-mini';
+    
+    // Set up periodic cleanup for Python outputs
+    setInterval(() => {
+      this.pythonService.cleanup().catch(err => 
+        console.error('Python service cleanup error:', err)
+      );
+    }, 60 * 60 * 1000); // Clean up every hour
   }
 
   async createStreamingSession(message, vehicleContext = {}, customerContext = {}) {
@@ -26,8 +35,10 @@ class ResponsesAPIService {
     // Build system prompt with context
     const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
     
-    // Get MCP tools
-    const tools = this.mcpService.getToolDefinitions();
+    // Get MCP tools and Python execution tool
+    const mcpTools = this.mcpService.getToolDefinitions();
+    const pythonTool = this.pythonService.getToolDefinition();
+    const tools = [...mcpTools, pythonTool];
     
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -135,7 +146,7 @@ class ResponsesAPIService {
   }
 
   buildSystemPrompt(vehicleContext, customerContext) {
-    let prompt = `You are an AI automotive diagnostic assistant with access to real-time OBD2 vehicle data through specialized tools.
+    let prompt = `You are an AI automotive diagnostic assistant with access to real-time OBD2 vehicle data through specialized tools and Python code execution capabilities for data analysis and visualization.
 
 VEHICLE INFORMATION:`;
 
@@ -164,22 +175,41 @@ CUSTOMER INFORMATION:
     prompt += `
 
 AVAILABLE TOOLS:
-You have access to the following OBD2 diagnostic tools:
+You have access to the following diagnostic and analysis tools:
+
+OBD2 DIAGNOSTIC TOOLS:
 - scan_obd2_adapters: Scan for available Bluetooth OBD2 adapters
 - connect_obd2_adapter: Connect to a specific OBD2 adapter  
 - get_obd2_live_data: Get real-time engine data (RPM, speed, temperature, etc.)
 - read_dtc_codes: Read diagnostic trouble codes from the vehicle
 - get_connection_status: Check current OBD2 connection status
 
+PYTHON CODE EXECUTION:
+- execute_python_code: Execute Python code with access to data analysis libraries
+  * Available libraries: pandas, numpy, matplotlib, seaborn, scipy, sklearn
+  * Can perform calculations, statistical analysis, and data visualization
+  * Automatically saves generated plots as PNG files
+  * Useful for analyzing sensor data trends, calculating performance metrics, etc.
+
 INSTRUCTIONS:
 1. Use the appropriate tools to gather vehicle data when requested
-2. Provide clear, professional diagnostic guidance
-3. Always explain what you're doing when using tools
-4. Include relevant vehicle context in your responses
-5. Suggest specific diagnostic steps based on the data you collect
-6. If asked about DTC codes, use the tools to read current codes and provide detailed explanations
+2. When mathematical calculations or data analysis are needed, use the Python execution tool
+3. Generate visualizations to help explain diagnostic findings when appropriate
+4. Provide clear, professional diagnostic guidance
+5. Always explain what you're doing when using tools
+6. Include relevant vehicle context in your responses
+7. Suggest specific diagnostic steps based on the data you collect
+8. If asked about DTC codes, use the tools to read current codes and provide detailed explanations
+9. When analyzing sensor data patterns, consider using Python to create trend charts
 
-Be thorough, accurate, and helpful in your automotive diagnostic assistance.`;
+PYTHON USAGE EXAMPLES:
+- Calculate fuel efficiency from OBD2 data
+- Plot engine temperature over time
+- Analyze RPM vs speed relationships
+- Create diagnostic trouble code frequency charts
+- Perform statistical analysis on sensor readings
+
+Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use visualizations when they would help explain complex data patterns.`;
 
     return prompt;
   }
@@ -207,7 +237,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance.`;
 
     for (const toolCall of toolCalls) {
       try {
-        console.log(`Executing MCP tool: ${toolCall.function.name}`);
+        console.log(`Executing tool: ${toolCall.function.name}`);
         
         let parameters = {};
         if (toolCall.function.arguments) {
@@ -220,7 +250,50 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance.`;
           }
         }
 
-        const result = await this.mcpService.callTool(toolCall.function.name, parameters);
+        let result;
+
+        // Handle Python execution tool
+        if (toolCall.function.name === 'execute_python_code') {
+          console.log('Executing Python code...');
+          result = await this.pythonService.executeCode(
+            parameters.code,
+            {
+              save_plots: parameters.save_plots !== false,
+              plot_filename: parameters.plot_filename
+            }
+          );
+
+          // Format the result for better display
+          if (result.success) {
+            let formattedResult = {
+              success: true,
+              output: result.output
+            };
+
+            // If plots were generated, include their paths
+            if (result.plots && result.plots.length > 0) {
+              formattedResult.plots_generated = result.plots.length;
+              formattedResult.plot_paths = result.plots;
+              
+              // Try to get base64 data for the plots
+              formattedResult.plots = [];
+              for (const plotPath of result.plots) {
+                const base64Data = await this.pythonService.getPlotAsBase64(plotPath);
+                if (base64Data) {
+                  formattedResult.plots.push({
+                    path: plotPath,
+                    data: base64Data
+                  });
+                }
+              }
+            }
+
+            result = formattedResult;
+          }
+        } else {
+          // Handle MCP tools
+          result = await this.mcpService.callTool(toolCall.function.name, parameters);
+        }
         
         toolResults.push({
           tool_call_id: toolCall.id,
@@ -253,11 +326,27 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance.`;
       throw new Error('Session not found');
     }
 
-    // Add tool results to conversation
+    // The last message should be an assistant message with tool_calls
+    // We need to add the tool results right after it
+    if (session.messages.length === 0 || session.messages[session.messages.length - 1].role !== 'assistant') {
+      throw new Error('Invalid conversation state: expected assistant message with tool_calls');
+    }
+
+    // Add tool results to conversation - they must come immediately after the assistant message with tool_calls
     session.messages.push(...toolResults);
 
+    // Log the conversation structure for debugging
+    console.log('Conversation structure:', session.messages.map(m => ({
+      role: m.role, 
+      hasContent: !!m.content, 
+      hasToolCalls: !!m.tool_calls,
+      isToolResult: m.role === 'tool'
+    })));
+
     // Get tools again in case they've changed
-    const tools = this.mcpService.getToolDefinitions();
+    const mcpTools = this.mcpService.getToolDefinitions();
+    const pythonTool = this.pythonService.getToolDefinition();
+    const tools = [...mcpTools, pythonTool];
 
     try {
       // Check if this is a fallback session
