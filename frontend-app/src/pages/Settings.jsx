@@ -179,20 +179,24 @@ export function Settings() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {serviceStatusItems.map(({ key, label, icon: Icon }) => {
               const status = servicesStatus?.[key] || 'unknown'
+              const statusString = String(status)
               const isOnline = status === 'online'
               
               return (
-                <div key={key} className="flex items-center space-x-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                  <Icon className={`h-5 w-5 ${isOnline ? 'text-green-500' : 'text-red-500'}`} />
+                <div key={key} className="flex items-center space-x-3 p-4 bg-gradient-panel border border-dark-border rounded-lg relative overflow-hidden">
+                  <Icon className={`h-5 w-5 ${isOnline ? 'text-neon-green' : 'text-red-400'} drop-shadow-lg`} />
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">
-                      {label}
+                    <p className="text-sm font-mono font-medium text-dark-text-primary tracking-wide">
+                      {label.toUpperCase()}
                     </p>
-                    <p className={`text-xs ${isOnline ? 'text-green-600' : 'text-red-600'}`}>
-                      {status.charAt(0).toUpperCase() + status.slice(1)}
+                    <p className={`text-xs font-mono tracking-wider ${isOnline ? 'text-neon-green' : 'text-red-400'}`}>
+                      {statusString.charAt(0).toUpperCase() + statusString.slice(1)}
                     </p>
                   </div>
-                  <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-neon-green animate-pulse' : 'bg-red-500'} shadow-lg`} />
+                  
+                  {/* Status line */}
+                  <div className={`absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-${isOnline ? 'neon-green' : 'red-500'} to-transparent opacity-60`} />
                 </div>
               )
             })}

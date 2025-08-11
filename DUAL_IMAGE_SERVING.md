@@ -50,7 +50,7 @@ Lists all available chart images with pagination and filtering.
 curl http://localhost:5000/api/images/charts
 
 # Filter by execution ID
-curl http://localhost:5000/api/images/charts?executionId=exec_123456
+curl http://localhost:5000/api/images/charts?maf_sensor_wavform.png
 
 # Filter by tag
 curl http://localhost:5000/api/images/charts?tag=engine
