@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import WebSocket from 'ws';
+import { registerImage } from '../routes/images.js';
 
 class PythonExecutionService {
   constructor() {
@@ -126,8 +127,16 @@ class PythonExecutionService {
               case 'plot':
                 // Handle plot data (base64 encoded)
                 if (message.data && options.save_plots) {
-                  const plotPath = await this.savePlot(message.data, message.filename || options.plot_filename);
-                  plots.push(plotPath);
+                  const plotResult = await this.savePlot(
+                    message.data, 
+                    message.filename || options.plot_filename,
+                    executionId,
+                    {
+                      description: message.description || 'Generated chart',
+                      tags: message.tags || ['python', 'visualization']
+                    }
+                  );
+                  plots.push(plotResult);
                 }
                 break;
 
@@ -207,8 +216,22 @@ class PythonExecutionService {
             // Ignore cleanup errors
           }
 
-          // Check for generated plots
-          const plots = await this.findGeneratedPlots(executionId);
+          // Check for generated plots and register them
+          const plotPaths = await this.findGeneratedPlots(executionId);
+          const plots = [];
+          
+          for (const plotPath of plotPaths) {
+            const filename = path.basename(plotPath);
+            const imageId = registerImage(plotPath, {
+              filename,
+              executionId,
+              description: 'Local Python execution chart',
+              tags: ['python', 'local-execution'],
+              mimeType: 'image/png'
+            });
+            
+            plots.push({ path: plotPath, imageId });
+          }
 
           resolve({
             success: code === 0,
@@ -277,7 +300,7 @@ if 'plt' in locals():
 `;
   }
 
-  async savePlot(base64Data, filename) {
+  async savePlot(base64Data, filename, executionId, options = {}) {
     const plotFilename = filename || `plot_${Date.now()}`;
     const plotPath = path.join(this.outputDir, `${plotFilename}.png`);
     
@@ -286,7 +309,17 @@ if 'plt' in locals():
     const buffer = Buffer.from(base64Clean, 'base64');
     
     await fs.writeFile(plotPath, buffer);
-    return plotPath;
+    
+    // Register the image for API serving
+    const imageId = registerImage(plotPath, {
+      filename: `${plotFilename}.png`,
+      executionId: executionId,
+      description: options.description || 'Python generated chart',
+      tags: options.tags || ['python', 'chart'],
+      mimeType: 'image/png'
+    });
+    
+    return { path: plotPath, imageId };
   }
 
   async findGeneratedPlots(executionId) {

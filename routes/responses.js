@@ -628,6 +628,28 @@ router.get('/mcp/status', async (req, res) => {
   }
 });
 
+// WEB SEARCH STATUS ENDPOINT
+router.get('/websearch/status', async (req, res) => {
+  try {
+    const status = await responsesService.getWebSearchStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Web search status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ALL SERVICES STATUS ENDPOINT
+router.get('/services/status', async (req, res) => {
+  try {
+    const status = await responsesService.getAllServicesStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Services status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // PYTHON CODE EXECUTION ENDPOINT
 router.post('/execute/python', async (req, res) => {
   try {

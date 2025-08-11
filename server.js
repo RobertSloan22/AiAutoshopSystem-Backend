@@ -63,6 +63,7 @@ import { VectorService } from './services/VectorService.js';
 import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
+import imagesRoutes from './routes/images.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 import obd2Routes from './routes/obd2.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
@@ -623,6 +624,7 @@ app.use('/api/serp', serperRoutes);
 // Memory vector routes disabled to reduce startup overhead
 // app.use('/api/memory-vector', memoryVectorRoutes);
 app.use('/api/responses', responsesRoutes);
+app.use('/api/images', imagesRoutes);
 
 // Register Eliza proxy router for direct communication with Eliza system
 app.use('/api/eliza-direct', elizaProxyRoutes);
@@ -639,6 +641,66 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
   customfavIcon: "/favicon.ico",
   customCss: '.swagger-ui .topbar { display: none }'
 }));
+
+
+// Chrome Extension Routes
+app.post('/api/diagnostic-data', async (req, res) => {
+  try {
+    const { extensionData, sessionId } = req.body;
+    
+    console.log('📥 Received diagnostic data from Chrome extension:', {
+      sessionId,
+      dtcCodes: extensionData?.dtcCodes?.length || 0,
+      vehicleInfo: extensionData?.vehicleInfo?.length || 0,
+      diagnosticText: extensionData?.diagnosticText?.length || 0,
+      pageUrl: extensionData?.pageUrl,
+      pageTitle: extensionData?.pageTitle
+    });
+
+    // Store the data (you can save to MongoDB or process immediately)
+    const processedData = {
+      sessionId,
+      extensionData,
+      timestamp: new Date(),
+      status: 'received'
+    };
+
+    // If you have DTC codes, you might want to trigger additional processing
+    if (extensionData?.dtcCodes?.length > 0) {
+      console.log('🔧 DTC codes detected, ready for diagnostic agent processing:', extensionData.dtcCodes);
+    }
+
+    // If you have diagnostic text, you might want to analyze it
+    if (extensionData?.diagnosticText?.length > 0) {
+      console.log('📝 Diagnostic text extracted from page:', extensionData.diagnosticText.length, 'items');
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Diagnostic data received and processed successfully',
+      sessionId,
+      dataReceived: {
+        dtcCodes: extensionData?.dtcCodes?.length || 0,
+        vehicleInfo: extensionData?.vehicleInfo?.length || 0,
+        diagnosticText: extensionData?.diagnosticText?.length || 0,
+        hasPageData: !!(extensionData?.pageUrl && extensionData?.pageTitle)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error processing diagnostic data from extension:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process diagnostic data',
+      message: error.message
+    });
+  }
+});
+
+
+
+
+
+
 
 // Base URL route
 app.get('/', (req, res) => {
