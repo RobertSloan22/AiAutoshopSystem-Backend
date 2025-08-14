@@ -5,6 +5,7 @@ import path from 'path';
 import crypto from 'crypto';
 import WebSocket from 'ws';
 import { registerImage } from '../routes/images.js';
+import Plot from '../models/plot.model.js';
 
 class PythonExecutionService {
   constructor() {
@@ -76,10 +77,10 @@ class PythonExecutionService {
     try {
       // If Python server is available, use it for better performance
       if (this.isConnected) {
-        return await this.executeViaServer(code, executionId, { save_plots, plot_filename });
+        return await this.executeViaServer(code, executionId, { ...options, save_plots, plot_filename });
       } else {
         // Fallback to local execution
-        return await this.executeLocally(code, executionId, { save_plots, plot_filename });
+        return await this.executeLocally(code, executionId, { ...options, save_plots, plot_filename });
       }
     } catch (error) {
       console.error('Python execution error:', error);
@@ -133,7 +134,11 @@ class PythonExecutionService {
                     executionId,
                     {
                       description: message.description || 'Generated chart',
-                      tags: message.tags || ['python', 'visualization']
+                      tags: message.tags || ['python', 'visualization'],
+                      pythonCode: options.pythonCode,
+                      sessionId: options.sessionId,
+                      vehicleContext: options.vehicleContext,
+                      customerContext: options.customerContext
                     }
                   );
                   plots.push(plotResult);
@@ -189,7 +194,7 @@ class PythonExecutionService {
     
     try {
       // Wrap the code to capture plots if needed
-      const wrappedCode = this.wrapCodeForExecution(code, options);
+      const wrappedCode = this.wrapCodeForExecution(code, { ...options, executionId });
       await fs.writeFile(tempFile, wrappedCode);
 
       return new Promise((resolve, reject) => {
@@ -216,13 +221,58 @@ class PythonExecutionService {
             // Ignore cleanup errors
           }
 
+          // Parse output to find plot paths
+          const outputText = output.join('');
+          const plotPathMatches = outputText.match(/Plot saved to: (.+\.png)/g) || [];
+          const extractedPaths = plotPathMatches.map(match => 
+            match.replace('Plot saved to: ', '').trim()
+          );
+
           // Check for generated plots and register them
           const plotPaths = await this.findGeneratedPlots(executionId);
+          
+          // Combine both methods
+          const allPlotPaths = [...new Set([...plotPaths, ...extractedPaths])];
+          
           const plots = [];
           
-          for (const plotPath of plotPaths) {
+          for (const plotPath of allPlotPaths) {
             const filename = path.basename(plotPath);
-            const imageId = registerImage(plotPath, {
+            const imageId = crypto.randomUUID();
+            
+            try {
+              // Read file data and stats
+              const imageData = await fs.readFile(plotPath);
+              const stats = await fs.stat(plotPath);
+              
+              // Save to MongoDB
+              const plot = new Plot({
+                imageId,
+                filename,
+                originalPath: plotPath,
+                imageData,
+                mimeType: 'image/png',
+                size: stats.size,
+                executionId,
+                description: 'Local Python execution chart',
+                tags: ['python', 'local-execution'],
+                pythonCode: options.pythonCode || code,
+                sessionId: options.sessionId,
+                vehicleContext: options.vehicleContext,
+                customerContext: options.customerContext
+              });
+              
+              plot.setExpiration(7);
+              await plot.save();
+              console.log(`Local plot saved to MongoDB with ID: ${imageId}`);
+              
+            } catch (dbError) {
+              console.error('Error saving local plot to MongoDB:', dbError);
+            }
+            
+            // Also register with legacy system for backward compatibility
+            registerImage(plotPath, {
+              id: imageId,
               filename,
               executionId,
               description: 'Local Python execution chart',
@@ -265,6 +315,7 @@ class PythonExecutionService {
   }
 
   wrapCodeForExecution(code, options) {
+    const executionId = options.executionId || 'unknown';
     const plotSetup = options.save_plots ? `
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
@@ -276,7 +327,7 @@ _original_show = plt.show
 # Override plt.show to save instead
 def _save_show():
     import os
-    plot_filename = "${options.plot_filename || `plot_${Date.now()}`}"
+    plot_filename = "${options.plot_filename || `plot_${executionId}_${Date.now()}`}"
     plot_path = os.path.join("${this.outputDir}", f"{plot_filename}.png")
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
     print(f"Plot saved to: {plot_path}")
@@ -295,7 +346,7 @@ ${code}
 if 'plt' in locals():
     for fig_num in plt.get_fignums():
         plt.figure(fig_num)
-        plt.savefig(f"${this.outputDir}/figure_{fig_num}_${Date.now()}.png", dpi=150, bbox_inches='tight')
+        plt.savefig(f"${this.outputDir}/figure_{fig_num}_${executionId}_${Date.now()}.png", dpi=150, bbox_inches='tight')
     plt.close('all')
 `;
   }
@@ -310,14 +361,60 @@ if 'plt' in locals():
     
     await fs.writeFile(plotPath, buffer);
     
-    // Register the image for API serving
-    const imageId = registerImage(plotPath, {
-      filename: `${plotFilename}.png`,
-      executionId: executionId,
-      description: options.description || 'Python generated chart',
-      tags: options.tags || ['python', 'chart'],
-      mimeType: 'image/png'
-    });
+    // Generate unique image ID
+    const imageId = crypto.randomUUID();
+    
+    try {
+      // Get file stats for size information
+      const stats = await fs.stat(plotPath);
+      
+      // Save to MongoDB
+      const plot = new Plot({
+        imageId,
+        filename: `${plotFilename}.png`,
+        originalPath: plotPath,
+        imageData: buffer,
+        mimeType: 'image/png',
+        size: stats.size,
+        executionId: executionId,
+        description: options.description || 'Python generated chart',
+        tags: options.tags || ['python', 'chart'],
+        pythonCode: options.pythonCode,
+        pythonOutput: options.pythonOutput || '',
+        metadata: options.metadata || {},
+        vehicleContext: options.vehicleContext,
+        customerContext: options.customerContext,
+        sessionId: options.sessionId
+      });
+      
+      // Set automatic expiration (7 days by default)
+      plot.setExpiration(7);
+      
+      await plot.save();
+      console.log(`Plot saved to MongoDB with ID: ${imageId}`);
+      
+      // Also register with the legacy image system for backward compatibility
+      registerImage(plotPath, {
+        id: imageId,
+        filename: `${plotFilename}.png`,
+        executionId: executionId,
+        description: options.description || 'Python generated chart',
+        tags: options.tags || ['python', 'chart'],
+        mimeType: 'image/png'
+      });
+      
+    } catch (error) {
+      console.error('Error saving plot to MongoDB:', error);
+      // Fallback to legacy system only
+      registerImage(plotPath, {
+        id: imageId,
+        filename: `${plotFilename}.png`,
+        executionId: executionId,
+        description: options.description || 'Python generated chart',
+        tags: options.tags || ['python', 'chart'],
+        mimeType: 'image/png'
+      });
+    }
     
     return { path: plotPath, imageId };
   }
@@ -325,7 +422,21 @@ if 'plt' in locals():
   async findGeneratedPlots(executionId) {
     try {
       const files = await fs.readdir(this.outputDir);
-      const plots = files.filter(f => f.endsWith('.png') && f.includes(String(executionId)));
+      // Look for plots that either contain the executionId or were just created
+      const plots = files.filter(f => {
+        if (!f.endsWith('.png')) return false;
+        // Check if filename contains executionId
+        if (f.includes(String(executionId))) return true;
+        // If not, check if the file was created recently (within last 5 seconds)
+        try {
+          const filePath = path.join(this.outputDir, f);
+          const stats = fs.statSync(filePath);
+          const fileAge = Date.now() - stats.mtimeMs;
+          return fileAge < 5000; // 5 seconds
+        } catch (err) {
+          return false;
+        }
+      });
       return plots.map(f => path.join(this.outputDir, f));
     } catch (error) {
       console.error('Error finding generated plots:', error);
@@ -340,6 +451,42 @@ if 'plt' in locals():
     } catch (error) {
       console.error('Error reading plot file:', error);
       return null;
+    }
+  }
+
+  // Get plot from MongoDB by imageId
+  async getPlotFromDB(imageId) {
+    try {
+      const plot = await Plot.findOne({ imageId });
+      if (plot) {
+        // Update access statistics
+        await plot.updateAccess();
+        return plot;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error retrieving plot from MongoDB:', error);
+      return null;
+    }
+  }
+
+  // Get plots by execution ID from MongoDB
+  async getPlotsByExecutionId(executionId, options = {}) {
+    try {
+      return await Plot.findByExecutionId(executionId, options);
+    } catch (error) {
+      console.error('Error retrieving plots by execution ID:', error);
+      return [];
+    }
+  }
+
+  // Get plots by session ID from MongoDB
+  async getPlotsBySessionId(sessionId, options = {}) {
+    try {
+      return await Plot.findBySessionId(sessionId, options);
+    } catch (error) {
+      console.error('Error retrieving plots by session ID:', error);
+      return [];
     }
   }
 

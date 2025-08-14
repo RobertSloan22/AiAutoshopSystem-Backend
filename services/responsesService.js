@@ -279,7 +279,11 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
             parameters.code,
             {
               save_plots: parameters.save_plots !== false,
-              plot_filename: parameters.plot_filename
+              plot_filename: parameters.plot_filename,
+              sessionId: sessionId,
+              vehicleContext: session.vehicleContext,
+              customerContext: session.customerContext,
+              pythonCode: parameters.code
             }
           );
 
@@ -301,12 +305,24 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
                 const plotData = {
                   path: plotResult.path || plotResult, // Handle both new and old format
                   imageId: plotResult.imageId,
-                  url: plotResult.imageId ? `/api/images/charts/${plotResult.imageId}` : null,
-                  thumbnailUrl: plotResult.imageId ? `/api/images/charts/${plotResult.imageId}/thumbnail` : null
+                  url: plotResult.imageId ? `/api/plots/${plotResult.imageId}` : null,
+                  thumbnailUrl: plotResult.imageId ? `/api/plots/${plotResult.imageId}/thumbnail` : null
                 };
                 
-                // Add base64 data for immediate rendering
-                const base64Data = await this.pythonService.getPlotAsBase64(plotData.path);
+                // Try to get base64 data from MongoDB first, then fallback to file system
+                let base64Data = null;
+                if (plotResult.imageId) {
+                  const plotFromDB = await this.pythonService.getPlotFromDB(plotResult.imageId);
+                  if (plotFromDB) {
+                    base64Data = plotFromDB.base64Data;
+                  }
+                }
+                
+                // Fallback to file system if MongoDB doesn't have it
+                if (!base64Data && plotData.path) {
+                  base64Data = await this.pythonService.getPlotAsBase64(plotData.path);
+                }
+                
                 if (base64Data) {
                   plotData.data = base64Data;
                 }
