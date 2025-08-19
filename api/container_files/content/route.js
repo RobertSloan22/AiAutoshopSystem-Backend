@@ -34,40 +34,53 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
-import axiosInstance from '../utils/axiosConfig.js';
-var AgentServiceImpl = /** @class */ (function () {
-    function AgentServiceImpl() {
-    }
-    AgentServiceImpl.prototype.sendComprehensiveData = function (customer, vehicle, images, researchData) {
-        return __awaiter(this, void 0, void 0, function () {
-            var error_1;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        _a.trys.push([0, 2, , 3]);
-                        return [4 /*yield*/, axiosInstance.post('/agent/data', {
-                                customer: customer,
-                                vehicle: vehicle,
-                                images: images,
-                                researchData: researchData
+export function GET(request) {
+    return __awaiter(this, void 0, void 0, function () {
+        var searchParams, fileId, containerId, filename, url, res, blob, err_1;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    searchParams = new URL(request.url).searchParams;
+                    fileId = searchParams.get("file_id");
+                    containerId = searchParams.get("container_id");
+                    filename = searchParams.get("filename");
+                    if (!fileId) {
+                        return [2 /*return*/, new Response(JSON.stringify({ error: "Missing file_id" }), {
+                                status: 400,
                             })];
-                    case 1:
-                        _a.sent();
-                        return [3 /*break*/, 3];
-                    case 2:
-                        error_1 = _a.sent();
-                        console.error('Error sending data to agent:', error_1);
-                        throw error_1;
-                    case 3: return [2 /*return*/];
-                }
-            });
+                    }
+                    _a.label = 1;
+                case 1:
+                    _a.trys.push([1, 4, , 5]);
+                    url = containerId
+                        ? "https://api.openai.com/v1/containers/".concat(containerId, "/files/").concat(fileId, "/content")
+                        : "https://api.openai.com/v1/container-files/".concat(fileId, "/content");
+                    return [4 /*yield*/, fetch(url, {
+                            headers: {
+                                Authorization: "Bearer ".concat(process.env.OPENAI_API_KEY),
+                            },
+                        })];
+                case 2:
+                    res = _a.sent();
+                    if (!res.ok)
+                        throw new Error("Failed to fetch file: ".concat(res.status));
+                    return [4 /*yield*/, res.blob()];
+                case 3:
+                    blob = _a.sent();
+                    return [2 /*return*/, new Response(blob, {
+                            headers: {
+                                "Content-Type": res.headers.get("Content-Type") || "application/octet-stream",
+                                "Content-Disposition": "attachment; filename=".concat(filename !== null && filename !== void 0 ? filename : fileId),
+                            },
+                        })];
+                case 4:
+                    err_1 = _a.sent();
+                    console.error("Error fetching container file", err_1);
+                    return [2 /*return*/, new Response(JSON.stringify({ error: "Failed to fetch file" }), {
+                            status: 500,
+                        })];
+                case 5: return [2 /*return*/];
+            }
         });
-    };
-    return AgentServiceImpl;
-}());
-export var agentService = new AgentServiceImpl();
-
-export function startAgentService() {
-    console.log('Agent service started');
-    return agentService;
+    });
 }

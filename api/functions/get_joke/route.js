@@ -34,40 +34,33 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
-import axiosInstance from '../utils/axiosConfig.js';
-var AgentServiceImpl = /** @class */ (function () {
-    function AgentServiceImpl() {
-    }
-    AgentServiceImpl.prototype.sendComprehensiveData = function (customer, vehicle, images, researchData) {
-        return __awaiter(this, void 0, void 0, function () {
-            var error_1;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        _a.trys.push([0, 2, , 3]);
-                        return [4 /*yield*/, axiosInstance.post('/agent/data', {
-                                customer: customer,
-                                vehicle: vehicle,
-                                images: images,
-                                researchData: researchData
-                            })];
-                    case 1:
-                        _a.sent();
-                        return [3 /*break*/, 3];
-                    case 2:
-                        error_1 = _a.sent();
-                        console.error('Error sending data to agent:', error_1);
-                        throw error_1;
-                    case 3: return [2 /*return*/];
-                }
-            });
+export function GET() {
+    return __awaiter(this, void 0, void 0, function () {
+        var jokeRes, jokeData, joke, error_1;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    _a.trys.push([0, 3, , 4]);
+                    return [4 /*yield*/, fetch("https://v2.jokeapi.dev/joke/Programming")];
+                case 1:
+                    jokeRes = _a.sent();
+                    if (!jokeRes.ok)
+                        throw new Error("Failed to fetch joke");
+                    return [4 /*yield*/, jokeRes.json()];
+                case 2:
+                    jokeData = _a.sent();
+                    joke = jokeData.type === "twopart"
+                        ? "".concat(jokeData.setup, " - ").concat(jokeData.delivery)
+                        : jokeData.joke;
+                    return [2 /*return*/, new Response(JSON.stringify({ joke: joke }), { status: 200 })];
+                case 3:
+                    error_1 = _a.sent();
+                    console.error("Error fetching joke:", error_1);
+                    return [2 /*return*/, new Response(JSON.stringify({ error: "Could not fetch joke" }), {
+                            status: 500,
+                        })];
+                case 4: return [2 /*return*/];
+            }
         });
-    };
-    return AgentServiceImpl;
-}());
-export var agentService = new AgentServiceImpl();
-
-export function startAgentService() {
-    console.log('Agent service started');
-    return agentService;
+    });
 }

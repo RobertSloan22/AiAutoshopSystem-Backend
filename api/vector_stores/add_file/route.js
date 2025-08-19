@@ -34,40 +34,31 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
-import axiosInstance from '../utils/axiosConfig.js';
-var AgentServiceImpl = /** @class */ (function () {
-    function AgentServiceImpl() {
-    }
-    AgentServiceImpl.prototype.sendComprehensiveData = function (customer, vehicle, images, researchData) {
-        return __awaiter(this, void 0, void 0, function () {
-            var error_1;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        _a.trys.push([0, 2, , 3]);
-                        return [4 /*yield*/, axiosInstance.post('/agent/data', {
-                                customer: customer,
-                                vehicle: vehicle,
-                                images: images,
-                                researchData: researchData
-                            })];
-                    case 1:
-                        _a.sent();
-                        return [3 /*break*/, 3];
-                    case 2:
-                        error_1 = _a.sent();
-                        console.error('Error sending data to agent:', error_1);
-                        throw error_1;
-                    case 3: return [2 /*return*/];
-                }
-            });
+import OpenAI from "openai";
+var openai = new OpenAI();
+export function POST(request) {
+    return __awaiter(this, void 0, void 0, function () {
+        var _a, vectorStoreId, fileId, vectorStore, error_1;
+        return __generator(this, function (_b) {
+            switch (_b.label) {
+                case 0: return [4 /*yield*/, request.json()];
+                case 1:
+                    _a = _b.sent(), vectorStoreId = _a.vectorStoreId, fileId = _a.fileId;
+                    _b.label = 2;
+                case 2:
+                    _b.trys.push([2, 4, , 5]);
+                    return [4 /*yield*/, openai.vectorStores.files.create(vectorStoreId, {
+                            file_id: fileId,
+                        })];
+                case 3:
+                    vectorStore = _b.sent();
+                    return [2 /*return*/, new Response(JSON.stringify(vectorStore), { status: 200 })];
+                case 4:
+                    error_1 = _b.sent();
+                    console.error("Error adding file:", error_1);
+                    return [2 /*return*/, new Response("Error adding file", { status: 500 })];
+                case 5: return [2 /*return*/];
+            }
         });
-    };
-    return AgentServiceImpl;
-}());
-export var agentService = new AgentServiceImpl();
-
-export function startAgentService() {
-    console.log('Agent service started');
-    return agentService;
+    });
 }
