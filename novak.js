@@ -53,7 +53,6 @@ import embeddingsRoutes from './routes/embeddings.routes.js';
 import vectorStoreRoutes from './routes/vectorStore.routes.js';
 import openaiRoutes from './routes/openai.js';
 import assistantsRoutes from './routes/assistants.routes.js';
-import assistantsV2Routes from './routes/assistant-v2.routes.js';
 import turnResponseRoutes from './routes/turnResponse.routes.js';
 import functionRoutes from './routes/functions.routes.js';
 import responseImageRoutes from './routes/responseImage.routes.js';
@@ -64,8 +63,6 @@ import { VectorService } from './services/VectorService.js';
 import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
-import imagesRoutes from './routes/images.js';
-import plotsRoutes from './routes/plots.routes.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 import obd2Routes from './routes/obd2.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
@@ -568,7 +565,6 @@ console.log('✅ OBD2 HTTP-based service integrated');
 app.use("/api/auth", authRoutes);
 // Enable research routes
 app.use("/api/research", researchRoutes);
-app.use("/api/research1", researchServiceRoutes);
 app.use("/api/researcho3/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
 // Integrated research bot - direct endpoint
@@ -579,7 +575,6 @@ import researchProgressRoutes from './routes/researchProgress.routes.js';
 import apiRoutes from './routes/api.routes.js';
 
 // Add the new API routes
-app.use("/api", apiRoutes);
 
 app.use("/api/research-progress", researchProgressRoutes);
 // Research results endpoints
@@ -606,20 +601,19 @@ app.use('/api/conversations', conversationRoutes);
 app.use('/api/notes', notesRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/serper', serperRoutes);
-app.use('/api', imageRoutes);
-app.use('/api', proxyRoutes);
+app.use('/api/images', imageRoutes);
+app.use('/api/proxy', proxyRoutes);
 app.use('/api/researchl', localResearchRoutes);
 app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
 // Vector store routes disabled to reduce startup overhead
 app.use('/api/vector-store', vectorStoreRoutes);
 app.use('/api/openai/assistants', assistantsRoutes);
-app.use('/api/openai/assistants-v2', assistantsV2Routes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
 app.use('/api/turn_response', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);
-app.use('/api', responseImageRoutes);
+app.use('/api/responseImage', responseImageRoutes);
 app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 app.use('/api/license-plate', licensePlateRoutes);
 app.use('/api/plate-to-vin', plateToVinRoutes);
@@ -627,8 +621,6 @@ app.use('/api/serp', serperRoutes);
 // Memory vector routes disabled to reduce startup overhead
 // app.use('/api/memory-vector', memoryVectorRoutes);
 app.use('/api/responses', responsesRoutes);
-app.use('/api/images', imagesRoutes);
-app.use('/api/plots', plotsRoutes);
 
 // Register Eliza proxy router for direct communication with Eliza system
 app.use('/api/eliza-direct', elizaProxyRoutes);
@@ -645,66 +637,6 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
   customfavIcon: "/favicon.ico",
   customCss: '.swagger-ui .topbar { display: none }'
 }));
-
-
-// Chrome Extension Routes
-app.post('/api/diagnostic-data', async (req, res) => {
-  try {
-    const { extensionData, sessionId } = req.body;
-    
-    console.log('📥 Received diagnostic data from Chrome extension:', {
-      sessionId,
-      dtcCodes: extensionData?.dtcCodes?.length || 0,
-      vehicleInfo: extensionData?.vehicleInfo?.length || 0,
-      diagnosticText: extensionData?.diagnosticText?.length || 0,
-      pageUrl: extensionData?.pageUrl,
-      pageTitle: extensionData?.pageTitle
-    });
-
-    // Store the data (you can save to MongoDB or process immediately)
-    const processedData = {
-      sessionId,
-      extensionData,
-      timestamp: new Date(),
-      status: 'received'
-    };
-
-    // If you have DTC codes, you might want to trigger additional processing
-    if (extensionData?.dtcCodes?.length > 0) {
-      console.log('🔧 DTC codes detected, ready for diagnostic agent processing:', extensionData.dtcCodes);
-    }
-
-    // If you have diagnostic text, you might want to analyze it
-    if (extensionData?.diagnosticText?.length > 0) {
-      console.log('📝 Diagnostic text extracted from page:', extensionData.diagnosticText.length, 'items');
-    }
-
-    res.json({ 
-      success: true, 
-      message: 'Diagnostic data received and processed successfully',
-      sessionId,
-      dataReceived: {
-        dtcCodes: extensionData?.dtcCodes?.length || 0,
-        vehicleInfo: extensionData?.vehicleInfo?.length || 0,
-        diagnosticText: extensionData?.diagnosticText?.length || 0,
-        hasPageData: !!(extensionData?.pageUrl && extensionData?.pageTitle)
-      }
-    });
-  } catch (error) {
-    console.error('❌ Error processing diagnostic data from extension:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to process diagnostic data',
-      message: error.message
-    });
-  }
-});
-
-
-
-
-
-
 
 // Base URL route
 app.get('/', (req, res) => {
@@ -879,8 +811,6 @@ import { startAgentService } from './services/agentService.js';
 import obd2WebSocketService from './services/obd2WebSocketService.js';
 // Import the RealtimeRelay
 import { RealtimeRelay } from './services/RealtimeRelay.js';
-// Import child_process to start agent service
-import { spawn } from 'child_process';
 
 // Start the server
 server.listen(PORT, async () => {
@@ -952,26 +882,8 @@ server.listen(PORT, async () => {
     }, OBD2_CLEANUP_INTERVAL);
   }
 
-  // Start the agent service (client service)
+  // Start the agent service
   startAgentService();
-
-  // Start the separate agent service server
-  console.log('🚀 Starting Agent Research Service...');
-  const agentServiceProcess = spawn('npm', ['start'], {
-    cwd: path.join(__dirname, 'agent-service'),
-    stdio: 'inherit',
-    shell: true
-  });
-
-  agentServiceProcess.on('error', (error) => {
-    console.error('❌ Failed to start Agent Research Service:', error);
-  });
-
-  agentServiceProcess.on('exit', (code) => {
-    console.warn(`⚠️ Agent Research Service exited with code ${code}`);
-  });
-
-  console.log('✅ Agent Research Service started on port 3003');
 
   // Initialize the OpenAI Realtime API relay
   if (process.env.OPENAI_API_KEY) {
