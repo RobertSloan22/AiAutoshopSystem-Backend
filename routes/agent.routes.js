@@ -221,4 +221,82 @@ router.get('/realtime/sessions', async (req, res) => {
   }
 });
 
+// Create an assistant with code interpreter and file search capabilities
+router.post('/assistant/create', async (req, res) => {
+  try {
+    const { 
+      name = "AI Autoshop Assistant",
+      instructions = "You are a helpful automotive diagnostic assistant with code interpreter and file search capabilities.",
+      model = "gpt-4o"
+    } = req.body;
+
+    const assistant = await openai.beta.assistants.create({
+      name,
+      instructions,
+      model,
+      tools: [
+        { type: "code_interpreter" },
+        { type: "file_search" }
+      ]
+    });
+
+    res.json(assistant);
+  } catch (error) {
+    console.error("Error creating assistant:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create a thread and run with the assistant
+router.post('/assistant/chat', async (req, res) => {
+  try {
+    const { assistant_id, message, thread_id } = req.body;
+
+    let threadId = thread_id;
+
+    // Create a new thread if one doesn't exist
+    if (!threadId) {
+      const thread = await openai.beta.threads.create();
+      threadId = thread.id;
+    }
+
+    // Add the user message to the thread
+    await openai.beta.threads.messages.create(threadId, {
+      role: "user",
+      content: message
+    });
+
+    // Create a run
+    const run = await openai.beta.threads.runs.create(threadId, {
+      assistant_id: assistant_id
+    });
+
+    // Poll for completion
+    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
+    
+    while (runStatus.status !== 'completed' && runStatus.status !== 'failed') {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
+      
+      // Handle required actions (tool calls)
+      if (runStatus.status === 'requires_action') {
+        // For now, we'll just wait for the action to be handled
+        // In a real implementation, you'd handle tool outputs here
+      }
+    }
+
+    // Get the messages
+    const messages = await openai.beta.threads.messages.list(threadId);
+
+    res.json({
+      thread_id: threadId,
+      messages: messages.data,
+      run_status: runStatus.status
+    });
+  } catch (error) {
+    console.error("Error in assistant chat:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router; 

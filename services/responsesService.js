@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import MCPService from './mcpService.js';
 import PythonExecutionService from './pythonExecutionService.js';
+import WebSearchService from './webSearchService.js';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -17,6 +18,8 @@ class ResponsesAPIService {
     });
     this.mcpService = new MCPService(process.env.MCP_SERVER_URL || 'http://localhost:3700');
     this.pythonService = new PythonExecutionService();
+    this.webSearchService = new WebSearchService();
+
     this.activeSessions = new Map();
     this.fallbackModels = ['gpt-3.5-turbo', 'claude-3-haiku-20240307'];
     this.primaryModel = 'gpt-4o-mini';
@@ -35,6 +38,11 @@ class ResponsesAPIService {
     // Build system prompt with context
     const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
     
+    // Get MCP tools, Python execution tool, and web search tools
+    const mcpTools = this.mcpService.getToolDefinitions();
+    const pythonTool = this.pythonService.getToolDefinition();
+    const webSearchTools = this.webSearchService.getToolDefinitions();
+    const tools = [...mcpTools, pythonTool, ...webSearchTools];
     // Get MCP tools and Python execution tool
     const mcpTools = this.mcpService.getToolDefinitions();
     const pythonTool = this.pythonService.getToolDefinition();
@@ -191,10 +199,34 @@ PYTHON CODE EXECUTION:
   * Automatically saves generated plots as PNG files
   * Useful for analyzing sensor data trends, calculating performance metrics, etc.
 
+WEB SEARCH CAPABILITIES:
+- web_search: Search the web for current information, recalls, TSBs, and troubleshooting guides
+  * Use for up-to-date information not in your training data
+  * Search for recalls, technical service bulletins, and latest diagnostic procedures
+  * Include vehicle context (make, model, year) for better results
+  * Search types: general, automotive, technical, recall, tsb
+
+- search_technical_images: Search for technical images and diagrams
+  * Find wiring diagrams, parts diagrams, and diagnostic flowcharts
+  * Search for visual guides and repair illustrations
+  * Provide vehicle context for more relevant results
+  * Image types: diagram, wiring, flowchart, parts, general
+
+
 INSTRUCTIONS:
 1. Use the appropriate tools to gather vehicle data when requested
 2. When mathematical calculations or data analysis are needed, use the Python execution tool
 3. Generate visualizations to help explain diagnostic findings when appropriate
+4. Use web search tools to get current information about recalls, TSBs, and latest repair procedures
+5. Search for technical diagrams when visual explanations would be helpful
+6. Provide clear, professional diagnostic guidance
+7. Always explain what you're doing when using tools
+8. Include relevant vehicle context in your responses
+9. Suggest specific diagnostic steps based on the data you collect
+10. If asked about DTC codes, use the tools to read current codes and provide detailed explanations
+11. When analyzing sensor data patterns, consider using Python to create trend charts
+12. Use web search for recent recalls, TSBs, or when you need current information beyond your training data
+13. Search for technical images when diagrams would help explain complex repairs or diagnostics
 4. Provide clear, professional diagnostic guidance
 5. Always explain what you're doing when using tools
 6. Include relevant vehicle context in your responses
@@ -259,6 +291,11 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
             parameters.code,
             {
               save_plots: parameters.save_plots !== false,
+              plot_filename: parameters.plot_filename,
+              sessionId: sessionId,
+              vehicleContext: session.vehicleContext,
+              customerContext: session.customerContext,
+              pythonCode: parameters.code
               plot_filename: parameters.plot_filename
             }
           );
@@ -275,6 +312,35 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
               formattedResult.plots_generated = result.plots.length;
               formattedResult.plot_paths = result.plots;
               
+              // Process plot results with both API URLs and base64 data
+              formattedResult.plots = [];
+              for (const plotResult of result.plots) {
+                const plotData = {
+                  path: plotResult.path || plotResult, // Handle both new and old format
+                  imageId: plotResult.imageId,
+                  url: plotResult.imageId ? `/api/plots/${plotResult.imageId}` : null,
+                  thumbnailUrl: plotResult.imageId ? `/api/plots/${plotResult.imageId}/thumbnail` : null
+                };
+                
+                // Try to get base64 data from MongoDB first, then fallback to file system
+                let base64Data = null;
+                if (plotResult.imageId) {
+                  const plotFromDB = await this.pythonService.getPlotFromDB(plotResult.imageId);
+                  if (plotFromDB) {
+                    base64Data = plotFromDB.base64Data;
+                  }
+                }
+                
+                // Fallback to file system if MongoDB doesn't have it
+                if (!base64Data && plotData.path) {
+                  base64Data = await this.pythonService.getPlotAsBase64(plotData.path);
+                }
+                
+                if (base64Data) {
+                  plotData.data = base64Data;
+                }
+                
+                formattedResult.plots.push(plotData);
               // Try to get base64 data for the plots
               formattedResult.plots = [];
               for (const plotPath of result.plots) {
@@ -290,6 +356,11 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
 
             result = formattedResult;
           }
+        } else if (['web_search', 'search_technical_images'].includes(toolCall.function.name)) {
+          // Handle web search tools
+          console.log(`Executing web search tool: ${toolCall.function.name}`);
+          result = await this.webSearchService.executeTool(toolCall.function.name, parameters);
+
         } else {
           // Handle MCP tools
           result = await this.mcpService.callTool(toolCall.function.name, parameters);
@@ -346,6 +417,8 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     // Get tools again in case they've changed
     const mcpTools = this.mcpService.getToolDefinitions();
     const pythonTool = this.pythonService.getToolDefinition();
+    const webSearchTools = this.webSearchService.getToolDefinitions();
+    const tools = [...mcpTools, pythonTool, ...webSearchTools];
     const tools = [...mcpTools, pythonTool];
 
     try {
@@ -431,6 +504,26 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
 
   async getMCPStatus() {
     return await this.mcpService.getConnectionStatus();
+  }
+
+  async getWebSearchStatus() {
+    return this.webSearchService.getStatus();
+  }
+
+  async getAllServicesStatus() {
+    const [mcpStatus, webSearchStatus] = await Promise.all([
+      this.getMCPStatus(),
+      Promise.resolve(this.getWebSearchStatus())
+    ]);
+
+    return {
+      mcp: mcpStatus,
+      webSearch: webSearchStatus,
+      python: {
+        available: true,
+        outputDir: this.pythonService.outputDir
+      }
+    };
   }
 }
 

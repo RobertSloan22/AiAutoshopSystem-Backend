@@ -628,6 +628,30 @@ router.get('/mcp/status', async (req, res) => {
   }
 });
 
+
+// WEB SEARCH STATUS ENDPOINT
+router.get('/websearch/status', async (req, res) => {
+  try {
+    const status = await responsesService.getWebSearchStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Web search status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ALL SERVICES STATUS ENDPOINT
+router.get('/services/status', async (req, res) => {
+  try {
+    const status = await responsesService.getAllServicesStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Services status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 // PYTHON CODE EXECUTION ENDPOINT
 router.post('/execute/python', async (req, res) => {
   try {
@@ -667,6 +691,417 @@ router.post('/execute/python', async (req, res) => {
     });
   }
 });
+
+
+// AGENT QUESTION WITH PLOT GENERATION ENDPOINT
+router.post('/chat/analyze', async (req, res) => {
+  try {
+    const { question, vehicleContext, customerContext, includeVisualization = true } = req.body;
+
+    if (!question) {
+      return res.status(400).json({ error: 'Question is required' });
+    }
+
+    // Create a streaming session with the question
+    const { sessionId, stream } = await responsesService.createStreamingSession(
+      question,
+      vehicleContext,
+      customerContext
+    );
+
+    let fullResponse = '';
+    let toolCalls = [];
+    let plotResults = [];
+    let pythonCode = '';
+    let pythonOutput = '';
+
+    // Process the stream to collect the full response
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+      
+      if (delta?.content) {
+        fullResponse += delta.content;
+      }
+
+      if (delta?.tool_calls) {
+        for (const toolCallDelta of delta.tool_calls) {
+          if (toolCallDelta.index !== undefined) {
+            if (!toolCalls[toolCallDelta.index]) {
+              toolCalls[toolCallDelta.index] = {
+                id: toolCallDelta.id,
+                type: 'function',
+                function: { name: '', arguments: '' }
+              };
+            }
+
+            if (toolCallDelta.function?.name) {
+              toolCalls[toolCallDelta.index].function.name += toolCallDelta.function.name;
+            }
+            if (toolCallDelta.function?.arguments) {
+              toolCalls[toolCallDelta.index].function.arguments += toolCallDelta.function.arguments;
+            }
+          }
+        }
+      }
+
+      if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+        // Add the assistant message with tool_calls to conversation
+        const session = responsesService.getSession(sessionId);
+        if (session) {
+          const assistantMessage = {
+            role: 'assistant',
+            content: fullResponse || null,
+            tool_calls: toolCalls
+          };
+          session.messages.push(assistantMessage);
+        }
+        
+        // Process tool calls and extract plot data
+        const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
+        
+        // Check if any tool calls were Python executions with plots
+        for (let i = 0; i < toolCalls.length; i++) {
+          if (toolCalls[i].function.name === 'execute_python_code') {
+            try {
+              const args = JSON.parse(toolCalls[i].function.arguments);
+              pythonCode = args.code || '';
+              
+              // Parse the tool result to extract plot information
+              const resultContent = JSON.parse(toolResults[i].content);
+              if (resultContent.success) {
+                pythonOutput = resultContent.output || '';
+                if (resultContent.plots && resultContent.plots.length > 0) {
+                  plotResults = resultContent.plots;
+                }
+              }
+            } catch (e) {
+              console.error('Error parsing Python tool results:', e);
+            }
+          }
+        }
+
+        // Continue the conversation after tool execution
+        const continuedStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
+        
+        for await (const continueChunk of continuedStream) {
+          const continueDelta = continueChunk.choices[0]?.delta;
+          if (continueDelta?.content) {
+            fullResponse += continueDelta.content;
+          }
+          if (continueChunk.choices[0]?.finish_reason === 'stop') {
+            break;
+          }
+        }
+        break;
+      }
+
+      if (chunk.choices[0]?.finish_reason === 'stop') {
+        break;
+      }
+    }
+
+    responsesService.closeSession(sessionId);
+
+    // Prepare the combined response
+    const response = {
+      message: fullResponse,
+      analysis: {
+        question: question,
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    // Add plot data if available
+    if (plotResults.length > 0) {
+      response.visualizations = plotResults.map(plot => ({
+        imageId: plot.imageId,
+        url: plot.url,
+        thumbnailUrl: plot.thumbnailUrl,
+        data: plot.data, // Base64 encoded image data
+        path: plot.path
+      }));
+      
+      // Add Python execution details
+      response.codeExecution = {
+        code: pythonCode,
+        output: pythonOutput,
+        success: true
+      };
+    }
+
+    // Add context information if provided
+    if (vehicleContext || customerContext) {
+      response.context = {
+        vehicle: vehicleContext,
+        customer: customerContext
+      };
+    }
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('Analysis error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Analysis failed',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// STREAMING AGENT QUESTION WITH PLOT GENERATION ENDPOINT
+router.post('/chat/analyze/stream', async (req, res) => {
+  try {
+    const { question, vehicleContext, customerContext, includeVisualization = true } = req.body;
+
+    if (!question) {
+      return res.status(400).json({ error: 'Question is required' });
+    }
+
+    // Set headers for Server-Sent Events
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Cache-Control'
+    });
+
+    // Create a streaming session with the question
+    const { sessionId, stream } = await responsesService.createStreamingSession(
+      question,
+      vehicleContext,
+      customerContext
+    );
+
+    // Send session info
+    res.write(`data: ${JSON.stringify({
+      type: 'session_started',
+      sessionId,
+      question,
+      timestamp: new Date().toISOString()
+    })}\n\n`);
+
+    let toolCalls = [];
+    let fullResponse = '';
+    let plotResults = [];
+    let pythonCode = '';
+    let pythonOutput = '';
+    
+    // Buffer for streaming content
+    let contentBuffer = '';
+    let bufferTimeout = null;
+    const BUFFER_TIME = 100;
+    const MIN_CHUNK_SIZE = 20;
+    
+    const flushContentBuffer = () => {
+      if (contentBuffer.length > 0) {
+        const trimmedContent = contentBuffer.trim();
+        
+        if (trimmedContent.length > 0) {
+          res.write(`data: ${JSON.stringify({
+            type: 'content',
+            content: trimmedContent,
+            sessionId
+          })}\n\n`);
+        }
+        
+        contentBuffer = '';
+      }
+      
+      if (bufferTimeout) {
+        clearTimeout(bufferTimeout);
+        bufferTimeout = null;
+      }
+    };
+
+    const scheduleFlush = (forceTime = BUFFER_TIME) => {
+      if (bufferTimeout) {
+        clearTimeout(bufferTimeout);
+      }
+      bufferTimeout = setTimeout(flushContentBuffer, forceTime);
+    };
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+      
+      if (delta?.content) {
+        contentBuffer += delta.content;
+        fullResponse += delta.content;
+        
+        const hasGoodBreakpoint = /[.!?]\s+|[.!?]$|\n/.test(contentBuffer);
+        const isLongEnough = contentBuffer.length >= MIN_CHUNK_SIZE;
+        const hasWordBoundary = /\s+\w+$/.test(contentBuffer);
+        
+        if (hasGoodBreakpoint && isLongEnough) {
+          flushContentBuffer();
+        } else if (contentBuffer.length >= 40 && hasWordBoundary) {
+          flushContentBuffer();
+        } else {
+          scheduleFlush(BUFFER_TIME);
+        }
+      }
+
+      if (delta?.tool_calls) {
+        flushContentBuffer();
+        
+        for (const toolCallDelta of delta.tool_calls) {
+          if (toolCallDelta.index !== undefined) {
+            if (!toolCalls[toolCallDelta.index]) {
+              toolCalls[toolCallDelta.index] = {
+                id: toolCallDelta.id,
+                type: 'function',
+                function: { name: '', arguments: '' }
+              };
+            }
+
+            if (toolCallDelta.function?.name) {
+              toolCalls[toolCallDelta.index].function.name += toolCallDelta.function.name;
+            }
+            if (toolCallDelta.function?.arguments) {
+              toolCalls[toolCallDelta.index].function.arguments += toolCallDelta.function.arguments;
+            }
+          }
+        }
+      }
+
+      if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+        flushContentBuffer();
+        
+        // Add the assistant message with tool_calls to conversation
+        const session = responsesService.getSession(sessionId);
+        if (session) {
+          const assistantMessage = {
+            role: 'assistant',
+            content: fullResponse || null,
+            tool_calls: toolCalls
+          };
+          session.messages.push(assistantMessage);
+        }
+        
+        // Notify about tool execution starting
+        res.write(`data: ${JSON.stringify({
+          type: 'tools_executing',
+          tools: toolCalls.map(tc => tc.function.name),
+          sessionId
+        })}\n\n`);
+        
+        // Process tool calls
+        const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
+        
+        // Check if any tool calls were Python executions with plots
+        for (let i = 0; i < toolCalls.length; i++) {
+          if (toolCalls[i].function.name === 'execute_python_code') {
+            try {
+              const args = JSON.parse(toolCalls[i].function.arguments);
+              pythonCode = args.code || '';
+              
+              // Parse the tool result to extract plot information
+              const resultContent = JSON.parse(toolResults[i].content);
+              if (resultContent.success) {
+                pythonOutput = resultContent.output || '';
+                
+                // Send Python execution info
+                res.write(`data: ${JSON.stringify({
+                  type: 'code_execution',
+                  code: pythonCode,
+                  output: pythonOutput,
+                  sessionId
+                })}\n\n`);
+                
+                if (resultContent.plots && resultContent.plots.length > 0) {
+                  plotResults = resultContent.plots;
+                  
+                  // Send plot data immediately
+                  res.write(`data: ${JSON.stringify({
+                    type: 'visualization_ready',
+                    visualizations: plotResults.map(plot => ({
+                      imageId: plot.imageId,
+                      url: plot.url,
+                      thumbnailUrl: plot.thumbnailUrl,
+                      data: plot.data,
+                      path: plot.path
+                    })),
+                    sessionId
+                  })}\n\n`);
+                }
+              }
+            } catch (e) {
+              console.error('Error parsing Python tool results:', e);
+            }
+          }
+        }
+
+        // Continue the conversation after tool execution
+        const continuedStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
+        
+        contentBuffer = '';
+        
+        for await (const continueChunk of continuedStream) {
+          const continueDelta = continueChunk.choices[0]?.delta;
+          
+          if (continueDelta?.content) {
+            contentBuffer += continueDelta.content;
+            fullResponse += continueDelta.content;
+            
+            const hasGoodBreakpoint = /[.!?]\s+|[.!?]$|\n/.test(contentBuffer);
+            const isLongEnough = contentBuffer.length >= MIN_CHUNK_SIZE;
+            const hasWordBoundary = /\s+\w+$/.test(contentBuffer);
+            
+            if (hasGoodBreakpoint && isLongEnough) {
+              flushContentBuffer();
+            } else if (contentBuffer.length >= 40 && hasWordBoundary) {
+              flushContentBuffer();
+            } else {
+              scheduleFlush(BUFFER_TIME);
+            }
+          }
+          
+          if (continueChunk.choices[0]?.finish_reason === 'stop') {
+            break;
+          }
+        }
+        break;
+      }
+
+      if (chunk.choices[0]?.finish_reason === 'stop') {
+        break;
+      }
+    }
+
+    // Final flush
+    flushContentBuffer();
+    
+    // Send completion event with full summary
+    const completionData = {
+      type: 'analysis_complete',
+      sessionId,
+      summary: {
+        message: fullResponse,
+        hasVisualization: plotResults.length > 0,
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    if (plotResults.length > 0) {
+      completionData.summary.visualizationCount = plotResults.length;
+      completionData.summary.codeExecuted = !!pythonCode;
+    }
+    
+    res.write(`data: ${JSON.stringify(completionData)}\n\n`);
+    
+    res.end();
+    responsesService.closeSession(sessionId);
+
+  } catch (error) {
+    console.error('Streaming analysis error:', error);
+    res.write(`data: ${JSON.stringify({
+      type: 'error',
+      error: error.message || 'Analysis failed'
+    })}\n\n`);
+    res.end();
+  }
+});
+
 
 // HEALTH CHECK ENDPOINT
 router.get('/health', (req, res) => {

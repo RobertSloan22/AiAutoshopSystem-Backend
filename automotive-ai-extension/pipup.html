@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔧 Auto AI Assistant</h1>
+    </div>
+    
+    <div class="status-section">
+      <div class="status-indicator">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Checking...</span>
+      </div>
+      
+      <button id="toggleBtn" class="toggle-btn">
+        <span id="toggleText">Enable</span>
+      </button>
+    </div>
+    
+    <div class="info-section">
+      <div class="info-item">
+        <label>Backend URL:</label>
+        <input type="text" id="backendUrl" placeholder="http://localhost:3000">
+      </div>
+      
+      <button id="saveSettings" class="save-btn">Save Settings</button>
+    </div>
+    
+    <div class="actions-section">
+      <button id="captureBtn" class="action-btn">📸 Capture Screenshot</button>
+      <button id="scanBtn" class="action-btn">🔍 Scan Current Page</button>
+    </div>
+    
+    <div class="stats-section">
+      <div class="stat">
+        <span class="stat-label">Data Extractions:</span>
+        <span id="extractionCount">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Last Activity:</span>
+        <span id="lastActivity">Never</span>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <a href="#" id="viewLogs">View Logs</a>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

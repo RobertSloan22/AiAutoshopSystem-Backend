@@ -1,0 +1,145 @@
+{
+  "name": "vector-storage-service",
+  "version": "1.0.0",
+  "description": "Unified vector storage system with dual storage in ChromaDB and OpenAI",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "migrate": "node scripts/migrateVectorData.js"
+  },
+  "dependencies": {
+    "@elizaos/core": "^0.1.7",
+    "@emotion/react": "^11.13.5",
+    "@emotion/styled": "^11.13.5",
+    "@langchain/anthropic": "^0.3.12",
+    "@langchain/community": "^0.3.14",
+    "@langchain/core": "^0.3.44",
+    "@langchain/langgraph": "^0.2.74",
+    "@langchain/openai": "^0.3.17",
+    "@langchain/textsplitters": "^0.1.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@mui/icons-material": "^6.1.7",
+    "@mui/material": "^6.1.8",
+    "@openai/agents": "^0.0.7",
+    "@openai/realtime-api-beta": "github:openai/openai-realtime-api-beta",
+    "@qdrant/js-client-rest": "^1.14.0",
+    "@reduxjs/toolkit": "^2.3.0",
+    "@tanstack/react-query": "^5.63.0",
+    "@types/electron": "^1.6.12",
+    "@types/node": "^20.0.0",
+    "@types/react-helmet": "^6.1.11",
+    "axios": "^1.7.7",
+    "bcryptjs": "^2.4.3",
+    "cheerio": "^1.0.0-rc.12",
+    "chromadb": "^1.7.0",
+    "code2prompt": "^1.1.4",
+    "compression": "^1.8.0",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "csv-parse": "^5.5.6",
+    "csv-parser": "^3.0.0",
+    "date-fns": "^4.1.0",
+    "dotenv": "^16.5.0",
+    "electron-fetch": "^1.9.1",
+    "electron-squirrel-startup": "^1.0.1",
+    "elizaos": "0.25.6-alpha.1",
+    "express": "^4.21.2",
+    "express-async-handler": "^1.2.0",
+    "express-rate-limit": "^7.5.0",
+    "google-auth-library": "^10.2.1",
+    "helmet": "^8.1.0",
+    "http-proxy-middleware": "^3.0.5",
+    "ioredis": "^5.6.1",
+    "jsdom": "^24.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.469.0",
+    "mongoose": "^8.7.3",
+    "multer": "^1.4.5-lts.2",
+    "node-fetch": "^2.7.0",
+    "openai": "^4.104.0",
+    "ora": "^7.0.1",
+    "p-limit": "^6.2.0",
+    "p-queue": "^8.1.0",
+    "path": "^0.12.7",
+    "pdfjs-dist": "^4.8.69",
+    "prop-types": "^15.8.1",
+    "puppeteer": "^21.9.0",
+    "react-beautiful-dnd": "^13.1.1",
+    "react-big-calendar": "^1.15.0",
+    "react-feather": "^2.0.10",
+    "react-helmet": "^6.1.0",
+    "react-hot-toast": "^2.4.1",
+    "react-redux": "^9.1.2",
+    "react-toastify": "^10.0.6",
+    "redis": "^5.6.1",
+    "sharp": "^0.34.1",
+    "socket.io": "^4.8.1",
+    "string-similarity": "^4.0.4",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^9.0.1",
+    "web3": "^4.15.0",
+    "ws": "^8.18.2",
+    "zod": "^3.24.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.5.0",
+    "@electron-forge/maker-deb": "^7.5.0",
+    "@electron-forge/maker-rpm": "^7.5.0",
+    "@electron-forge/maker-squirrel": "^7.5.0",
+    "@electron-forge/maker-zip": "^7.5.0",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.5.0",
+    "@electron-forge/plugin-fuses": "^7.5.0",
+    "@electron/fuses": "^1.8.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.0.1",
+    "electron": "^33.1.0",
+    "electron-is-dev": "^3.0.1",
+    "langchain": "^0.3.28",
+    "nodemon": "^3.1.7",
+    "tsx": "^4.20.3",
+    "vite-plugin-top-level-await": "^1.4.4",
+    "vite-plugin-wasm": "^3.4.1",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.yourcompany.autorepair",
+    "productName": "Auto Repair Shop",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.icns"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "proxy": "http://localhost:3001",
+  "author": "robertsloan",
+  "license": "MIT"
+}
