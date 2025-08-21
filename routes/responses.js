@@ -628,6 +628,7 @@ router.get('/mcp/status', async (req, res) => {
   }
 });
 
+
 // WEB SEARCH STATUS ENDPOINT
 router.get('/websearch/status', async (req, res) => {
   try {
@@ -649,6 +650,7 @@ router.get('/services/status', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // PYTHON CODE EXECUTION ENDPOINT
 router.post('/execute/python', async (req, res) => {
@@ -689,6 +691,7 @@ router.post('/execute/python', async (req, res) => {
     });
   }
 });
+
 
 // AGENT QUESTION WITH PLOT GENERATION ENDPOINT
 router.post('/chat/analyze', async (req, res) => {
@@ -1098,6 +1101,7 @@ router.post('/chat/analyze/stream', async (req, res) => {
     res.end();
   }
 });
+
 
 // HEALTH CHECK ENDPOINT
 router.get('/health', (req, res) => {

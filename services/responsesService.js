@@ -19,6 +19,7 @@ class ResponsesAPIService {
     this.mcpService = new MCPService(process.env.MCP_SERVER_URL || 'http://localhost:3700');
     this.pythonService = new PythonExecutionService();
     this.webSearchService = new WebSearchService();
+
     this.activeSessions = new Map();
     this.fallbackModels = ['gpt-3.5-turbo', 'claude-3-haiku-20240307'];
     this.primaryModel = 'gpt-4o-mini';
@@ -42,6 +43,10 @@ class ResponsesAPIService {
     const pythonTool = this.pythonService.getToolDefinition();
     const webSearchTools = this.webSearchService.getToolDefinitions();
     const tools = [...mcpTools, pythonTool, ...webSearchTools];
+    // Get MCP tools and Python execution tool
+    const mcpTools = this.mcpService.getToolDefinitions();
+    const pythonTool = this.pythonService.getToolDefinition();
+    const tools = [...mcpTools, pythonTool];
     
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -207,6 +212,7 @@ WEB SEARCH CAPABILITIES:
   * Provide vehicle context for more relevant results
   * Image types: diagram, wiring, flowchart, parts, general
 
+
 INSTRUCTIONS:
 1. Use the appropriate tools to gather vehicle data when requested
 2. When mathematical calculations or data analysis are needed, use the Python execution tool
@@ -221,6 +227,12 @@ INSTRUCTIONS:
 11. When analyzing sensor data patterns, consider using Python to create trend charts
 12. Use web search for recent recalls, TSBs, or when you need current information beyond your training data
 13. Search for technical images when diagrams would help explain complex repairs or diagnostics
+4. Provide clear, professional diagnostic guidance
+5. Always explain what you're doing when using tools
+6. Include relevant vehicle context in your responses
+7. Suggest specific diagnostic steps based on the data you collect
+8. If asked about DTC codes, use the tools to read current codes and provide detailed explanations
+9. When analyzing sensor data patterns, consider using Python to create trend charts
 
 PYTHON USAGE EXAMPLES:
 - Calculate fuel efficiency from OBD2 data
@@ -284,6 +296,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
               vehicleContext: session.vehicleContext,
               customerContext: session.customerContext,
               pythonCode: parameters.code
+              plot_filename: parameters.plot_filename
             }
           );
 
@@ -328,6 +341,16 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
                 }
                 
                 formattedResult.plots.push(plotData);
+              // Try to get base64 data for the plots
+              formattedResult.plots = [];
+              for (const plotPath of result.plots) {
+                const base64Data = await this.pythonService.getPlotAsBase64(plotPath);
+                if (base64Data) {
+                  formattedResult.plots.push({
+                    path: plotPath,
+                    data: base64Data
+                  });
+                }
               }
             }
 
@@ -337,6 +360,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
           // Handle web search tools
           console.log(`Executing web search tool: ${toolCall.function.name}`);
           result = await this.webSearchService.executeTool(toolCall.function.name, parameters);
+
         } else {
           // Handle MCP tools
           result = await this.mcpService.callTool(toolCall.function.name, parameters);
@@ -395,6 +419,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     const pythonTool = this.pythonService.getToolDefinition();
     const webSearchTools = this.webSearchService.getToolDefinitions();
     const tools = [...mcpTools, pythonTool, ...webSearchTools];
+    const tools = [...mcpTools, pythonTool];
 
     try {
       // Check if this is a fallback session
