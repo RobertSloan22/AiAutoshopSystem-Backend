@@ -4,8 +4,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import WebSocket from 'ws';
+
 import { registerImage } from '../routes/images.js';
 import Plot from '../models/plot.model.js';
+
 
 class PythonExecutionService {
   constructor() {
@@ -77,10 +79,17 @@ class PythonExecutionService {
     try {
       // If Python server is available, use it for better performance
       if (this.isConnected) {
+
         return await this.executeViaServer(code, executionId, { ...options, save_plots, plot_filename });
       } else {
         // Fallback to local execution
         return await this.executeLocally(code, executionId, { ...options, save_plots, plot_filename });
+
+        return await this.executeViaServer(code, executionId, { save_plots, plot_filename });
+      } else {
+        // Fallback to local execution
+        return await this.executeLocally(code, executionId, { save_plots, plot_filename });
+
       }
     } catch (error) {
       console.error('Python execution error:', error);
@@ -128,6 +137,7 @@ class PythonExecutionService {
               case 'plot':
                 // Handle plot data (base64 encoded)
                 if (message.data && options.save_plots) {
+
                   const plotResult = await this.savePlot(
                     message.data, 
                     message.filename || options.plot_filename,
@@ -142,6 +152,10 @@ class PythonExecutionService {
                     }
                   );
                   plots.push(plotResult);
+
+                  const plotPath = await this.savePlot(message.data, message.filename || options.plot_filename);
+                  plots.push(plotPath);
+
                 }
                 break;
 
@@ -193,8 +207,9 @@ class PythonExecutionService {
     const tempFile = path.join(this.outputDir, `temp_${executionId}.py`);
     
     try {
-      // Wrap the code to capture plots if needed
+
       const wrappedCode = this.wrapCodeForExecution(code, { ...options, executionId });
+      const wrappedCode = this.wrapCodeForExecution(code, options);
       await fs.writeFile(tempFile, wrappedCode);
 
       return new Promise((resolve, reject) => {
@@ -285,6 +300,10 @@ class PythonExecutionService {
             plots.push({ path: plotPath, imageId });
           }
 
+          // Check for generated plots
+          const plots = await this.findGeneratedPlots(executionId);
+
+
           resolve({
             success: code === 0,
             output: output.join(''),
@@ -317,7 +336,9 @@ class PythonExecutionService {
   }
 
   wrapCodeForExecution(code, options) {
+
     const executionId = options.executionId || 'unknown';
+
     const plotSetup = options.save_plots ? `
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
@@ -330,6 +351,7 @@ _original_show = plt.show
 def _save_show():
     import os
     plot_filename = "${options.plot_filename || `plot_${executionId}_${Date.now()}`}"
+    plot_filename = "${options.plot_filename || `plot_${Date.now()}`}"
     plot_path = os.path.join("${this.outputDir}", f"{plot_filename}.png")
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
     print(f"Plot saved to: {plot_path}")
@@ -349,11 +371,13 @@ if 'plt' in locals():
     for fig_num in plt.get_fignums():
         plt.figure(fig_num)
         plt.savefig(f"${this.outputDir}/figure_{fig_num}_${executionId}_${Date.now()}.png", dpi=150, bbox_inches='tight')
+        plt.savefig(f"${this.outputDir}/figure_{fig_num}_${Date.now()}.png", dpi=150, bbox_inches='tight')
     plt.close('all')
 `;
   }
 
   async savePlot(base64Data, filename, executionId, options = {}) {
+  async savePlot(base64Data, filename) {
     const plotFilename = filename || `plot_${Date.now()}`;
     const plotPath = path.join(this.outputDir, `${plotFilename}.png`);
     
@@ -419,6 +443,8 @@ if 'plt' in locals():
     }
     
     return { path: plotPath, imageId };
+    return plotPath;
+
   }
 
   async findGeneratedPlots(executionId) {
@@ -439,6 +465,7 @@ if 'plt' in locals():
           return false;
         }
       });
+      const plots = files.filter(f => f.endsWith('.png') && f.includes(String(executionId)));
       return plots.map(f => path.join(this.outputDir, f));
     } catch (error) {
       console.error('Error finding generated plots:', error);
@@ -491,6 +518,7 @@ if 'plt' in locals():
       return [];
     }
   }
+
 
   // Clean up old execution results and plots
   async cleanup(maxAgeMs = 60 * 60 * 1000) { // 1 hour default

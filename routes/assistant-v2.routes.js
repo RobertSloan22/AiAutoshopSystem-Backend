@@ -2,21 +2,6 @@ import express from 'express';
 import multer from 'multer';
 import OpenAI from 'openai';
 import fs from 'fs';
-import {
-  createAssistant,
-  listAssistants,
-  getAssistant,
-  updateAssistant,
-  deleteAssistant,
-  createThread,
-  addMessage,
-  getMessages,
-  createRun,
-  getRun,
-  submitToolOutputs,
-  cancelRun,
-  createThreadAndRun
-} from '../controllers/assistants.controller.js';
 
 const router = express.Router();
 
@@ -28,12 +13,10 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Helper function to get or create vector store for a specific assistant
-const getOrCreateVectorStore = async (assistantId) => {
-  if (!assistantId || !assistantId.startsWith('asst_')) {
-    throw new Error(`Invalid assistant ID: ${assistantId}. Expected ID starting with "asst_"`);
-  }
-  
+const assistantId = process.env.OPENAI_ASSISTANT_ID || 'your-assistant-id-here';
+
+// Helper function to get or create vector store
+const getOrCreateVectorStore = async () => {
   const assistant = await openai.beta.assistants.retrieve(assistantId);
 
   // If assistant already has a vector store, return it
@@ -57,37 +40,14 @@ const getOrCreateVectorStore = async (assistantId) => {
   return vectorStore.id;
 };
 
-// Assistant routes
-router.post('/', createAssistant);
-router.get('/', listAssistants);
-router.get('/:assistantId', getAssistant);
-router.put('/:assistantId', updateAssistant);
-router.delete('/:assistantId', deleteAssistant);
-
-// Thread routes
-router.post('/threads', createThread);
-router.post('/threads/:threadId/messages', addMessage);
-router.get('/threads/:threadId/messages', getMessages);
-
-// Run routes
-router.post('/threads/:threadId/runs', createRun);
-router.get('/threads/:threadId/runs/:runId', getRun);
-router.post('/threads/:threadId/runs/:runId/submit-tool-outputs', submitToolOutputs);
-router.post('/threads/:threadId/runs/:runId/cancel', cancelRun);
-
-// Thread and run creation (combined operation)
-router.post('/thread-runs', createThreadAndRun);
-
-// File management routes
 // Upload file to assistant's vector store
-router.post('/:assistantId/files', upload.single('file'), async (req, res) => {
+router.post('/files', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file provided' });
     }
 
-    const { assistantId } = req.params;
-    const vectorStoreId = await getOrCreateVectorStore(assistantId);
+    const vectorStoreId = await getOrCreateVectorStore();
 
     // Create a readable stream from the uploaded file
     const fileStream = fs.createReadStream(req.file.path);
@@ -122,10 +82,9 @@ router.post('/:assistantId/files', upload.single('file'), async (req, res) => {
 });
 
 // List files in assistant's vector store
-router.get('/:assistantId/files', async (req, res) => {
+router.get('/files', async (req, res) => {
   try {
-    const { assistantId } = req.params;
-    const vectorStoreId = await getOrCreateVectorStore(assistantId);
+    const vectorStoreId = await getOrCreateVectorStore();
     const fileList = await openai.beta.vectorStores.files.list(vectorStoreId);
 
     const filesArray = await Promise.all(
@@ -151,10 +110,10 @@ router.get('/:assistantId/files', async (req, res) => {
 });
 
 // Delete file from assistant's vector store
-router.delete('/:assistantId/files/:fileId', async (req, res) => {
+router.delete('/files/:fileId', async (req, res) => {
   try {
-    const { assistantId, fileId } = req.params;
-    const vectorStoreId = await getOrCreateVectorStore(assistantId);
+    const { fileId } = req.params;
+    const vectorStoreId = await getOrCreateVectorStore();
 
     await openai.beta.vectorStores.files.del(vectorStoreId, fileId);
 
@@ -166,14 +125,13 @@ router.delete('/:assistantId/files/:fileId', async (req, res) => {
 });
 
 // Upload multiple files
-router.post('/:assistantId/files/bulk', upload.array('files', 10), async (req, res) => {
+router.post('/files/bulk', upload.array('files', 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: 'No files provided' });
     }
 
-    const { assistantId } = req.params;
-    const vectorStoreId = await getOrCreateVectorStore(assistantId);
+    const vectorStoreId = await getOrCreateVectorStore();
     const uploadedFiles = [];
 
     for (const file of req.files) {
