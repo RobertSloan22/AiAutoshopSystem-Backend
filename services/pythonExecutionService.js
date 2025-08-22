@@ -198,7 +198,9 @@ class PythonExecutionService {
       await fs.writeFile(tempFile, wrappedCode);
 
       return new Promise((resolve, reject) => {
-        const pythonProcess = spawn('python3', [tempFile], {
+        // Use the virtual environment's Python interpreter
+        const venvPython = path.join(process.cwd(), 'venv', 'bin', 'python');
+        const pythonProcess = spawn(venvPython, [tempFile], {
           env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
         });
 
