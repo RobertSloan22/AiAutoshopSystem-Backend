@@ -13,10 +13,36 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const assistantId = process.env.OPENAI_ASSISTANT_ID || 'your-assistant-id-here';
+// Helper function to get or create assistant if needed
+const getOrCreateAssistant = async () => {
+  const assistantId = process.env.OPENAI_ASSISTANT_ID;
+  
+  if (assistantId && assistantId !== 'your-assistant-id-here') {
+    try {
+      // Try to retrieve existing assistant
+      const assistant = await openai.beta.assistants.retrieve(assistantId);
+      return assistant.id;
+    } catch (error) {
+      console.log('Assistant not found, creating new one...');
+    }
+  }
+  
+  // Create a new assistant if none exists
+  const assistant = await openai.beta.assistants.create({
+    name: 'File Analysis Assistant',
+    instructions: 'You are a helpful assistant that can analyze and answer questions about uploaded files.',
+    model: 'gpt-4-turbo-preview',
+    tools: [{ type: 'file_search' }],
+  });
+  
+  console.log('Created new assistant:', assistant.id);
+  console.log('Please update your .env file with OPENAI_ASSISTANT_ID=' + assistant.id);
+  
+  return assistant.id;
+};
 
 // Helper function to get or create vector store
-const getOrCreateVectorStore = async () => {
+const getOrCreateVectorStore = async (assistantId) => {
   const assistant = await openai.beta.assistants.retrieve(assistantId);
 
   // If assistant already has a vector store, return it
@@ -47,7 +73,8 @@ router.post('/files', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file provided' });
     }
 
-    const vectorStoreId = await getOrCreateVectorStore();
+    const assistantId = await getOrCreateAssistant();
+    const vectorStoreId = await getOrCreateVectorStore(assistantId);
 
     // Create a readable stream from the uploaded file
     const fileStream = fs.createReadStream(req.file.path);
@@ -84,7 +111,8 @@ router.post('/files', upload.single('file'), async (req, res) => {
 // List files in assistant's vector store
 router.get('/files', async (req, res) => {
   try {
-    const vectorStoreId = await getOrCreateVectorStore();
+    const assistantId = await getOrCreateAssistant();
+    const vectorStoreId = await getOrCreateVectorStore(assistantId);
     const fileList = await openai.beta.vectorStores.files.list(vectorStoreId);
 
     const filesArray = await Promise.all(
@@ -113,7 +141,8 @@ router.get('/files', async (req, res) => {
 router.delete('/files/:fileId', async (req, res) => {
   try {
     const { fileId } = req.params;
-    const vectorStoreId = await getOrCreateVectorStore();
+    const assistantId = await getOrCreateAssistant();
+    const vectorStoreId = await getOrCreateVectorStore(assistantId);
 
     await openai.beta.vectorStores.files.del(vectorStoreId, fileId);
 
@@ -131,7 +160,8 @@ router.post('/files/bulk', upload.array('files', 10), async (req, res) => {
       return res.status(400).json({ error: 'No files provided' });
     }
 
-    const vectorStoreId = await getOrCreateVectorStore();
+    const assistantId = await getOrCreateAssistant();
+    const vectorStoreId = await getOrCreateVectorStore(assistantId);
     const uploadedFiles = [];
 
     for (const file of req.files) {
@@ -177,6 +207,62 @@ router.post('/files/bulk', upload.array('files', 10), async (req, res) => {
         }
       });
     }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create a thread and send a message
+router.post('/chat', async (req, res) => {
+  try {
+    const { message, threadId } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    
+    const assistantId = await getOrCreateAssistant();
+    
+    // Create or use existing thread
+    let thread;
+    if (threadId) {
+      thread = await openai.beta.threads.retrieve(threadId);
+    } else {
+      thread = await openai.beta.threads.create();
+    }
+    
+    // Add message to thread
+    await openai.beta.threads.messages.create(thread.id, {
+      role: 'user',
+      content: message,
+    });
+    
+    // Run the assistant
+    const run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: assistantId,
+    });
+    
+    // Wait for completion
+    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    while (runStatus.status !== 'completed' && runStatus.status !== 'failed') {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    }
+    
+    if (runStatus.status === 'failed') {
+      throw new Error('Assistant run failed');
+    }
+    
+    // Get messages
+    const messages = await openai.beta.threads.messages.list(thread.id);
+    const assistantMessages = messages.data.filter(m => m.role === 'assistant');
+    const latestMessage = assistantMessages[0];
+    
+    res.json({
+      threadId: thread.id,
+      message: latestMessage.content[0].text.value,
+    });
+  } catch (error) {
+    console.error('Error in chat:', error);
     res.status(500).json({ error: error.message });
   }
 });

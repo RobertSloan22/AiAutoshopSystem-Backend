@@ -28,33 +28,55 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Supported file types for vector stores
+const SUPPORTED_FILE_TYPES = [
+  '.txt', '.md', '.pdf', '.html', '.json', '.jsonl',
+  '.csv', '.xml', '.tex', '.docx', '.pptx', '.xlsx',
+  '.py', '.js', '.java', '.c', '.cpp', '.cs', '.php',
+  '.rb', '.go', '.rs', '.kt', '.swift', '.m', '.scala',
+  '.sh', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+  '.log'
+];
+
+// Helper function to check if file type is supported
+const isSupportedFileType = (filename) => {
+  const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
+  return SUPPORTED_FILE_TYPES.includes(ext);
+};
+
 // Helper function to get or create vector store for a specific assistant
 const getOrCreateVectorStore = async (assistantId) => {
   if (!assistantId || !assistantId.startsWith('asst_')) {
     throw new Error(`Invalid assistant ID: ${assistantId}. Expected ID starting with "asst_"`);
   }
   
-  const assistant = await openai.beta.assistants.retrieve(assistantId);
+  try {
+    const assistant = await openai.beta.assistants.retrieve(assistantId);
 
-  // If assistant already has a vector store, return it
-  if (assistant.tool_resources?.file_search?.vector_store_ids?.length > 0) {
-    return assistant.tool_resources.file_search.vector_store_ids[0];
-  }
+    // If assistant already has a vector store, return it
+    if (assistant.tool_resources?.file_search?.vector_store_ids?.length > 0) {
+      return assistant.tool_resources.file_search.vector_store_ids[0];
+    }
 
-  // Otherwise, create a new vector store and attach it to the assistant
-  const vectorStore = await openai.beta.vectorStores.create({
-    name: 'assistant-vector-store',
-  });
+    // Create a new vector store
+    const vectorStore = await openai.vectorStores.create({
+      name: 'assistant-vector-store',
+    });
 
-  await openai.beta.assistants.update(assistantId, {
-    tool_resources: {
-      file_search: {
-        vector_store_ids: [vectorStore.id],
+    // Update the assistant with the new vector store
+    await openai.beta.assistants.update(assistantId, {
+      tool_resources: {
+        file_search: {
+          vector_store_ids: [vectorStore.id],
+        },
       },
-    },
-  });
+    });
 
-  return vectorStore.id;
+    return vectorStore.id;
+  } catch (error) {
+    console.error('Error in getOrCreateVectorStore:', error);
+    throw error;
+  }
 };
 
 // Assistant routes
@@ -86,22 +108,43 @@ router.post('/:assistantId/files', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file provided' });
     }
 
+    // Log file details for debugging
+    console.log('Uploading file:', {
+      originalName: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path
+    });
+
+    // Check if file type is supported
+    if (!isSupportedFileType(req.file.originalname)) {
+      fs.unlinkSync(req.file.path);
+      const ext = req.file.originalname.substring(req.file.originalname.lastIndexOf('.'));
+      return res.status(400).json({ 
+        error: `File type ${ext} is not supported. Supported types: ${SUPPORTED_FILE_TYPES.join(', ')}`
+      });
+    }
+
     const { assistantId } = req.params;
     const vectorStoreId = await getOrCreateVectorStore(assistantId);
 
     // Create a readable stream from the uploaded file
     const fileStream = fs.createReadStream(req.file.path);
 
-    // Upload file to OpenAI
+    // Upload file to OpenAI with assistants purpose for vector store usage
     const openaiFile = await openai.files.create({
       file: fileStream,
-      purpose: 'assistants',
+      purpose: 'assistants',  // Use 'assistants' for files that will be added to vector stores
     });
+    
+    console.log('OpenAI file created:', openaiFile.id);
 
     // Add file to vector store
-    await openai.beta.vectorStores.files.create(vectorStoreId, {
+    console.log('Adding file to vector store:', vectorStoreId);
+    const vectorFile = await openai.vectorStores.files.createAndPoll(vectorStoreId, {
       file_id: openaiFile.id,
     });
+    console.log('File added to vector store:', vectorFile);
 
     // Clean up the temporary file
     fs.unlinkSync(req.file.path);
@@ -126,12 +169,12 @@ router.get('/:assistantId/files', async (req, res) => {
   try {
     const { assistantId } = req.params;
     const vectorStoreId = await getOrCreateVectorStore(assistantId);
-    const fileList = await openai.beta.vectorStores.files.list(vectorStoreId);
+    const fileList = await openai.vectorStores.files.list(vectorStoreId);
 
     const filesArray = await Promise.all(
       fileList.data.map(async (file) => {
         const fileDetails = await openai.files.retrieve(file.id);
-        const vectorFileDetails = await openai.beta.vectorStores.files.retrieve(
+        const vectorFileDetails = await openai.vectorStores.files.retrieve(
           vectorStoreId,
           file.id
         );
@@ -156,7 +199,7 @@ router.delete('/:assistantId/files/:fileId', async (req, res) => {
     const { assistantId, fileId } = req.params;
     const vectorStoreId = await getOrCreateVectorStore(assistantId);
 
-    await openai.beta.vectorStores.files.del(vectorStoreId, fileId);
+    await openai.vectorStores.files.del(vectorStoreId, fileId);
 
     res.status(200).json({ success: true });
   } catch (error) {
@@ -178,14 +221,21 @@ router.post('/:assistantId/files/bulk', upload.array('files', 10), async (req, r
 
     for (const file of req.files) {
       try {
+        // Check if file type is supported
+        if (!isSupportedFileType(file.originalname)) {
+          console.log(`Skipping unsupported file type: ${file.originalname}`);
+          fs.unlinkSync(file.path);
+          continue;
+        }
+
         const fileStream = fs.createReadStream(file.path);
 
         const openaiFile = await openai.files.create({
           file: fileStream,
-          purpose: 'assistants',
+          purpose: 'assistants',  // Use 'assistants' for files that will be added to vector stores
         });
 
-        await openai.beta.vectorStores.files.create(vectorStoreId, {
+        await openai.vectorStores.files.createAndPoll(vectorStoreId, {
           file_id: openaiFile.id,
         });
 
