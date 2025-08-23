@@ -184,11 +184,16 @@ export const searchImages = async (req, res) => {
           const hasPart = query.toLowerCase().split(' ').some(word => imageText.includes(word));
 
           if (isPartQuery) {
-            if (!(hasMake && hasModel && hasPart)) return null;
+            // For part queries, be less restrictive - require at least 2 out of 3 main criteria
+            const criteriaCount = (hasMake ? 1 : 0) + (hasModel ? 1 : 0) + (hasPart ? 1 : 0);
+            if (criteriaCount < 2) return null;
+            
+            // Boost score based on matching criteria
+            image.relevanceScore += (hasMake ? 2 : 0) + (hasModel ? 2 : 0) + (hasPart ? 3 : 0);
             image.relevanceScore += (hasYear ? 2 : 0) + (hasEngine ? 1 : 0);
-            image.relevanceScore += hasPart ? 2 : 0;
           } else {
-            const hasModelOrYear = vehicleTerms.slice(0, 2).some(term => imageText.includes(term));
+            // For general queries, require make and at least one other vehicle identifier
+            const hasModelOrYear = hasModel || hasYear;
             if (!hasMake || !hasModelOrYear) return null;
             image.relevanceScore += vehicleTerms.filter(term => imageText.includes(term)).length;
           }
@@ -241,7 +246,7 @@ export const searchImages = async (req, res) => {
     });
 
     // Take the specified number of results, but ensure we have at least some results
-    const minResults = Math.min(3, filteredResults.length);
+    const minResults = Math.min(10, filteredResults.length);
     filteredResults = filteredResults.slice(0, Math.max(minResults, num));
 
     // Save each image to the database
