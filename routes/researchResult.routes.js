@@ -5,7 +5,10 @@ import {
   getResearchResults,
   updateResearchResult,
   deleteResearchResult,
-  searchResearchResults
+  searchResearchResults,
+  getResearchResultsByClient,
+  getRecentResearchResults,
+  getResearchStats
 } from '../controllers/researchResult.controller.js';
 import additionalRoutes from './researchResult.additional.routes.js';
 
@@ -144,7 +147,10 @@ const router = express.Router();
 router.post('/', saveResearchResult);
 
 // Special search endpoints (need to come before /:id to avoid path conflicts)
-router.get('/search', searchResearchResults);
+router.get('/search/:query', searchResearchResults);
+router.get('/client/:clientId', getResearchResultsByClient);
+router.get('/recent/:count', getRecentResearchResults);
+router.get('/stats', getResearchStats);
 
 // Add the additional search route endpoints
 router.use('/', additionalRoutes);
