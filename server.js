@@ -584,6 +584,16 @@ app.use("/api", apiRoutes);
 app.use("/api/research-progress", researchProgressRoutes);
 // Research results endpoints
 app.use("/api/research-results", researchResultRoutes);
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
