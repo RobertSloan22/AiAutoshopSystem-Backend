@@ -478,9 +478,124 @@ export const deleteResearchResult = async (req, res) => {
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
+export const getResearchResultsByClient = async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+    
+    const results = await ResearchResult.find({ userId: clientId })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+    
+    const total = await ResearchResult.countDocuments({ userId: clientId });
+    
+    res.status(200).json({
+      success: true,
+      data: results.map(result => formatResearchResult(result)),
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        pages: Math.ceil(total / limitNum)
+      }
+    });
+  } catch (error) {
+    console.error('[ResearchResultController] GetByClient error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve research results by client',
+      message: error.message || 'An unexpected error occurred'
+    });
+  }
+};
+
+export const getRecentResearchResults = async (req, res) => {
+  try {
+    const { count } = req.params;
+    const limitNum = parseInt(count) || 10;
+    
+    const results = await ResearchResult.find({})
+      .sort({ createdAt: -1 })
+      .limit(limitNum);
+    
+    res.status(200).json({
+      success: true,
+      data: results.map(result => formatResearchResult(result)),
+      count: results.length
+    });
+  } catch (error) {
+    console.error('[ResearchResultController] GetRecent error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve recent research results',
+      message: error.message || 'An unexpected error occurred'
+    });
+  }
+};
+
+export const getResearchStats = async (req, res) => {
+  try {
+    const stats = await ResearchResult.aggregate([
+      {
+        $facet: {
+          totalCount: [{ $count: "count" }],
+          statusBreakdown: [
+            { $group: { _id: "$status", count: { $sum: 1 } } }
+          ],
+          recentActivity: [
+            {
+              $match: {
+                createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+              }
+            },
+            { $count: "count" }
+          ],
+          topTags: [
+            { $unwind: "$tags" },
+            { $group: { _id: "$tags", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+          ],
+          userActivity: [
+            { $group: { _id: "$userId", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+          ]
+        }
+      }
+    ]);
+    
+    const formattedStats = {
+      total: stats[0].totalCount[0]?.count || 0,
+      statusBreakdown: stats[0].statusBreakdown,
+      last24Hours: stats[0].recentActivity[0]?.count || 0,
+      topTags: stats[0].topTags,
+      topUsers: stats[0].userActivity
+    };
+    
+    res.status(200).json({
+      success: true,
+      data: formattedStats
+    });
+  } catch (error) {
+    console.error('[ResearchResultController] GetStats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve research statistics',
+      message: error.message || 'An unexpected error occurred'
+    });
+  }
+};
+
 export const searchResearchResults = async (req, res) => {
   try {
-    const { query, limit = 10, format = 'full' } = req.query;
+    const { query } = req.params;
+    const { page = 1, limit = 10, format = 'full' } = req.query;
     
     if (!query) {
       return res.status(400).json({
