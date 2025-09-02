@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import axios from 'axios';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import WebSocket from 'ws';
@@ -198,7 +199,9 @@ class PythonExecutionService {
       await fs.writeFile(tempFile, wrappedCode);
 
       return new Promise((resolve, reject) => {
-        const pythonProcess = spawn('python3', [tempFile], {
+        // Use the Python from virtual environment
+        const pythonPath = path.join(process.cwd(), 'venv', 'bin', 'python');
+        const pythonProcess = spawn(pythonPath, [tempFile], {
           env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
         });
 
@@ -430,7 +433,7 @@ if 'plt' in locals():
         // If not, check if the file was created recently (within last 5 seconds)
         try {
           const filePath = path.join(this.outputDir, f);
-          const stats = fs.statSync(filePath);
+          const stats = fsSync.statSync(filePath);
           const fileAge = Date.now() - stats.mtimeMs;
           return fileAge < 5000; // 5 seconds
         } catch (err) {
