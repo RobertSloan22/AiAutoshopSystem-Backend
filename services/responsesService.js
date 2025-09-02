@@ -20,6 +20,7 @@ class ResponsesAPIService {
     this.pythonService = new PythonExecutionService();
     this.webSearchService = new WebSearchService();
     this.activeSessions = new Map();
+    this.conversationHistory = new Map(); // Add conversation history storage
     this.fallbackModels = ['gpt-3.5-turbo', 'claude-3-haiku-20240307'];
     this.primaryModel = 'gpt-4o-mini';
     
@@ -31,7 +32,7 @@ class ResponsesAPIService {
     }, 60 * 60 * 1000); // Clean up every hour
   }
 
-  async createStreamingSession(message, vehicleContext = {}, customerContext = {}) {
+  async createStreamingSession(message, vehicleContext = {}, customerContext = {}, conversationId = null) {
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     // Build system prompt with context
@@ -43,10 +44,19 @@ class ResponsesAPIService {
     const webSearchTools = this.webSearchService.getToolDefinitions();
     const tools = [...mcpTools, pythonTool, ...webSearchTools];
     
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: message }
-    ];
+    // Build messages array with conversation history
+    let messages = [{ role: 'system', content: systemPrompt }];
+    
+    // Add conversation history if conversationId is provided
+    if (conversationId && this.conversationHistory.has(conversationId)) {
+      const history = this.conversationHistory.get(conversationId);
+      // Add previous messages (excluding system messages to avoid duplicates)
+      const historyMessages = history.messages.filter(msg => msg.role !== 'system');
+      messages.push(...historyMessages);
+    }
+    
+    // Add current user message
+    messages.push({ role: 'user', content: message });
 
     try {
       const stream = await this.openai.chat.completions.create({
@@ -63,6 +73,7 @@ class ResponsesAPIService {
         messages,
         vehicleContext,
         customerContext,
+        conversationId,
         createdAt: Date.now()
       });
 
@@ -71,20 +82,29 @@ class ResponsesAPIService {
       console.error('Failed to create OpenAI stream with primary model:', error);
       
       // Try fallback model if primary fails
-      return this.createFallbackStreamingSession(message, vehicleContext, customerContext);
+      return this.createFallbackStreamingSession(message, vehicleContext, customerContext, conversationId);
     }
   }
 
-  async createFallbackStreamingSession(message, vehicleContext = {}, customerContext = {}) {
+  async createFallbackStreamingSession(message, vehicleContext = {}, customerContext = {}, conversationId = null) {
     const sessionId = `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     // Build system prompt with context
     const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
     
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: message }
-    ];
+    // Build messages array with conversation history
+    let messages = [{ role: 'system', content: systemPrompt }];
+    
+    // Add conversation history if conversationId is provided
+    if (conversationId && this.conversationHistory.has(conversationId)) {
+      const history = this.conversationHistory.get(conversationId);
+      // Add previous messages (excluding system messages to avoid duplicates)
+      const historyMessages = history.messages.filter(msg => msg.role !== 'system');
+      messages.push(...historyMessages);
+    }
+    
+    // Add current user message
+    messages.push({ role: 'user', content: message });
 
     // Try each fallback model in sequence
     for (const fallbackModel of this.fallbackModels) {
@@ -104,6 +124,7 @@ class ResponsesAPIService {
           messages,
           vehicleContext,
           customerContext,
+          conversationId,
           createdAt: Date.now(),
           fallback: true,
           fallbackModel
@@ -457,6 +478,12 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
 
   closeSession(sessionId) {
     const session = this.activeSessions.get(sessionId);
+    
+    // Save conversation history before closing session
+    if (session && session.conversationId) {
+      this.saveConversationHistory(session.conversationId, session.messages);
+    }
+    
     if (session?.stream) {
       try {
         session.stream.destroy?.();
@@ -467,12 +494,50 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     this.activeSessions.delete(sessionId);
   }
 
+  // Save conversation history
+  saveConversationHistory(conversationId, messages) {
+    if (!conversationId || !messages) return;
+    
+    // Keep only the last 20 messages to prevent unbounded growth
+    const maxMessages = 20;
+    const messagesToSave = messages.slice(-maxMessages);
+    
+    this.conversationHistory.set(conversationId, {
+      messages: messagesToSave,
+      lastUpdated: Date.now()
+    });
+    
+    console.log(`Saved conversation history for ${conversationId} with ${messagesToSave.length} messages`);
+  }
+  
+  // Get conversation history
+  getConversationHistory(conversationId) {
+    return this.conversationHistory.get(conversationId);
+  }
+  
+  // Clear conversation history
+  clearConversationHistory(conversationId) {
+    if (conversationId) {
+      this.conversationHistory.delete(conversationId);
+      console.log(`Cleared conversation history for ${conversationId}`);
+    }
+  }
+
   // Cleanup old sessions (call periodically)
   cleanupOldSessions(maxAgeMs = 30 * 60 * 1000) { // 30 minutes
     const now = Date.now();
     for (const [sessionId, session] of this.activeSessions.entries()) {
       if (now - session.createdAt > maxAgeMs) {
         this.closeSession(sessionId);
+      }
+    }
+    
+    // Also cleanup old conversation histories (keep for 2 hours)
+    const historyMaxAge = 2 * 60 * 60 * 1000; // 2 hours
+    for (const [conversationId, history] of this.conversationHistory.entries()) {
+      if (now - history.lastUpdated > historyMaxAge) {
+        this.conversationHistory.delete(conversationId);
+        console.log(`Cleaned up old conversation history for ${conversationId}`);
       }
     }
   }

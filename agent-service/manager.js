@@ -4,7 +4,7 @@ import {
   webSearchPlan,
   searchAgent,
   writerAgent,
-  reportData,
+  enhancedReportData,
 } from './agents.js';
 import { Runner } from '@openai/agents';
 
@@ -23,7 +23,7 @@ export class ResearchManager {
       const searchResults = await this._performSearches(searchPlan);
       const report = await this._writeReport(query, searchResults);
 
-      const finalReport = `Automotive Research Report\n\n${report.shortSummary}`;
+      const finalReport = `Automotive Research Report\n\n${report.executiveSummary}`;
       console.log(`[final_report] ${finalReport}`);
       console.log('Automotive research complete.');
 
@@ -48,7 +48,7 @@ export class ResearchManager {
       const searchResults = await this._performSearches(searchPlan);
       const report = await this._writeReport(query, searchResults);
 
-      const finalReport = `Automotive Research Report\n\n${report.shortSummary}`;
+      const finalReport = `Automotive Research Report\n\n${report.executiveSummary}`;
       console.log(`[final_report] ${finalReport}`);
       console.log('Automotive research complete.');
 
@@ -103,7 +103,7 @@ export class ResearchManager {
       });
       const report = await this._writeReport(query, searchResults);
 
-      const finalReport = `Automotive Research Report\n\n${report.shortSummary}`;
+      const finalReport = `Automotive Research Report\n\n${report.executiveSummary}`;
       console.log(`[final_report] ${finalReport}`);
       console.log('Automotive research complete.');
 
@@ -224,6 +224,6 @@ export class ResearchManager {
     const input = `Original automotive query: ${query}\nAutomotive research results: ${searchResults}`;
     const result = await this.runner.run(writerAgent, input);
     console.log('[writing] Automotive report complete');
-    return reportData.parse(result.finalOutput);
+    return enhancedReportData.parse(result.finalOutput);
   }
 }

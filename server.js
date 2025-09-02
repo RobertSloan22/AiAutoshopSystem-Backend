@@ -57,6 +57,7 @@ import assistantsV2Routes from './routes/assistant-v2.routes.js';
 import turnResponseRoutes from './routes/turnResponse.routes.js';
 import functionRoutes from './routes/functions.routes.js';
 import responseImageRoutes from './routes/responseImage.routes.js';
+import agentReportsRoutes from './routes/agent-reports.routes.js';
 import vehicleQuestionsRoutes from './routes/vehicle-questions.routes.js';
 import plateToVinRoutes from './routes/plateToVin.js';
 import serpRoutes from './routes/serp.routes.js';
@@ -584,6 +585,7 @@ app.use("/api", apiRoutes);
 app.use("/api/research-progress", researchProgressRoutes);
 // Research results endpoints
 app.use("/api/research-results", researchResultRoutes);
+app.use("/api/agent-reports", agentReportsRoutes); // Agent reports endpoint
 
 // Health check endpoint
 app.get('/health', (req, res) => {

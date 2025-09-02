@@ -293,7 +293,7 @@ router.post('/turn_response', async (req, res) => {
 // STREAMING CHAT ENDPOINT - Enhanced version with better buffering
 router.post('/chat/stream', async (req, res) => {
   try {
-    const { message, vehicleContext, customerContext } = req.body;
+    const { message, vehicleContext, customerContext, conversationId } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -302,7 +302,8 @@ router.post('/chat/stream', async (req, res) => {
     const { sessionId, stream } = await responsesService.createStreamingSession(
       message,
       vehicleContext,
-      customerContext
+      customerContext,
+      conversationId
     );
 
     // Set headers for Server-Sent Events
@@ -528,7 +529,7 @@ router.post('/chat/stream', async (req, res) => {
 // SIMPLE CHAT ENDPOINT (non-streaming)
 router.post('/chat', async (req, res) => {
   try {
-    const { message, vehicleContext, customerContext } = req.body;
+    const { message, vehicleContext, customerContext, conversationId } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -537,7 +538,8 @@ router.post('/chat', async (req, res) => {
     const { sessionId, stream } = await responsesService.createStreamingSession(
       message,
       vehicleContext,
-      customerContext
+      customerContext,
+      conversationId
     );
 
     let fullResponse = '';
@@ -693,7 +695,7 @@ router.post('/execute/python', async (req, res) => {
 // AGENT QUESTION WITH PLOT GENERATION ENDPOINT
 router.post('/chat/analyze', async (req, res) => {
   try {
-    const { question, vehicleContext, customerContext, includeVisualization = true } = req.body;
+    const { question, vehicleContext, customerContext, conversationId, includeVisualization = true } = req.body;
 
     if (!question) {
       return res.status(400).json({ error: 'Question is required' });
@@ -703,7 +705,8 @@ router.post('/chat/analyze', async (req, res) => {
     const { sessionId, stream } = await responsesService.createStreamingSession(
       question,
       vehicleContext,
-      customerContext
+      customerContext,
+      conversationId
     );
 
     let fullResponse = '';
@@ -848,7 +851,7 @@ router.post('/chat/analyze', async (req, res) => {
 // STREAMING AGENT QUESTION WITH PLOT GENERATION ENDPOINT
 router.post('/chat/analyze/stream', async (req, res) => {
   try {
-    const { question, vehicleContext, customerContext, includeVisualization = true } = req.body;
+    const { question, vehicleContext, customerContext, conversationId, includeVisualization = true } = req.body;
 
     if (!question) {
       return res.status(400).json({ error: 'Question is required' });
@@ -867,7 +870,8 @@ router.post('/chat/analyze/stream', async (req, res) => {
     const { sessionId, stream } = await responsesService.createStreamingSession(
       question,
       vehicleContext,
-      customerContext
+      customerContext,
+      conversationId
     );
 
     // Send session info
@@ -1096,6 +1100,43 @@ router.post('/chat/analyze/stream', async (req, res) => {
       error: error.message || 'Analysis failed'
     })}\n\n`);
     res.end();
+  }
+});
+
+// CONVERSATION HISTORY MANAGEMENT ENDPOINTS
+router.get('/conversation/:conversationId', (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const history = responsesService.getConversationHistory(conversationId);
+    
+    if (!history) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+    
+    res.json({
+      conversationId,
+      messageCount: history.messages.length,
+      lastUpdated: history.lastUpdated,
+      messages: history.messages
+    });
+  } catch (error) {
+    console.error('Error retrieving conversation history:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/conversation/:conversationId', (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    responsesService.clearConversationHistory(conversationId);
+    
+    res.json({ 
+      success: true,
+      message: `Conversation history cleared for ${conversationId}`
+    });
+  } catch (error) {
+    console.error('Error clearing conversation history:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
