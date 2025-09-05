@@ -20,9 +20,10 @@ const openai = new OpenAI();
           headers: {
             Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
             "Content-Type": "application/json",
+            "OpenAI-Beta": "realtime=v1"
           },
           body: JSON.stringify({
-            model: "gpt-4o-realtime-preview-2025-06-03",
+            model: "gpt-realtime",
           }),
         }
       );
@@ -74,12 +75,13 @@ router.post('/realtime/sessions', async (req, res) => {
     }
 
     const response = await fetch(
-      `https://api.openai.com/v1/realtime?model=gpt-4o-realtime`,
+      `https://api.openai.com/v1/realtime?model=gpt-realtime`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           "Content-Type": "application/sdp",
+          "OpenAI-Beta": "realtime=v1"
         },
         body: sdp
       }
@@ -133,12 +135,13 @@ router.post('/realtime', async (req, res) => {
     console.log('Sending SDP to OpenAI:', sdp);
     
     const response = await fetch(
-      `https://api.openai.com/v1/realtime?model=${model || "gpt-4o-realtime"}`,
+      `https://api.openai.com/v1/realtime?model=${model || "gpt-realtime"}`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           "Content-Type": "application/sdp",
+          "OpenAI-Beta": "realtime=v1"
         },
         body: sdp
       }
@@ -173,9 +176,10 @@ router.get('/realtime/sessions', async (req, res) => {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           "Content-Type": "application/json",
+          "OpenAI-Beta": "realtime=v1"
         },
         body: JSON.stringify({
-          model: "gpt-4o-realtime",
+          model: "gpt-realtime",
         }),
       }
     );
@@ -202,9 +206,10 @@ router.get('/realtime/sessions', async (req, res) => {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           "Content-Type": "application/json",
+          "OpenAI-Beta": "realtime=v1"
         },
         body: JSON.stringify({
-          model: "gpt-4o-realtime",
+          model: "gpt-realtime",
         }),
       }
     );
@@ -227,7 +232,7 @@ router.post('/assistant/create', async (req, res) => {
     const { 
       name = "AI Autoshop Assistant",
       instructions = "You are a helpful automotive diagnostic assistant with code interpreter and file search capabilities.",
-      model = "gpt-4o"
+      model = "gpt-4o-mini"
     } = req.body;
 
     const assistant = await openai.beta.assistants.create({
@@ -295,6 +300,47 @@ router.post('/assistant/chat', async (req, res) => {
     });
   } catch (error) {
     console.error("Error in assistant chat:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add image analysis route
+router.post('/analyze-image', async (req, res) => {
+  try {
+    const { image, context, sessionId } = req.body;
+    
+    if (!image) {
+      return res.status(400).json({ error: 'No image provided' });
+    }
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { 
+            type: 'text', 
+            text: context || 'Analyze this image and provide a detailed description.'
+          },
+          {
+            type: 'image_url',
+            image_url: {
+              url: `data:image/jpeg;base64,${image}`,
+              detail: 'high'
+            }
+          }
+        ]
+      }],
+      max_tokens: 1000
+    });
+
+    res.json({
+      analysis: response.choices[0].message.content,
+      sessionId,
+      usage: response.usage
+    });
+  } catch (error) {
+    console.error("Error in image analysis:", error);
     res.status(500).json({ error: error.message });
   }
 });
