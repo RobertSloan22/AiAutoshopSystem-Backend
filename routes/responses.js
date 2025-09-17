@@ -655,17 +655,21 @@ router.get('/services/status', async (req, res) => {
 // PYTHON CODE EXECUTION ENDPOINT
 router.post('/execute/python', async (req, res) => {
   try {
-    const { code, save_plots = true, plot_filename } = req.body;
+    const { code, save_plots = true, plot_filename, sessionId, vehicleContext, customerContext } = req.body;
 
     if (!code) {
       return res.status(400).json({ error: 'Code is required' });
     }
 
     console.log('Executing Python code via API endpoint');
+    console.log(`📐 DIRECT EXEC: SessionId: ${sessionId}`);
     
     const result = await responsesService.pythonService.executeCode(code, {
       save_plots,
-      plot_filename
+      plot_filename,
+      sessionId,
+      vehicleContext,
+      customerContext
     });
 
     // If plots were generated, convert them to base64
@@ -701,12 +705,23 @@ router.post('/chat/analyze', async (req, res) => {
       return res.status(400).json({ error: 'Question is required' });
     }
 
+    console.log('📊 ANALYZE ENDPOINT: Request received with:');
+    console.log('  Question:', question);
+    console.log('  VehicleContext:', JSON.stringify(vehicleContext));
+    console.log('  CustomerContext:', JSON.stringify(customerContext));
+    
+    // Extract OBD2 session ID from the question if present
+    const obd2SessionMatch = question.match(/session\s+([a-f0-9]{24})/i);
+    const obd2SessionId = obd2SessionMatch ? obd2SessionMatch[1] : null;
+    console.log('  Extracted OBD2 SessionId:', obd2SessionId);
+
     // Create a streaming session with the question
     const { sessionId, stream } = await responsesService.createStreamingSession(
       question,
       vehicleContext,
       customerContext,
-      conversationId
+      conversationId,
+      obd2SessionId // Pass the OBD2 session ID
     );
 
     let fullResponse = '';

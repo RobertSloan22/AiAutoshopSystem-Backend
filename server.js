@@ -68,6 +68,7 @@ import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
 import imagesRoutes from './routes/images.js';
 import plotsRoutes from './routes/plots.routes.js';
+import plotsFallbackRoutes from './routes/plots-fallback.routes.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 import obd2Routes from './routes/obd2.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
@@ -644,6 +645,7 @@ app.use('/api/serp', serperRoutes);
 app.use('/api/responses', responsesRoutes);
 app.use('/api/images', imagesRoutes);
 app.use('/api/plots', plotsRoutes);
+app.use('/api/plots/fallback', plotsFallbackRoutes);
 app.use('/api/ui', uiGenerationRoutes);
 
 // Register Eliza proxy router for direct communication with Eliza system
