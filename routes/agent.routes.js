@@ -8,7 +8,7 @@ dotenv.config();
 const router = express.Router();
 const openai = new OpenAI();
 
-const imagesModel = process.env.IMAGES_MODEL || "gpt-image-1";
+const imagesModel = process.env.IMAGES_MODEL || "dall-e-3";
 
 // Image generation function for the realtime agent
 async function generateImage({
@@ -84,7 +84,7 @@ const REALTIME_FUNCTIONS = [
   },
   {
     name: 'search_automotive',
-    description: 'Search for automotive-specific information like repair guides, part specifications, or diagnostic procedures',   
+    description: 'Search for automotive-specific information like repair guides, part specifications, or diagnostic procedures',
     parameters: {
       type: 'object',
       properties: {
@@ -341,7 +341,7 @@ router.post('/assistant/create', async (req, res) => {
   try {
     const {
       name = "AI Autoshop Assistant",
-      instructions = "You are a helpful automotive diagnostic assistant with code interpreter and file search capabilities.",      
+      instructions = "You are a helpful automotive diagnostic assistant with code interpreter and file search capabilities.",
       model = "gpt-4o-mini"
     } = req.body;
 

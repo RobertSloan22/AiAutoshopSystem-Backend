@@ -48,6 +48,7 @@ import proxyRoutes from './routes/proxy.routes.js';
 import forumCrawlerRoutes from './routes/forumCrawler.js';
 import localRoutes from './routes/local.routes.js';
 import localResearchRoutes from './routes/localResearch.routes.js';
+import imageanalysisRoutes from './routes/imageanalysis.routes.js';
 import localresearchServiceRoutes from './routes/localresearch.service.js';
 import embeddingsRoutes from './routes/embeddings.routes.js';
 import vectorStoreRoutes from './routes/vectorStore.routes.js';
@@ -71,6 +72,7 @@ import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 import obd2Routes from './routes/obd2.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
 import diagnosticAgentsRoutes from './routes/diagnostic-agents.js';
+import uiGenerationRoutes from './routes/ui-generation.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -620,6 +622,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/serper', serperRoutes);
 app.use('/api', imageRoutes);
 app.use('/api', proxyRoutes);
+app.use('/api/imageanalysis', imageanalysisRoutes);
 app.use('/api/researchl', localResearchRoutes);
 app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
@@ -641,6 +644,7 @@ app.use('/api/serp', serperRoutes);
 app.use('/api/responses', responsesRoutes);
 app.use('/api/images', imagesRoutes);
 app.use('/api/plots', plotsRoutes);
+app.use('/api/ui', uiGenerationRoutes);
 
 // Register Eliza proxy router for direct communication with Eliza system
 app.use('/api/eliza-direct', elizaProxyRoutes);
