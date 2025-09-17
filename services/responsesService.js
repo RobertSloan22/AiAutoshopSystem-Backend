@@ -32,8 +32,13 @@ class ResponsesAPIService {
     }, 60 * 60 * 1000); // Clean up every hour
   }
 
-  async createStreamingSession(message, vehicleContext = {}, customerContext = {}, conversationId = null) {
+  async createStreamingSession(message, vehicleContext = {}, customerContext = {}, conversationId = null, obd2SessionId = null) {
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    console.log('📊 CREATE SESSION: Creating streaming session');
+    console.log('  Internal SessionId:', sessionId);
+    console.log('  OBD2 SessionId:', obd2SessionId);
+    console.log('  VehicleContext:', JSON.stringify(vehicleContext));
     
     // Build system prompt with context
     const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
@@ -74,6 +79,7 @@ class ResponsesAPIService {
         vehicleContext,
         customerContext,
         conversationId,
+        obd2SessionId,
         createdAt: Date.now()
       });
 
@@ -125,6 +131,7 @@ class ResponsesAPIService {
           vehicleContext,
           customerContext,
           conversationId,
+          obd2SessionId,
           createdAt: Date.now(),
           fallback: true,
           fallbackModel
@@ -296,12 +303,17 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
         // Handle Python execution tool
         if (toolCall.function.name === 'execute_python_code') {
           console.log('Executing Python code...');
+          console.log(`🔍 PLOT DEBUG: Internal sessionId: ${sessionId}`);
+          console.log(`🔍 PLOT DEBUG: OBD2 sessionId: ${session.obd2SessionId}`);
+          console.log(`🔍 PLOT DEBUG: Using sessionId for plots: ${session.obd2SessionId || sessionId}`);
+          console.log(`🔍 PLOT DEBUG: vehicleContext: ${JSON.stringify(session.vehicleContext)}`);
+          
           result = await this.pythonService.executeCode(
             parameters.code,
             {
               save_plots: parameters.save_plots !== false,
               plot_filename: parameters.plot_filename,
-              sessionId: sessionId,
+              sessionId: session.obd2SessionId || sessionId, // Use OBD2 session ID if available
               vehicleContext: session.vehicleContext,
               customerContext: session.customerContext,
               pythonCode: parameters.code
@@ -392,6 +404,15 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     const session = this.activeSessions.get(sessionId);
     if (!session) {
       throw new Error('Session not found');
+    }
+
+    // Truncate messages to prevent context length issues
+    const maxMessages = 10; // Keep only the last 10 messages to stay under token limit
+    if (session.messages.length > maxMessages) {
+      const systemMessage = session.messages.find(msg => msg.role === 'system');
+      const recentMessages = session.messages.slice(-maxMessages);
+      session.messages = systemMessage ? [systemMessage, ...recentMessages] : recentMessages;
+      console.log(`🔧 CONTEXT: Truncated conversation to ${session.messages.length} messages`);
     }
 
     // The last message should be an assistant message with tool_calls

@@ -75,12 +75,20 @@ class PythonExecutionService {
     const executionId = crypto.randomUUID();
     const { save_plots = true, plot_filename } = options;
 
+    console.log(`📐 PYTHON EXEC: Starting execution with ID: ${executionId}`);
+    console.log(`📐 PYTHON EXEC: Options:`, JSON.stringify(options));
+    console.log(`📐 PYTHON EXEC: SessionId for plots: ${options.sessionId}`);
+    console.log(`📐 PYTHON EXEC: Code length: ${code.length} chars`);
+    console.log(`📐 PYTHON EXEC: Code includes plt.savefig: ${code.includes('plt.savefig')}`);
+
     try {
       // If Python server is available, use it for better performance
       if (this.isConnected) {
+        console.log(`📐 PYTHON EXEC: Using server execution`);
         return await this.executeViaServer(code, executionId, { ...options, save_plots, plot_filename });
       } else {
         // Fallback to local execution
+        console.log(`📐 PYTHON EXEC: Using local execution`);
         return await this.executeLocally(code, executionId, { ...options, save_plots, plot_filename });
       }
     } catch (error) {
@@ -226,6 +234,11 @@ class PythonExecutionService {
 
           // Parse output to find plot paths
           const outputText = output.join('');
+          const errorText = errorOutput.join('');
+          
+          console.log(`📐 PYTHON OUTPUT: ${outputText.substring(0, 500)}...`);
+          console.log(`📐 PYTHON ERRORS: ${errorText.substring(0, 500)}...`);
+          
           const plotPathMatches = outputText.match(/Plot saved to: (.+\.png)/g) || [];
           const extractedPaths = plotPathMatches.map(match => 
             match.replace('Plot saved to: ', '').trim()
@@ -234,8 +247,13 @@ class PythonExecutionService {
           // Check for generated plots and register them
           const plotPaths = await this.findGeneratedPlots(executionId);
           
+          console.log(`📐 PYTHON EXEC: Output text includes 'Plot saved to': ${outputText.includes('Plot saved to')}`);
+          console.log(`📐 PYTHON EXEC: Found ${plotPathMatches.length} plot paths in output`);
+          console.log(`📐 PYTHON EXEC: Found ${plotPaths.length} plot files in directory`);
+          
           // Combine both methods
           const allPlotPaths = [...new Set([...plotPaths, ...extractedPaths])];
+          console.log(`📐 PYTHON EXEC: Total unique plots found: ${allPlotPaths.length}`);
           
           const plots = [];
           
@@ -267,7 +285,9 @@ class PythonExecutionService {
               
               plot.setExpiration(7);
               await plot.save();
-              console.log(`Local plot saved to MongoDB with ID: ${imageId}`);
+              console.log(`📊 LOCAL PLOT SAVED: MongoDB ID: ${imageId}`);
+              console.log(`📊 LOCAL PLOT SAVED: SessionId: ${options.sessionId}`);
+              console.log(`📊 LOCAL PLOT SAVED: Filename: ${filename}`);
               
             } catch (dbError) {
               console.error('Error saving local plot to MongoDB:', dbError);
@@ -319,27 +339,44 @@ class PythonExecutionService {
 
   wrapCodeForExecution(code, options) {
     const executionId = options.executionId || 'unknown';
+    const sessionId = options.sessionId || 'no_session';
+    
+    console.log(`📐 WRAP CODE: ExecutionId: ${executionId}`);
+    console.log(`📐 WRAP CODE: SessionId: ${sessionId}`);
+    console.log(`📐 WRAP CODE: save_plots: ${options.save_plots}`);
+    
     const plotSetup = options.save_plots ? `
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
+import os
 
-# Store the original show function
+# Store the original functions
 _original_show = plt.show
+_original_savefig = plt.savefig
 
 # Override plt.show to save instead
 def _save_show():
-    import os
-    plot_filename = "${options.plot_filename || `plot_${executionId}_${Date.now()}`}"
+    plot_filename = "${options.plot_filename || `plot_${sessionId}_${executionId}_${Date.now()}`}"
     plot_path = os.path.join("${this.outputDir}", f"{plot_filename}.png")
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
     print(f"Plot saved to: {plot_path}")
     plt.close()
 
+# Override plt.savefig to use absolute paths
+def _enhanced_savefig(fname, *args, **kwargs):
+    if not os.path.isabs(fname):
+        # Convert relative path to absolute path in our output directory
+        fname = os.path.join("${this.outputDir}", fname)
+    result = _original_savefig(fname, *args, **kwargs)
+    print(f"Plot saved to: {fname}")
+    return result
+
 plt.show = _save_show
+plt.savefig = _enhanced_savefig
 ` : '';
 
-    return `
+    const finalCode = `
 ${plotSetup}
 
 # User code starts here
@@ -349,14 +386,26 @@ ${code}
 if 'plt' in locals():
     for fig_num in plt.get_fignums():
         plt.figure(fig_num)
-        plt.savefig(f"${this.outputDir}/figure_{fig_num}_${executionId}_${Date.now()}.png", dpi=150, bbox_inches='tight')
+        plot_path = f"${this.outputDir}/figure_{fig_num}_${sessionId}_${executionId}_${Date.now()}.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        print(f"Plot saved to: {plot_path}")
     plt.close('all')
 `;
+    
+    console.log(`📐 FINAL CODE: Wrapped code length: ${finalCode.length}`);
+    console.log(`📐 FINAL CODE: Includes plt.show override: ${finalCode.includes('plt.show = _save_show')}`);
+    console.log(`📐 FINAL CODE: Includes auto-save: ${finalCode.includes('plt.get_fignums')}`);
+    
+    return finalCode;
   }
 
   async savePlot(base64Data, filename, executionId, options = {}) {
     const plotFilename = filename || `plot_${Date.now()}`;
     const plotPath = path.join(this.outputDir, `${plotFilename}.png`);
+    
+    console.log(`🔍 PLOT DEBUG: Saving plot with sessionId: ${options.sessionId}`);
+    console.log(`🔍 PLOT DEBUG: executionId: ${executionId}`);
+    console.log(`🔍 PLOT DEBUG: filename: ${plotFilename}`);
     
     // Remove base64 prefix if present
     const base64Clean = base64Data.replace(/^data:image\/\w+;base64,/, '');
@@ -394,7 +443,10 @@ if 'plt' in locals():
       plot.setExpiration(7);
       
       await plot.save();
-      console.log(`Plot saved to MongoDB with ID: ${imageId}`);
+      console.log(`📊 PLOT SAVED: MongoDB ID: ${imageId}`);
+      console.log(`📊 PLOT SAVED: SessionId: ${options.sessionId}`);
+      console.log(`📊 PLOT SAVED: Filename: ${plotFilename}.png`);
+      console.log(`📊 PLOT SAVED: Size: ${stats.size} bytes`);
       
       // Also register with the legacy image system for backward compatibility
       registerImage(plotPath, {
