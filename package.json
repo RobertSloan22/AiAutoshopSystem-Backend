@@ -63,6 +63,7 @@
     "p-limit": "^6.2.0",
     "p-queue": "^8.1.0",
     "path": "^0.12.7",
+    "pdf-parse": "^1.1.1",
     "pdfjs-dist": "^4.8.69",
     "prop-types": "^15.8.1",
     "puppeteer": "^21.9.0",
@@ -143,4 +144,3 @@
   "author": "robertsloan",
   "license": "MIT"
 }
-
