@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import MCPService from './mcpService.js';
 import PythonExecutionService from './pythonExecutionService.js';
 import WebSearchService from './webSearchService.js';
+import PDFProcessingService from './pdfProcessingService.js';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -19,6 +20,7 @@ class ResponsesAPIService {
     this.mcpService = new MCPService(process.env.MCP_SERVER_URL || 'http://localhost:3700');
     this.pythonService = new PythonExecutionService();
     this.webSearchService = new WebSearchService();
+    this.pdfService = new PDFProcessingService();
     this.activeSessions = new Map();
     this.conversationHistory = new Map(); // Add conversation history storage
     this.fallbackModels = ['gpt-3.5-turbo', 'claude-3-haiku-20240307'];
@@ -43,11 +45,12 @@ class ResponsesAPIService {
     // Build system prompt with context
     const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
     
-    // Get MCP tools, Python execution tool, and web search tools
+    // Get MCP tools, Python execution tool, web search tools, and PDF processing tool
     const mcpTools = this.mcpService.getToolDefinitions();
     const pythonTool = this.pythonService.getToolDefinition();
     const webSearchTools = this.webSearchService.getToolDefinitions();
-    const tools = [...mcpTools, pythonTool, ...webSearchTools];
+    const pdfTool = this.pdfService.getToolDefinition();
+    const tools = [...mcpTools, pythonTool, ...webSearchTools, pdfTool];
     
     // Build messages array with conversation history
     let messages = [{ role: 'system', content: systemPrompt }];
@@ -370,6 +373,10 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
           // Handle web search tools
           console.log(`Executing web search tool: ${toolCall.function.name}`);
           result = await this.webSearchService.executeTool(toolCall.function.name, parameters);
+        } else if (toolCall.function.name === 'process_pdf_from_url') {
+          // Handle PDF processing tool
+          console.log(`Executing PDF processing tool: ${toolCall.function.name}`);
+          result = await this.pdfService.executeTool(toolCall.function.name, parameters);
         } else {
           // Handle MCP tools
           result = await this.mcpService.callTool(toolCall.function.name, parameters);
@@ -436,7 +443,8 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     const mcpTools = this.mcpService.getToolDefinitions();
     const pythonTool = this.pythonService.getToolDefinition();
     const webSearchTools = this.webSearchService.getToolDefinitions();
-    const tools = [...mcpTools, pythonTool, ...webSearchTools];
+    const pdfTool = this.pdfService.getToolDefinition();
+    const tools = [...mcpTools, pythonTool, ...webSearchTools, pdfTool];
 
     try {
       // Check if this is a fallback session
@@ -583,7 +591,8 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
       python: {
         available: true,
         outputDir: this.pythonService.outputDir
-      }
+      },
+      pdf: this.pdfService.getStatus()
     };
   }
 }
