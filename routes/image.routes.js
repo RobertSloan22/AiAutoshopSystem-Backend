@@ -4,7 +4,7 @@ import protectRoute from "../middleware/protectRoute.js";
 
 const router = express.Router();
 
-router.post('/images', protectRoute, async (req, res) => {
+router.post('/images', async (req, res) => {
     try {
         const { imageUrl, thumbnailUrl, title, source, link, originalUrl } = req.body;
         
@@ -30,7 +30,7 @@ router.post('/images', protectRoute, async (req, res) => {
     }
 });
 
-router.get('/images', protectRoute, async (req, res) => {
+router.get('/images',  async (req, res) => {
   try {
     const images = await Image.find().sort({ timestamp: -1 }); // Sort by newest first
     res.json(images);
@@ -40,7 +40,7 @@ router.get('/images', protectRoute, async (req, res) => {
   }
 });
 
-router.delete('/images/:id', protectRoute, async (req, res) => {
+router.delete('/images/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const deletedImage = await Image.findByIdAndDelete(id);

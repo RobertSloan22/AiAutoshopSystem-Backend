@@ -8,7 +8,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-router.post('/generate-diagram', protectRoute, async (req, res) => {
+router.post('/generate-diagram', async (req, res) => {
   try {
     const { prompt, model, size, quality, n } = req.body;
     console.log('Generating diagram with prompt:', prompt);
@@ -31,7 +31,7 @@ router.post('/generate-diagram', protectRoute, async (req, res) => {
   }
 });
 
-router.get('/', protectRoute, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     res.json({ message: 'Diagram generation route is working' });
   } catch (error) {

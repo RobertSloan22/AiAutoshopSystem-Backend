@@ -3,6 +3,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import obd2RealtimeService from '../services/OBD2RealtimeService.js';
+import PythonExecutionService from '../services/pythonExecutionService.js';
 
 const router = express.Router();
 
@@ -288,6 +289,9 @@ class DataAggregator {
 }
 
 const dataAggregator = new DataAggregator();
+
+// Initialize Python execution service for analysis
+const pythonService = new PythonExecutionService();
 
 // Helper function to generate share codes
 function generateShareCode() {
@@ -630,6 +634,33 @@ router.get('/sessions/:sessionId', async (req, res) => {
   } catch (error) {
     console.error('❌ Failed to fetch session:', error);
     res.status(500).json({ error: 'Failed to fetch session' });
+  }
+});
+
+// Get session status and basic info (for frontend polling)
+router.get('/sessions/:sessionId/status', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    const session = await DiagnosticSession.findById(sessionId)
+      .select('status dataPointCount endTime duration updatedAt')
+      .lean();
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json({
+      sessionId,
+      status: session.status,
+      dataPointCount: session.dataPointCount || 0,
+      endTime: session.endTime,
+      duration: session.duration,
+      updatedAt: session.updatedAt
+    });
+  } catch (error) {
+    console.error('❌ Failed to fetch session status:', error);
+    res.status(500).json({ error: 'Failed to fetch session status' });
   }
 });
 
@@ -1115,6 +1146,423 @@ router.get('/health', async (req, res) => {
       service: 'obd2'
     });
   }
+});
+
+// =====================================================
+// PYTHON ANALYSIS ROUTES
+// =====================================================
+
+// Analyze session data using Python
+router.post('/sessions/:sessionId/analyze', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { 
+      analysisType = 'comprehensive',
+      generatePlots = true,
+      saveResults = true,
+      options = {} 
+    } = req.body;
+
+    // Validate sessionId parameter
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
+      return res.status(400).json({ 
+        error: 'Invalid session ID', 
+        message: 'You must provide a valid session ID',
+        received: sessionId
+      });
+    }
+    
+    // Validate MongoDB ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ 
+        error: 'Invalid session ID format', 
+        message: 'Session ID must be a valid MongoDB ObjectId',
+        received: sessionId
+      });
+    }
+
+    // Check if session exists
+    const session = await DiagnosticSession.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({ 
+        error: 'Session not found',
+        message: 'The specified session does not exist',
+        sessionId
+      });
+    }
+
+    console.log(`🔬 Starting ${analysisType} analysis for session: ${sessionId}`);
+
+    // Trigger Python analysis
+    const analysisResult = await pythonService.analyzeOBD2Session(sessionId, {
+      analysisType,
+      generatePlots,
+      saveResults,
+      ...options
+    });
+
+    if (analysisResult.success) {
+      // Update session status if analysis was successful
+      await DiagnosticSession.findByIdAndUpdate(sessionId, {
+        $set: { 
+          lastAnalyzedAt: new Date(),
+          analysisStatus: 'completed'
+        }
+      });
+
+      res.json({
+        success: true,
+        sessionId,
+        analysisType,
+        results: analysisResult.results,
+        plots: analysisResult.plots,
+        executionId: analysisResult.executionId,
+        generatedAt: analysisResult.generatedAt,
+        message: 'Analysis completed successfully'
+      });
+
+      console.log(`✅ ${analysisType} analysis completed for session: ${sessionId}`);
+    } else {
+      res.status(500).json({
+        success: false,
+        sessionId,
+        analysisType,
+        error: analysisResult.error,
+        message: 'Analysis failed - check logs for details'
+      });
+
+      console.error(`❌ Analysis failed for session: ${sessionId} - ${analysisResult.error}`);
+    }
+
+  } catch (error) {
+    console.error('❌ Analysis endpoint error:', error);
+    res.status(500).json({ 
+      error: 'Analysis service error',
+      message: error.message 
+    });
+  }
+});
+
+// Get analysis results for a session
+router.get('/sessions/:sessionId/analysis', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { limit = 10, analysisType } = req.query;
+
+    // Validate sessionId parameter
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
+      return res.status(400).json({ 
+        error: 'Invalid session ID', 
+        message: 'You must provide a valid session ID',
+        received: sessionId
+      });
+    }
+    
+    // Validate MongoDB ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ 
+        error: 'Invalid session ID format', 
+        message: 'Session ID must be a valid MongoDB ObjectId',
+        received: sessionId
+      });
+    }
+
+    // Get analysis results from the service
+    const analysisResults = await pythonService.getSessionAnalysisResults(sessionId);
+
+    // Filter by analysis type if specified
+    let filteredResults = analysisResults;
+    if (analysisType) {
+      filteredResults = analysisResults.filter(result => result.analysisType === analysisType);
+    }
+
+    // Sort by date (most recent first) and limit results
+    const sortedResults = filteredResults
+      .sort((a, b) => new Date(b.generatedAt) - new Date(a.generatedAt))
+      .slice(0, parseInt(limit));
+
+    // Get plots associated with the analyses
+    const plotResults = [];
+    for (const result of sortedResults) {
+      if (result.executionId) {
+        const plots = await pythonService.getPlotsByExecutionId(result.executionId);
+        plotResults.push(...plots);
+      }
+    }
+
+    res.json({
+      sessionId,
+      analysisResults: sortedResults,
+      plots: plotResults,
+      totalResults: analysisResults.length,
+      filteredCount: filteredResults.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error retrieving analysis results:', error);
+    res.status(500).json({ 
+      error: 'Failed to retrieve analysis results',
+      message: error.message 
+    });
+  }
+});
+
+// Get latest analysis result for a session
+router.get('/sessions/:sessionId/analysis/latest', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { analysisType } = req.query;
+
+    // Validate sessionId parameter
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
+      return res.status(400).json({ 
+        error: 'Invalid session ID', 
+        message: 'You must provide a valid session ID',
+        received: sessionId
+      });
+    }
+    
+    // Validate MongoDB ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ 
+        error: 'Invalid session ID format', 
+        message: 'Session ID must be a valid MongoDB ObjectId',
+        received: sessionId
+      });
+    }
+
+    // Get analysis results
+    const analysisResults = await pythonService.getSessionAnalysisResults(sessionId);
+
+    // Filter by analysis type if specified
+    let filteredResults = analysisResults;
+    if (analysisType) {
+      filteredResults = analysisResults.filter(result => result.analysisType === analysisType);
+    }
+
+    if (filteredResults.length === 0) {
+      return res.status(404).json({ 
+        error: 'No analysis results found',
+        message: analysisType 
+          ? `No ${analysisType} analysis results found for this session`
+          : 'No analysis results found for this session',
+        sessionId
+      });
+    }
+
+    // Get the most recent result
+    const latestResult = filteredResults
+      .sort((a, b) => new Date(b.generatedAt) - new Date(a.generatedAt))[0];
+
+    // Get associated plots
+    const plots = latestResult.executionId 
+      ? await pythonService.getPlotsByExecutionId(latestResult.executionId)
+      : [];
+
+    res.json({
+      sessionId,
+      analysisResult: latestResult,
+      plots,
+      totalResults: analysisResults.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error retrieving latest analysis:', error);
+    res.status(500).json({ 
+      error: 'Failed to retrieve latest analysis',
+      message: error.message 
+    });
+  }
+});
+
+// Quick analysis status check
+router.get('/sessions/:sessionId/analysis/status', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    // Validate sessionId parameter
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
+      return res.status(400).json({ 
+        error: 'Invalid session ID', 
+        received: sessionId
+      });
+    }
+    
+    // Validate MongoDB ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ 
+        error: 'Invalid session ID format',
+        received: sessionId
+      });
+    }
+
+    // Get session info
+    const session = await DiagnosticSession.findById(sessionId)
+      .select('lastAnalyzedAt analysisStatus createdAt');
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Get analysis results count
+    const analysisResults = await pythonService.getSessionAnalysisResults(sessionId);
+    
+    const analysisStatus = {
+      sessionId,
+      hasAnalysis: analysisResults.length > 0,
+      totalAnalyses: analysisResults.length,
+      lastAnalyzedAt: session.lastAnalyzedAt || null,
+      analysisTypes: [...new Set(analysisResults.map(r => r.analysisType))],
+      sessionCreatedAt: session.createdAt,
+      analysisStatus: session.analysisStatus || 'pending'
+    };
+
+    res.json(analysisStatus);
+
+  } catch (error) {
+    console.error('❌ Error checking analysis status:', error);
+    res.status(500).json({ 
+      error: 'Failed to check analysis status',
+      message: error.message 
+    });
+  }
+});
+
+// Batch analysis endpoint - analyze multiple sessions
+router.post('/analysis/batch', async (req, res) => {
+  try {
+    const { 
+      sessionIds, 
+      analysisType = 'comprehensive',
+      generatePlots = false,
+      saveResults = true 
+    } = req.body;
+
+    if (!sessionIds || !Array.isArray(sessionIds) || sessionIds.length === 0) {
+      return res.status(400).json({ 
+        error: 'Invalid session IDs',
+        message: 'You must provide an array of valid session IDs'
+      });
+    }
+
+    if (sessionIds.length > 10) {
+      return res.status(400).json({ 
+        error: 'Too many sessions',
+        message: 'Batch analysis is limited to 10 sessions at a time'
+      });
+    }
+
+    console.log(`🔬 Starting batch ${analysisType} analysis for ${sessionIds.length} sessions`);
+
+    const results = [];
+    const errors = [];
+
+    // Process sessions in parallel (with limit)
+    const analysisPromises = sessionIds.map(async (sessionId) => {
+      try {
+        const result = await pythonService.analyzeOBD2Session(sessionId, {
+          analysisType,
+          generatePlots,
+          saveResults
+        });
+        
+        if (result.success) {
+          // Update session status
+          await DiagnosticSession.findByIdAndUpdate(sessionId, {
+            $set: { 
+              lastAnalyzedAt: new Date(),
+              analysisStatus: 'completed'
+            }
+          });
+        }
+        
+        return { sessionId, result };
+      } catch (error) {
+        return { sessionId, error: error.message };
+      }
+    });
+
+    const batchResults = await Promise.all(analysisPromises);
+
+    // Separate successful results from errors
+    batchResults.forEach(({ sessionId, result, error }) => {
+      if (error) {
+        errors.push({ sessionId, error });
+      } else {
+        results.push({ sessionId, ...result });
+      }
+    });
+
+    res.json({
+      success: true,
+      analysisType,
+      totalSessions: sessionIds.length,
+      successfulAnalyses: results.length,
+      errors: errors.length,
+      results,
+      errors: errors.length > 0 ? errors : undefined,
+      completedAt: new Date()
+    });
+
+    console.log(`✅ Batch analysis completed: ${results.length}/${sessionIds.length} successful`);
+
+  } catch (error) {
+    console.error('❌ Batch analysis error:', error);
+    res.status(500).json({ 
+      error: 'Batch analysis failed',
+      message: error.message 
+    });
+  }
+});
+
+// Get available analysis types
+router.get('/analysis/types', (req, res) => {
+  res.json({
+    analysisTypes: [
+      {
+        id: 'comprehensive',
+        name: 'Comprehensive Analysis',
+        description: 'Complete analysis including performance, diagnostics, and fuel efficiency',
+        estimatedDuration: '30-60 seconds',
+        generatePlots: true
+      },
+      {
+        id: 'performance',
+        name: 'Performance Analysis',
+        description: 'Focus on engine performance metrics and driving patterns',
+        estimatedDuration: '15-30 seconds',
+        generatePlots: true
+      },
+      {
+        id: 'diagnostics',
+        name: 'Diagnostic Analysis',
+        description: 'Health check and diagnostic trouble analysis',
+        estimatedDuration: '20-40 seconds',
+        generatePlots: true
+      },
+      {
+        id: 'fuel_efficiency',
+        name: 'Fuel Efficiency Analysis',
+        description: 'Analysis of fuel consumption patterns and efficiency',
+        estimatedDuration: '15-30 seconds',
+        generatePlots: true
+      },
+      {
+        id: 'engine_health',
+        name: 'Engine Health Analysis',
+        description: 'Detailed engine health and maintenance recommendations',
+        estimatedDuration: '20-35 seconds',
+        generatePlots: true
+      }
+    ],
+    defaultType: 'comprehensive',
+    supportedFeatures: {
+      plotGeneration: true,
+      resultSaving: true,
+      batchAnalysis: true,
+      realTimeAnalysis: false
+    }
+  });
 });
 
 export default router;
