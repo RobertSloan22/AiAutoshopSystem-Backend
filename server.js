@@ -48,6 +48,7 @@ import proxyRoutes from './routes/proxy.routes.js';
 import forumCrawlerRoutes from './routes/forumCrawler.js';
 import localRoutes from './routes/local.routes.js';
 import localResearchRoutes from './routes/localResearch.routes.js';
+import imageanalysisRoutes from './routes/imageanalysis.routes.js';
 import localresearchServiceRoutes from './routes/localresearch.service.js';
 import embeddingsRoutes from './routes/embeddings.routes.js';
 import vectorStoreRoutes from './routes/vectorStore.routes.js';
@@ -57,6 +58,7 @@ import assistantsV2Routes from './routes/assistant-v2.routes.js';
 import turnResponseRoutes from './routes/turnResponse.routes.js';
 import functionRoutes from './routes/functions.routes.js';
 import responseImageRoutes from './routes/responseImage.routes.js';
+import agentReportsRoutes from './routes/agent-reports.routes.js';
 import vehicleQuestionsRoutes from './routes/vehicle-questions.routes.js';
 import plateToVinRoutes from './routes/plateToVin.js';
 import serpRoutes from './routes/serp.routes.js';
@@ -66,10 +68,12 @@ import memoryVectorRoutes from './routes/memoryVector.routes.js';
 import responsesRoutes from './routes/responses.js';
 import imagesRoutes from './routes/images.js';
 import plotsRoutes from './routes/plots.routes.js';
+import plotsFallbackRoutes from './routes/plots-fallback.routes.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 import obd2Routes from './routes/obd2.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
 import diagnosticAgentsRoutes from './routes/diagnostic-agents.js';
+import uiGenerationRoutes from './routes/ui-generation.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -584,6 +588,7 @@ app.use("/api", apiRoutes);
 app.use("/api/research-progress", researchProgressRoutes);
 // Research results endpoints
 app.use("/api/research-results", researchResultRoutes);
+app.use("/api/agent-reports", agentReportsRoutes); // Agent reports endpoint
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -618,6 +623,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/serper', serperRoutes);
 app.use('/api', imageRoutes);
 app.use('/api', proxyRoutes);
+app.use('/api/imageanalysis', imageanalysisRoutes);
 app.use('/api/researchl', localResearchRoutes);
 app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
@@ -639,6 +645,8 @@ app.use('/api/serp', serperRoutes);
 app.use('/api/responses', responsesRoutes);
 app.use('/api/images', imagesRoutes);
 app.use('/api/plots', plotsRoutes);
+app.use('/api/plots/fallback', plotsFallbackRoutes);
+app.use('/api/ui', uiGenerationRoutes);
 
 // Register Eliza proxy router for direct communication with Eliza system
 app.use('/api/eliza-direct', elizaProxyRoutes);
