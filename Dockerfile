@@ -1,39 +1,65 @@
-FROM node:18-alpine
+# Use Node.js 20 Alpine base image for smaller size
+FROM node:20-alpine AS base
 
-# Install git and other dependencies
-RUN apk add --no-cache git wget
+# Install Python and build dependencies (for native modules and Python scripts)
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    python3-dev \
+    make \
+    g++ \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev \
+    pixman-dev \
+    pangomm-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
 
-# Add a non-root user for security
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Set environment variables for Puppeteer
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
-# Set working directory
+# Create app directory
 WORKDIR /app
 
-# Copy package files for better layer caching
+# Copy package files
 COPY package*.json ./
 
-# Install dependencies with production flag to reduce size
-RUN npm install --only=production
+# Install Node.js dependencies
+RUN npm ci --only=production && \
+    npm cache clean --force
 
-# Copy application code
-COPY --chown=appuser:appgroup . .
+# Copy Python requirements and install
+COPY requirements.txt ./
+RUN pip3 install --no-cache-dir -r requirements.txt --break-system-packages || true
 
-# Create uploads directory and set permissions
-RUN mkdir -p uploads && chown -R appuser:appgroup uploads
+# Copy application source
+COPY . .
 
-# Switch to non-root user
-USER appuser
+# Create necessary directories
+RUN mkdir -p uploads logs
 
 # Expose the port the app runs on
-EXPOSE 5000
+EXPOSE 3001
 
-# Set proper environment values
-ENV NODE_ENV=production \
-    PORT=5000
+# Use non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
-# Healthcheck to verify app is running correctly
-HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:5000/ || exit 1
+USER nodejs
 
-# Command to run the application
-CMD ["node", "server.js"] 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3001/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); })"
+
+# Start the application
+CMD ["node", "server.js"]
