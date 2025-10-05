@@ -2,6 +2,8 @@ import OpenAI from 'openai';
 import MCPService from './mcpService.js';
 import PythonExecutionService from './pythonExecutionService.js';
 import WebSearchService from './webSearchService.js';
+import PDFProcessingService from './pdfProcessingService.js';
+import OBD2AnalysisService from './obd2AnalysisService.js';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -12,41 +14,60 @@ class ResponsesAPIService {
     if (!process.env.OPENAI_API_KEY) {
       console.error('WARNING: OPENAI_API_KEY environment variable is not set');
     }
-    
+
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
     this.mcpService = new MCPService(process.env.MCP_SERVER_URL || 'http://localhost:3700');
     this.pythonService = new PythonExecutionService();
     this.webSearchService = new WebSearchService();
+    this.pdfService = new PDFProcessingService();
+    this.obd2AnalysisService = new OBD2AnalysisService();
     this.activeSessions = new Map();
-    this.fallbackModels = ['gpt-3.5-turbo', 'claude-3-haiku-20240307'];
-    this.primaryModel = 'gpt-4o-mini';
-    
+    this.conversationHistory = new Map(); // Add conversation history storage
+    this.fallbackModels = ['gpt-4o-mini', 'gpt-3.5-turbo'];
+    this.primaryModel = 'gpt-4o-mini'; // Cost-effective yet capable model
+
     // Set up periodic cleanup for Python outputs
     setInterval(() => {
-      this.pythonService.cleanup().catch(err => 
+      this.pythonService.cleanup().catch(err =>
         console.error('Python service cleanup error:', err)
       );
     }, 60 * 60 * 1000); // Clean up every hour
   }
 
-  async createStreamingSession(message, vehicleContext = {}, customerContext = {}) {
+  async createStreamingSession(message, vehicleContext = {}, customerContext = {}, conversationId = null, obd2SessionId = null) {
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
+    console.log('📊 CREATE SESSION: Creating streaming session');
+    console.log('  Internal SessionId:', sessionId);
+    console.log('  OBD2 SessionId:', obd2SessionId);
+    console.log('  VehicleContext:', JSON.stringify(vehicleContext));
+
     // Build system prompt with context
     const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
-    
-    // Get MCP tools, Python execution tool, and web search tools
+
+    // Get MCP tools, Python execution tool, web search tools, PDF processing tool, and OBD2 analysis tools
     const mcpTools = this.mcpService.getToolDefinitions();
     const pythonTool = this.pythonService.getToolDefinition();
     const webSearchTools = this.webSearchService.getToolDefinitions();
-    const tools = [...mcpTools, pythonTool, ...webSearchTools];
-    
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: message }
-    ];
+    const pdfTool = this.pdfService.getToolDefinition();
+    const obd2AnalysisTools = this.obd2AnalysisService.getToolDefinitions();
+    const tools = [...mcpTools, pythonTool, ...webSearchTools, pdfTool, ...obd2AnalysisTools];
+
+    // Build messages array with conversation history
+    let messages = [{ role: 'system', content: systemPrompt }];
+
+    // Add conversation history if conversationId is provided
+    if (conversationId && this.conversationHistory.has(conversationId)) {
+      const history = this.conversationHistory.get(conversationId);
+      // Add previous messages (excluding system messages to avoid duplicates)
+      const historyMessages = history.messages.filter(msg => msg.role !== 'system');
+      messages.push(...historyMessages);
+    }
+
+    // Add current user message
+    messages.push({ role: 'user', content: message });
 
     try {
       const stream = await this.openai.chat.completions.create({
@@ -63,34 +84,45 @@ class ResponsesAPIService {
         messages,
         vehicleContext,
         customerContext,
+        conversationId,
+        obd2SessionId,
         createdAt: Date.now()
       });
 
       return { sessionId, stream };
     } catch (error) {
       console.error('Failed to create OpenAI stream with primary model:', error);
-      
+
       // Try fallback model if primary fails
-      return this.createFallbackStreamingSession(message, vehicleContext, customerContext);
+      return this.createFallbackStreamingSession(message, vehicleContext, customerContext, conversationId);
     }
   }
 
-  async createFallbackStreamingSession(message, vehicleContext = {}, customerContext = {}) {
+  async createFallbackStreamingSession(message, vehicleContext = {}, customerContext = {}, conversationId = null) {
     const sessionId = `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // Build system prompt with context
     const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
-    
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: message }
-    ];
+
+    // Build messages array with conversation history
+    let messages = [{ role: 'system', content: systemPrompt }];
+
+    // Add conversation history if conversationId is provided
+    if (conversationId && this.conversationHistory.has(conversationId)) {
+      const history = this.conversationHistory.get(conversationId);
+      // Add previous messages (excluding system messages to avoid duplicates)
+      const historyMessages = history.messages.filter(msg => msg.role !== 'system');
+      messages.push(...historyMessages);
+    }
+
+    // Add current user message
+    messages.push({ role: 'user', content: message });
 
     // Try each fallback model in sequence
     for (const fallbackModel of this.fallbackModels) {
       try {
         console.log(`Attempting fallback with model: ${fallbackModel}`);
-        
+
         // Use fallback model without tools
         const stream = await this.openai.chat.completions.create({
           model: fallbackModel,
@@ -104,6 +136,8 @@ class ResponsesAPIService {
           messages,
           vehicleContext,
           customerContext,
+          conversationId,
+          obd2SessionId,
           createdAt: Date.now(),
           fallback: true,
           fallbackModel
@@ -126,7 +160,7 @@ class ResponsesAPIService {
     try {
       // Build system prompt with context
       const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
-      
+
       const messages = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: message }
@@ -157,7 +191,7 @@ VEHICLE INFORMATION:`;
       prompt += `
 - Vehicle: ${vehicleContext.year || 'Unknown'} ${vehicleContext.make || 'Unknown'} ${vehicleContext.model || 'Unknown'}`;
     }
-    
+
     if (vehicleContext?.vin) {
       prompt += `
 - VIN: ${vehicleContext.vin}`;
@@ -182,7 +216,7 @@ You have access to the following diagnostic and analysis tools:
 
 OBD2 DIAGNOSTIC TOOLS:
 - scan_obd2_adapters: Scan for available Bluetooth OBD2 adapters
-- connect_obd2_adapter: Connect to a specific OBD2 adapter  
+- connect_obd2_adapter: Connect to a specific OBD2 adapter
 - get_obd2_live_data: Get real-time engine data (RPM, speed, temperature, etc.)
 - read_dtc_codes: Read diagnostic trouble codes from the vehicle
 - get_connection_status: Check current OBD2 connection status
@@ -207,6 +241,37 @@ WEB SEARCH CAPABILITIES:
   * Provide vehicle context for more relevant results
   * Image types: diagram, wiring, flowchart, parts, general
 
+OBD2 DATA ANALYSIS TOOLS:
+- analyze_obd2_session: Perform comprehensive analysis of OBD2 session data
+  * Get summary statistics, detailed analysis, anomaly detection
+  * Analyze performance metrics, fuel economy, and emissions data
+  * Generate insights and recommendations based on sensor readings
+
+- compare_obd2_sessions: Compare multiple diagnostic sessions to identify trends
+  * Track vehicle performance changes over time
+  * Identify degrading or improving systems
+  * Compare fuel economy, performance, and emission metrics
+
+- get_obd2_diagnostic_recommendations: Get AI-powered diagnostic recommendations
+  * Analyze OBD2 data patterns with DTC codes and symptoms
+  * Provide specific repair suggestions and maintenance recommendations
+  * Correlate sensor data with common automotive issues
+
+- calculate_fuel_economy_metrics: Calculate detailed fuel economy analysis
+  * Compute instantaneous and average fuel economy
+  * Analyze driving patterns and efficiency recommendations
+  * Support multiple units (MPG, L/100km, km/L)
+
+- detect_obd2_anomalies: Detect anomalies and potential issues in sensor data
+  * Identify out-of-range values and sudden changes
+  * Find patterns indicating potential component failures
+  * Adjustable sensitivity for different diagnostic needs
+
+- generate_obd2_health_report: Generate comprehensive vehicle health reports
+  * Overall health scoring and system assessments
+  * Historical trend analysis and comparisons
+  * Professional reports for technicians and customers
+
 INSTRUCTIONS:
 1. Use the appropriate tools to gather vehicle data when requested
 2. When mathematical calculations or data analysis are needed, use the Python execution tool
@@ -221,6 +286,11 @@ INSTRUCTIONS:
 11. When analyzing sensor data patterns, consider using Python to create trend charts
 12. Use web search for recent recalls, TSBs, or when you need current information beyond your training data
 13. Search for technical images when diagrams would help explain complex repairs or diagnostics
+14. Use OBD2 analysis tools when working with diagnostic session data for comprehensive insights
+15. When asked to analyze vehicle performance, use the OBD2 analysis tools to get detailed metrics
+16. Generate health reports and recommendations using the specialized OBD2 analysis capabilities
+17. Use anomaly detection tools to identify potential issues in sensor readings
+18. Compare multiple sessions to track vehicle health trends over time
 
 PYTHON USAGE EXAMPLES:
 - Calculate fuel efficiency from OBD2 data
@@ -258,11 +328,11 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     for (const toolCall of toolCalls) {
       try {
         console.log(`Executing tool: ${toolCall.function.name}`);
-        
+
         let parameters = {};
         if (toolCall.function.arguments) {
           try {
-            parameters = typeof toolCall.function.arguments === 'string' 
+            parameters = typeof toolCall.function.arguments === 'string'
               ? JSON.parse(toolCall.function.arguments)
               : toolCall.function.arguments;
           } catch (e) {
@@ -275,12 +345,17 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
         // Handle Python execution tool
         if (toolCall.function.name === 'execute_python_code') {
           console.log('Executing Python code...');
+          console.log(`🔍 PLOT DEBUG: Internal sessionId: ${sessionId}`);
+          console.log(`🔍 PLOT DEBUG: OBD2 sessionId: ${session.obd2SessionId}`);
+          console.log(`🔍 PLOT DEBUG: Using sessionId for plots: ${session.obd2SessionId || sessionId}`);
+          console.log(`🔍 PLOT DEBUG: vehicleContext: ${JSON.stringify(session.vehicleContext)}`);
+
           result = await this.pythonService.executeCode(
             parameters.code,
             {
               save_plots: parameters.save_plots !== false,
               plot_filename: parameters.plot_filename,
-              sessionId: sessionId,
+              sessionId: session.obd2SessionId || sessionId, // Use OBD2 session ID if available
               vehicleContext: session.vehicleContext,
               customerContext: session.customerContext,
               pythonCode: parameters.code
@@ -298,7 +373,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
             if (result.plots && result.plots.length > 0) {
               formattedResult.plots_generated = result.plots.length;
               formattedResult.plot_paths = result.plots;
-              
+
               // Process plot results with both API URLs and base64 data
               formattedResult.plots = [];
               for (const plotResult of result.plots) {
@@ -308,7 +383,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
                   url: plotResult.imageId ? `/api/plots/${plotResult.imageId}` : null,
                   thumbnailUrl: plotResult.imageId ? `/api/plots/${plotResult.imageId}/thumbnail` : null
                 };
-                
+
                 // Try to get base64 data from MongoDB first, then fallback to file system
                 let base64Data = null;
                 if (plotResult.imageId) {
@@ -317,16 +392,16 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
                     base64Data = plotFromDB.base64Data;
                   }
                 }
-                
+
                 // Fallback to file system if MongoDB doesn't have it
                 if (!base64Data && plotData.path) {
                   base64Data = await this.pythonService.getPlotAsBase64(plotData.path);
                 }
-                
+
                 if (base64Data) {
                   plotData.data = base64Data;
                 }
-                
+
                 formattedResult.plots.push(plotData);
               }
             }
@@ -337,11 +412,20 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
           // Handle web search tools
           console.log(`Executing web search tool: ${toolCall.function.name}`);
           result = await this.webSearchService.executeTool(toolCall.function.name, parameters);
+        } else if (toolCall.function.name === 'process_pdf_from_url') {
+          // Handle PDF processing tool
+          console.log(`Executing PDF processing tool: ${toolCall.function.name}`);
+          result = await this.pdfService.executeTool(toolCall.function.name, parameters);
+        } else if (['analyze_obd2_session', 'compare_obd2_sessions', 'get_obd2_diagnostic_recommendations',
+                   'calculate_fuel_economy_metrics', 'detect_obd2_anomalies', 'generate_obd2_health_report'].includes(toolCall.function.name)) {
+          // Handle OBD2 analysis tools
+          console.log(`Executing OBD2 analysis tool: ${toolCall.function.name}`);
+          result = await this.obd2AnalysisService.executeTool(toolCall.function.name, parameters);
         } else {
           // Handle MCP tools
           result = await this.mcpService.callTool(toolCall.function.name, parameters);
         }
-        
+
         toolResults.push({
           tool_call_id: toolCall.id,
           role: 'tool',
@@ -351,7 +435,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
         console.log(`Tool ${toolCall.function.name} executed successfully`);
       } catch (error) {
         console.error(`Tool execution failed: ${toolCall.function.name}`, error);
-        
+
         toolResults.push({
           tool_call_id: toolCall.id,
           role: 'tool',
@@ -373,6 +457,15 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
       throw new Error('Session not found');
     }
 
+    // Truncate messages to prevent context length issues
+    const maxMessages = 10; // Keep only the last 10 messages to stay under token limit
+    if (session.messages.length > maxMessages) {
+      const systemMessage = session.messages.find(msg => msg.role === 'system');
+      const recentMessages = session.messages.slice(-maxMessages);
+      session.messages = systemMessage ? [systemMessage, ...recentMessages] : recentMessages;
+      console.log(`🔧 CONTEXT: Truncated conversation to ${session.messages.length} messages`);
+    }
+
     // The last message should be an assistant message with tool_calls
     // We need to add the tool results right after it
     if (session.messages.length === 0 || session.messages[session.messages.length - 1].role !== 'assistant') {
@@ -384,8 +477,8 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
 
     // Log the conversation structure for debugging
     console.log('Conversation structure:', session.messages.map(m => ({
-      role: m.role, 
-      hasContent: !!m.content, 
+      role: m.role,
+      hasContent: !!m.content,
       hasToolCalls: !!m.tool_calls,
       isToolResult: m.role === 'tool'
     })));
@@ -394,13 +487,14 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     const mcpTools = this.mcpService.getToolDefinitions();
     const pythonTool = this.pythonService.getToolDefinition();
     const webSearchTools = this.webSearchService.getToolDefinitions();
-    const tools = [...mcpTools, pythonTool, ...webSearchTools];
+    const pdfTool = this.pdfService.getToolDefinition();
+    const tools = [...mcpTools, pythonTool, ...webSearchTools, pdfTool];
 
     try {
       // Check if this is a fallback session
       if (session.fallback) {
         console.log('Continuing with fallback model (no tools):', session.fallbackModel);
-        
+
         const stream = await this.openai.chat.completions.create({
           model: session.fallbackModel || 'gpt-3.5-turbo',
           messages: session.messages,
@@ -410,7 +504,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
         session.stream = stream;
         return stream;
       }
-      
+
       // Normal session with tools
       const stream = await this.openai.chat.completions.create({
         model: this.primaryModel,
@@ -424,19 +518,19 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
       return stream;
     } catch (error) {
       console.error('Failed to continue stream:', error);
-      
+
       // Try to continue with fallback model if primary fails
       if (!session.fallback) {
         try {
           console.log('Attempting to continue with fallback model after error');
           const fallbackModel = this.fallbackModels[0];
-          
+
           const stream = await this.openai.chat.completions.create({
             model: fallbackModel,
             messages: session.messages,
             stream: true
           });
-          
+
           session.fallback = true;
           session.fallbackModel = fallbackModel;
           session.stream = stream;
@@ -457,6 +551,12 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
 
   closeSession(sessionId) {
     const session = this.activeSessions.get(sessionId);
+
+    // Save conversation history before closing session
+    if (session && session.conversationId) {
+      this.saveConversationHistory(session.conversationId, session.messages);
+    }
+
     if (session?.stream) {
       try {
         session.stream.destroy?.();
@@ -467,12 +567,50 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     this.activeSessions.delete(sessionId);
   }
 
+  // Save conversation history
+  saveConversationHistory(conversationId, messages) {
+    if (!conversationId || !messages) return;
+
+    // Keep only the last 20 messages to prevent unbounded growth
+    const maxMessages = 20;
+    const messagesToSave = messages.slice(-maxMessages);
+
+    this.conversationHistory.set(conversationId, {
+      messages: messagesToSave,
+      lastUpdated: Date.now()
+    });
+
+    console.log(`Saved conversation history for ${conversationId} with ${messagesToSave.length} messages`);
+  }
+
+  // Get conversation history
+  getConversationHistory(conversationId) {
+    return this.conversationHistory.get(conversationId);
+  }
+
+  // Clear conversation history
+  clearConversationHistory(conversationId) {
+    if (conversationId) {
+      this.conversationHistory.delete(conversationId);
+      console.log(`Cleared conversation history for ${conversationId}`);
+    }
+  }
+
   // Cleanup old sessions (call periodically)
   cleanupOldSessions(maxAgeMs = 30 * 60 * 1000) { // 30 minutes
     const now = Date.now();
     for (const [sessionId, session] of this.activeSessions.entries()) {
       if (now - session.createdAt > maxAgeMs) {
         this.closeSession(sessionId);
+      }
+    }
+
+    // Also cleanup old conversation histories (keep for 2 hours)
+    const historyMaxAge = 2 * 60 * 60 * 1000; // 2 hours
+    for (const [conversationId, history] of this.conversationHistory.entries()) {
+      if (now - history.lastUpdated > historyMaxAge) {
+        this.conversationHistory.delete(conversationId);
+        console.log(`Cleaned up old conversation history for ${conversationId}`);
       }
     }
   }
@@ -497,7 +635,8 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
       python: {
         available: true,
         outputDir: this.pythonService.outputDir
-      }
+      },
+      pdf: this.pdfService.getStatus()
     };
   }
 }
