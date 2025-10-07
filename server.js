@@ -978,7 +978,8 @@ server.listen(PORT, async () => {
   const agentServiceProcess = spawn('npm', ['start'], {
     cwd: path.join(__dirname, 'agent-service'),
     stdio: 'inherit',
-    shell: true
+    shell: true,
+    env: { ...process.env, PORT: '3003' }
   });
 
   agentServiceProcess.on('error', (error) => {

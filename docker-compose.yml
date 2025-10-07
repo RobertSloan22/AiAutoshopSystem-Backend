@@ -7,13 +7,15 @@ services:
       dockerfile: Dockerfile
     container_name: ai-autoshop-backend
     ports:
+      - "5000:5000"
       - "3001:3001"
     environment:
       NODE_ENV: production
-      PORT: 3001
+      PORT: 5000
+      REDIS_URL: redis://redis:6379
+      CHROMA_URL: http://chromadb:8000
       # Add your environment variables here
       # MONGODB_URI: ${MONGODB_URI}
-      # REDIS_URL: ${REDIS_URL}
       # OPENAI_API_KEY: ${OPENAI_API_KEY}
       # JWT_SECRET: ${JWT_SECRET}
     env_file:
@@ -21,6 +23,9 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
+    depends_on:
+      - redis
+      - chromadb
     restart: unless-stopped
     networks:
       - autoshop-network
@@ -40,16 +45,29 @@ services:
   #   networks:
   #     - autoshop-network
 
-  # Optional: Redis service
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: autoshop-redis
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis_data:/data
-  #   networks:
-  #     - autoshop-network
+  redis:
+    image: redis:7-alpine
+    container_name: autoshop-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - autoshop-network
+    restart: unless-stopped
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: autoshop-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=*
+    networks:
+      - autoshop-network
+    restart: unless-stopped
 
 networks:
   autoshop-network:
@@ -58,3 +76,4 @@ networks:
 volumes:
   mongodb_data:
   redis_data:
+  chromadb_data:

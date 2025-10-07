@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Directory to store temporary files
-export const TEMP_DIR = path.join(__dirname, '..', '..', 'temp');
+export const TEMP_DIR = path.join(__dirname, '..', 'temp');
 
 /**
  * Ensures the temporary directory exists
