@@ -364,6 +364,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
               vehicleContext: session.vehicleContext,
               customerContext: session.customerContext,
               pythonCode: parameters.code
+              plot_filename: parameters.plot_filename
             }
           );
 
@@ -408,6 +409,16 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
                 }
 
                 formattedResult.plots.push(plotData);
+              // Try to get base64 data for the plots
+              formattedResult.plots = [];
+              for (const plotPath of result.plots) {
+                const base64Data = await this.pythonService.getPlotAsBase64(plotPath);
+                if (base64Data) {
+                  formattedResult.plots.push({
+                    path: plotPath,
+                    data: base64Data
+                  });
+                }
               }
             }
 
