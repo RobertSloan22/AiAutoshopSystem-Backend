@@ -86,6 +86,8 @@ class ResponsesAPIService {
         customerContext,
         conversationId,
         obd2SessionId,
+        conversationId,
+        obd2SessionId,
         createdAt: Date.now()
       });
 
@@ -136,6 +138,8 @@ class ResponsesAPIService {
           messages,
           vehicleContext,
           customerContext,
+          conversationId,
+          obd2SessionId,
           conversationId,
           obd2SessionId,
           createdAt: Date.now(),
@@ -355,6 +359,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
             {
               save_plots: parameters.save_plots !== false,
               plot_filename: parameters.plot_filename,
+              sessionId: session.obd2SessionId || sessionId, // Use OBD2 session ID if available
               sessionId: session.obd2SessionId || sessionId, // Use OBD2 session ID if available
               vehicleContext: session.vehicleContext,
               customerContext: session.customerContext,

@@ -7,18 +7,29 @@ const router = express.Router();
 router.get('/lookup', protectRoute, async (req, res) => {
   const { plate, state } = req.query;
   
+  if (!plate || !state) {
+    return res.status(400).json({ error: 'Plate and state are required' });
+  }
+
+  if (!process.env.PLATETOVIN_API_KEY) {
+    return res.status(500).json({ error: 'PlateToVin API key is not configured' });
+  }
+  
   try {
-    const options = {
-      method: 'GET',
-      url: 'https://us-license-plate-to-vin.p.rapidapi.com/licenseplate',
-      params: { plate, state },
-      headers: {
-        'x-rapidapi-key': process.env.RAPID_API_KEY,
-        'x-rapidapi-host': 'us-license-plate-to-vin.p.rapidapi.com'
-      }
+    const url = new URL('https://platetovin.com/api/convert');
+    
+    const headers = {
+      'Authorization': process.env.PLATETOVIN_API_KEY,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
     };
 
-    const response = await axios.request(options);
+    const body = {
+      state: state,
+      plate: plate
+    };
+
+    const response = await axios.post(url.toString(), body, { headers });
     res.json(response.data);
   } catch (error) {
     console.error('License plate lookup error:', error);

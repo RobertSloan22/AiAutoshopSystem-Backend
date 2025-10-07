@@ -215,7 +215,7 @@ class OBD2AnalysisService {
       }
 
       // Build query for data points
-      let query = { sessionId: mongoose.Types.ObjectId(sessionId) };
+      let query = { sessionId: new mongoose.Types.ObjectId(sessionId) };
       if (timeRange?.start || timeRange?.end) {
         query.timestamp = {};
         if (timeRange.start) query.timestamp.$gte = new Date(timeRange.start);
@@ -262,6 +262,14 @@ class OBD2AnalysisService {
           analysis.fuelEconomy = this.analyzeFuelEconomy(dataPoints);
           break;
         case 'emissions':
+          analysis.emissions = this.analyzeEmissions(dataPoints);
+          break;
+        case 'comprehensive':
+          analysis.summary = this.generateSummaryStats(dataPoints);
+          analysis.detailed = this.generateDetailedAnalysis(dataPoints);
+          analysis.anomalies = this.detectDataAnomalies(dataPoints);
+          analysis.performance = this.analyzePerformanceMetrics(dataPoints);
+          analysis.fuelEconomy = this.analyzeFuelEconomy(dataPoints);
           analysis.emissions = this.analyzeEmissions(dataPoints);
           break;
       }
@@ -324,7 +332,7 @@ class OBD2AnalysisService {
       engineHealth: this.analyzeEngineHealth(dataPoints),
       fuelSystem: this.analyzeFuelSystem(dataPoints),
       emissionSystem: this.analyzeEmissionSystem(dataPoints),
-      performanceMetrics: this.calculatePerformanceMetrics(dataPoints),
+      performanceMetrics: this.analyzePerformanceMetrics(dataPoints),
       temperatureAnalysis: this.analyzeTemperatures(dataPoints)
     };
 
@@ -449,7 +457,7 @@ class OBD2AnalysisService {
       const { DiagnosticSession, OBD2DataPoint } = this.getModels();
 
       const dataPoints = await OBD2DataPoint.find({
-        sessionId: mongoose.Types.ObjectId(sessionId),
+        sessionId: new mongoose.Types.ObjectId(sessionId),
         speed: { $gt: 0 },
         maf: { $exists: true, $ne: null }
       }).sort({ timestamp: 1 });
@@ -1003,6 +1011,91 @@ class OBD2AnalysisService {
       coEmissions: this.estimateCOEmissions(dataPoints),
       overallRating: this.calculateEmissionsRating(dataPoints)
     };
+  }
+
+  analyzeFuelEconomy(dataPoints) {
+    if (!dataPoints || dataPoints.length === 0) {
+      return { error: 'No data points available for fuel economy analysis' };
+    }
+
+    // Extract relevant data
+    const fuelData = dataPoints.filter(dp => dp.fuelLevel !== undefined || dp.fuelRate !== undefined);
+    const speedData = dataPoints.filter(dp => dp.speed !== undefined && dp.speed > 0);
+    const rpmData = dataPoints.filter(dp => dp.rpm !== undefined && dp.rpm > 0);
+
+    if (fuelData.length === 0) {
+      return { error: 'No fuel-related data available' };
+    }
+
+    // Calculate basic fuel economy metrics
+    const avgSpeed = speedData.length > 0 ? speedData.reduce((sum, dp) => sum + dp.speed, 0) / speedData.length : 0;
+    const avgRPM = rpmData.length > 0 ? rpmData.reduce((sum, dp) => sum + dp.rpm, 0) / rpmData.length : 0;
+    
+    // Estimate fuel economy based on driving patterns
+    const idleTime = dataPoints.filter(dp => dp.speed !== undefined && dp.speed < 1).length;
+    const idlePercentage = (idleTime / dataPoints.length) * 100;
+    
+    const highwayDriving = dataPoints.filter(dp => dp.speed !== undefined && dp.speed > 55).length;
+    const highwayPercentage = (highwayDriving / dataPoints.length) * 100;
+    
+    const cityDriving = dataPoints.filter(dp => dp.speed !== undefined && dp.speed >= 1 && dp.speed <= 55).length;
+    const cityPercentage = (cityDriving / dataPoints.length) * 100;
+
+    // Calculate efficiency score (0-100)
+    let efficiencyScore = 100;
+    
+    // Penalize excessive idling
+    if (idlePercentage > 20) {
+      efficiencyScore -= (idlePercentage - 20) * 2;
+    }
+    
+    // Reward highway driving
+    if (highwayPercentage > 30) {
+      efficiencyScore += 10;
+    }
+    
+    // Penalize aggressive driving (high RPM at low speeds)
+    const aggressiveDriving = dataPoints.filter(dp => 
+      dp.rpm !== undefined && dp.rpm > 3000 && 
+      dp.speed !== undefined && dp.speed < 30
+    ).length;
+    const aggressivePercentage = (aggressiveDriving / dataPoints.length) * 100;
+    
+    if (aggressivePercentage > 10) {
+      efficiencyScore -= aggressivePercentage * 1.5;
+    }
+
+    efficiencyScore = Math.max(0, Math.min(100, efficiencyScore));
+
+    return {
+      averageSpeed: Math.round(avgSpeed * 10) / 10,
+      averageRPM: Math.round(avgRPM),
+      idlePercentage: Math.round(idlePercentage * 10) / 10,
+      highwayDriving: Math.round(highwayPercentage * 10) / 10,
+      cityDriving: Math.round(cityPercentage * 10) / 10,
+      efficiencyScore: Math.round(efficiencyScore),
+      drivingPattern: this.assessDrivingPattern(avgSpeed, idlePercentage, highwayPercentage),
+      recommendations: this.generateFuelEconomyRecommendations({
+        idlePercentage,
+        highwayPercentage,
+        aggressivePercentage,
+        avgSpeed
+      }, dataPoints)
+    };
+  }
+
+  assessDrivingPattern(avgSpeed, idlePercentage, highwayPercentage) {
+    const cityPercentage = 100 - highwayPercentage - idlePercentage;
+    
+    if (highwayPercentage > 50) {
+      return 'Highway';
+    } else if (cityPercentage > 60) {
+      return 'City';
+    } else if (idlePercentage > 30) {
+      return 'Stop-and-go';
+    } else {
+      return 'Mixed';
+    }
   }
 
   estimateNOxEmissions(dataPoints) {
@@ -1915,7 +2008,7 @@ class OBD2AnalysisService {
       const { DiagnosticSession, OBD2DataPoint } = this.getModels();
 
       const dataPoints = await OBD2DataPoint.find({
-        sessionId: mongoose.Types.ObjectId(sessionId)
+        sessionId: new mongoose.Types.ObjectId(sessionId)
       }).sort({ timestamp: 1 });
 
       if (dataPoints.length === 0) {

@@ -4,10 +4,10 @@ import protectRoute from "../middleware/protectRoute.js";
 
 const router = express.Router();
 
-router.post('/images', async (req, res) => {
+router.post('/images', protectRoute, async (req, res) => {
     try {
         const { imageUrl, thumbnailUrl, title, source, link, originalUrl } = req.body;
-        
+
         // Create image record
         const imageData = {
             title: title || 'Untitled',
@@ -18,19 +18,19 @@ router.post('/images', async (req, res) => {
             originalUrl: originalUrl || imageUrl,
             timestamp: new Date()
         };
-        
+
         const savedImage = await Image.create(imageData);
         res.status(201).json(savedImage);
     } catch (error) {
         console.error('Failed to save image:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to save image',
-            details: error.message 
+            details: error.message
         });
     }
 });
 
-router.get('/images',  async (req, res) => {
+router.get('/images', protectRoute, async (req, res) => {
   try {
     const images = await Image.find().sort({ timestamp: -1 }); // Sort by newest first
     res.json(images);
@@ -40,15 +40,15 @@ router.get('/images',  async (req, res) => {
   }
 });
 
-router.delete('/images/:id', async (req, res) => {
+router.delete('/images/:id', protectRoute, async (req, res) => {
   try {
     const { id } = req.params;
     const deletedImage = await Image.findByIdAndDelete(id);
-    
+
     if (!deletedImage) {
       return res.status(404).json({ error: 'Image not found' });
     }
-    
+
     res.json({ message: 'Image deleted successfully' });
   } catch (error) {
     console.error('Failed to delete image:', error);
