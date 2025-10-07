@@ -583,7 +583,7 @@ import researchProgressRoutes from './routes/researchProgress.routes.js';
 import apiRoutes from './routes/api.routes.js';
 
 // Add the new API routes
-app.use("/api", apiRoutes);
+app.use("/api/", apiRoutes);
 
 app.use("/api/research-progress", researchProgressRoutes);
 // Research results endpoints
@@ -629,8 +629,8 @@ app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
 // Vector store routes disabled to reduce startup overhead
 app.use('/api/vector-store', vectorStoreRoutes);
-app.use('/api/openai/assistants', assistantsRoutes);
-app.use('/api/openai/assistants-v2', assistantsV2Routes);
+app.use('/api/assistants', assistantsRoutes);
+app.use('/api/assistants-v2', assistantsV2Routes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
 app.use('/api/turn_response', turnResponseRoutes);
@@ -653,6 +653,10 @@ app.use('/api/eliza-direct', elizaProxyRoutes);
 
 // Register OBD2 data routes
 app.use('/api/obd2', obd2Routes);
+import analysisDashboardRoutes from './routes/analysisDashboard.routes.js';
+
+// Register analysis dashboard routes
+app.use('/api/analysis', analysisDashboardRoutes);
 
 // Register diagnostic agents routes
 app.use('/api/diagnostic-agents', diagnosticAgentsRoutes);

@@ -5,7 +5,7 @@ import { verifyToken } from '../middleware/auth.middleware.js';
 
 
 const router = express.Router();
-router.use(protectRoute);
+router.use(verifyToken);
 
 router.post('/search/diagrams', searchDiagrams);
 

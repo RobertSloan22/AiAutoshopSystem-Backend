@@ -158,7 +158,7 @@ const getImageExplanation = async (imageUrl, prompt = "Describe this image in de
 };
 
 // POST /api/response-images - Create new image with explanation
-router.post('/response-images', protectRoute, async (req, res) => {
+router.post('/response-images', async (req, res) => {
     try {
         const { imageUrl, thumbnailUrl, title, source, link, originalUrl, prompt } = req.body;
         
@@ -210,7 +210,7 @@ router.post('/response-images', protectRoute, async (req, res) => {
 });
 
 // GET /api/response-images - Get all images with explanations
-router.get('/response-images', protectRoute, async (req, res) => {
+router.get('/response-images', async (req, res) => {
   try {
     const images = await Image.find().sort({ timestamp: -1 });
     res.json(images);
@@ -221,7 +221,7 @@ router.get('/response-images', protectRoute, async (req, res) => {
 });
 
 // DELETE /api/response-images/:id - Delete an image
-router.delete('/response-images/:id', protectRoute, async (req, res) => {
+router.delete('/response-images/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const deletedImage = await Image.findByIdAndDelete(id);

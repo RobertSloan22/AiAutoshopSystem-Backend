@@ -43,11 +43,11 @@ const searchWeb = async (query, maxResults = 5) => {
       },
       timeout: 10000
     });
-    
+
     if (!response.ok) {
       throw new Error(`Search API error: ${response.status}`);
     }
-    
+
     const data = await response.json();
     return data.web?.results?.map(result => ({
       title: result.title,
@@ -86,7 +86,7 @@ const REALTIME_FUNCTIONS = [
     name: 'search_automotive',
     description: 'Search for automotive-specific information like repair guides, part specifications, or diagnostic procedures',
     parameters: {
-      type: 'object', 
+      type: 'object',
       properties: {
         query: {
           type: 'string',
@@ -236,7 +236,7 @@ router.post('/realtime/sessions', async (req, res) => {
 router.post('/chat/completions', async (req, res) => {
   try {
     const { model, messages } = req.body;
-    
+
     // Security: only allow specific models
     const ALLOWED_MODELS = new Set(["gpt-4o", "gpt-4o-mini", "gpt-realtime"]);
     if (!ALLOWED_MODELS.has(model)) {
@@ -261,13 +261,13 @@ router.post('/chat/completions', async (req, res) => {
 router.post('/realtime', async (req, res) => {
   try {
     const { model, sdp } = req.body;
-    
+
     if (!sdp) {
       throw new Error('No SDP provided in request body');
     }
 
     console.log('Sending SDP to OpenAI:', sdp);
-    
+
     const response = await fetch(
       `https://api.openai.com/v1/realtime?model=${model || "gpt-realtime"}`,
       {
@@ -281,7 +281,7 @@ router.post('/realtime', async (req, res) => {
         signal: AbortSignal.timeout(15000) // 15s timeout for SDP exchange
       }
     );
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI API error:', errorText);
@@ -290,11 +290,11 @@ router.post('/realtime', async (req, res) => {
 
     const answerSdp = await response.text();
     console.log('Received SDP from OpenAI:', answerSdp);
-    
+
     res.json({ sdp: answerSdp });
   } catch (error) {
     console.error("Error in /realtime:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: error.message,
       details: error.response?.data || error.stack
     });
@@ -319,7 +319,7 @@ router.get('/realtime/sessions', async (req, res) => {
         signal: AbortSignal.timeout(10000) // 10s timeout
       }
     );
-    
+
     if (!response.ok) {
       throw new Error(`OpenAI API responded with status: ${response.status}`);
     }
@@ -339,7 +339,7 @@ router.get('/realtime/sessions', async (req, res) => {
 // Create an assistant with code interpreter and file search capabilities
 router.post('/assistant/create', async (req, res) => {
   try {
-    const { 
+    const {
       name = "AI Autoshop Assistant",
       instructions = "You are a helpful automotive diagnostic assistant with code interpreter and file search capabilities.",
       model = "gpt-4o-mini"
@@ -388,11 +388,11 @@ router.post('/assistant/chat', async (req, res) => {
 
     // Poll for completion
     let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-    
+
     while (runStatus.status !== 'completed' && runStatus.status !== 'failed') {
       await new Promise(resolve => setTimeout(resolve, 1000));
       runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-      
+
       // Handle required actions (tool calls)
       if (runStatus.status === 'requires_action') {
         // For now, we'll just wait for the action to be handled
@@ -418,7 +418,7 @@ router.post('/assistant/chat', async (req, res) => {
 router.post('/analyze-image', async (req, res) => {
   try {
     const { image, context, sessionId } = req.body;
-    
+
     if (!image) {
       return res.status(400).json({ error: 'No image provided' });
     }
@@ -429,8 +429,8 @@ router.post('/analyze-image', async (req, res) => {
       messages: [{
         role: 'user',
         content: [
-          { 
-            type: 'text', 
+          {
+            type: 'text',
             text: context || 'Analyze this automotive image and describe notable components, defects, and safety issues.'
           },
           {
@@ -463,7 +463,7 @@ router.post('/analyze-image', async (req, res) => {
 router.post('/realtime/image-message', async (req, res) => {
   try {
     const { image, context, sessionId } = req.body;
-    
+
     if (!image) {
       return res.status(400).json({ error: 'No image provided' });
     }
@@ -475,8 +475,8 @@ router.post('/realtime/image-message', async (req, res) => {
         type: "message",
         role: "user",
         content: [
-          { 
-            type: "input_text", 
+          {
+            type: "input_text",
             text: context || "Analyze this automotive image and describe what you see in detail."
           },
           {
@@ -502,13 +502,13 @@ router.post('/realtime/image-message', async (req, res) => {
 router.post('/images/generate', async (req, res) => {
   try {
     const { prompt, size = "1024x1024", quality = "standard" } = req.body || {};
-    
+
     if (!prompt) {
       return res.status(400).json({ error: "prompt is required" });
     }
 
     const imageDataUrl = await generateImage({ prompt, size, quality });
-    
+
     res.json({
       prompt,
       size,
@@ -525,7 +525,7 @@ router.post('/images/generate', async (req, res) => {
 router.post('/search', async (req, res) => {
   try {
     const { query, max_results = 5, category } = req.body;
-    
+
     if (!query) {
       return res.status(400).json({ error: 'Query is required' });
     }
@@ -544,7 +544,7 @@ router.post('/search', async (req, res) => {
     }
 
     const results = await searchWeb(searchQuery, max_results);
-    
+
     res.json({
       query: searchQuery,
       results,
@@ -560,14 +560,14 @@ router.post('/search', async (req, res) => {
 router.post('/function-call', async (req, res) => {
   try {
     const { function_name, arguments: funcArgs, call_id } = req.body;
-    
+
     let result;
-    
+
     switch (function_name) {
       case 'search_web':
         result = await searchWeb(funcArgs.query, funcArgs.max_results);
         break;
-        
+
       case 'search_automotive':
         let autoQuery = funcArgs.query;
         if (funcArgs.category) {
@@ -582,7 +582,7 @@ router.post('/function-call', async (req, res) => {
         }
         result = await searchWeb(autoQuery, 5);
         break;
-        
+
       case 'generate_image':
         const { prompt, size, quality } = funcArgs || {};
         const imageDataUrl = await generateImage({ prompt, size, quality });
@@ -593,11 +593,11 @@ router.post('/function-call', async (req, res) => {
           quality: quality || 'standard'
         };
         break;
-        
+
       default:
         result = { error: `Unknown function: ${function_name}` };
     }
-    
+
     res.json({
       call_id,
       function_name,
@@ -606,9 +606,9 @@ router.post('/function-call', async (req, res) => {
     });
   } catch (error) {
     console.error('Function call error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       call_id: req.body.call_id,
-      error: error.message 
+      error: error.message
     });
   }
 });
@@ -617,12 +617,12 @@ router.post('/function-call', async (req, res) => {
 router.post('/realtime/function-call', async (req, res) => {
   try {
     const { type, function_call } = req.body;
-    
+
     if (type === 'function_call_invocation') {
       const { name, arguments: funcArgs, call_id } = function_call;
-      
+
       let output;
-      
+
       switch (name) {
         case 'search_web':
           const webResults = await searchWeb(funcArgs.query, funcArgs.max_results || 5);
@@ -632,7 +632,7 @@ router.post('/realtime/function-call', async (req, res) => {
             found: webResults.length
           });
           break;
-          
+
         case 'search_automotive':
           let query = funcArgs.query;
           if (funcArgs.category) {
@@ -646,7 +646,7 @@ router.post('/realtime/function-call', async (req, res) => {
             found: autoResults.length
           });
           break;
-          
+
         case 'generate_image':
           const { prompt, size, quality } = funcArgs || {};
           const imageDataUrl = await generateImage({ prompt, size, quality });
@@ -657,11 +657,11 @@ router.post('/realtime/function-call', async (req, res) => {
             quality: quality || 'high'
           });
           break;
-          
+
         default:
           output = JSON.stringify({ error: `Unknown function: ${name}` });
       }
-      
+
       // Return function call output for realtime session
       res.json({
         type: 'function_call_output',
@@ -677,4 +677,4 @@ router.post('/realtime/function-call', async (req, res) => {
   }
 });
 
-export default router; 
+export default router;
