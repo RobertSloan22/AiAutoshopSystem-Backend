@@ -33,6 +33,7 @@ curl -X GET http://localhost:5000/api/obd2/sessions/{sessionId}/analysis
 ```javascript
 {
   analysisResults: Mixed,          // Full analysis response
+  analysisVisualizations: [Mixed], // ✨ Actual visualization data (images, charts)
   analysisTimestamp: Date,         // When analysis was performed
   analysisType: String,            // Type of analysis
   analysisMetadata: {
@@ -91,6 +92,14 @@ curl -X GET http://localhost:5000/api/obd2/sessions/{sessionId}/analysis
   "analysisType": "comprehensive",
   "analysisTimestamp": "2025-10-07T10:30:00Z",
   "analysis": { ... },
+  "visualizations": [
+    {
+      "imageId": "plot_123",
+      "url": "/api/images/plots/plot_123.png",
+      "thumbnailUrl": "/api/images/plots/thumbnails/plot_123.png",
+      "type": "chart"
+    }
+  ],
   "metadata": {
     "dataPointsAnalyzed": 1500,
     "visualizationsGenerated": 1,
