@@ -1,82 +1,59 @@
 import express from 'express';
-import { getVinFromPlate } from '../controllers/plateToVinController.js';
+import axios from 'axios';
+import protectRoute from "../middleware/protectRoute.js";
 
 const router = express.Router();
 
-/**
- * @swagger
- * components:
- *   schemas:
- *     PlateToVinResponse:
- *       type: object
- *       required:
- *         - licensePlate
- *         - state
- *       properties:
- *         licensePlate:
- *           type: string
- *           description: The license plate number
- *         state:
- *           type: string
- *           description: State where the vehicle is registered
- *         vin:
- *           type: string
- *           description: Vehicle Identification Number
- *         make:
- *           type: string
- *           description: Vehicle manufacturer
- *         model:
- *           type: string
- *           description: Vehicle model
- *         year:
- *           type: integer
- *           description: Vehicle year
- *         confidence:
- *           type: number
- *           format: float
- *           description: Confidence score of the match
- */
-
-/**
- * @swagger
- * /api/plate-to-vin:
- *   post:
- *     summary: Convert license plate to VIN
- *     tags: [Plate to VIN]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - licensePlate
- *               - state
- *             properties:
- *               licensePlate:
- *                 type: string
- *                 description: License plate number
- *               state:
- *                 type: string
- *                 description: State code (e.g., CA, NY)
- *     responses:
- *       200:
- *         description: VIN information retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/PlateToVinResponse'
- *       400:
- *         description: Invalid input
- *       404:
- *         description: No matching vehicle found
- *       429:
- *         description: Rate limit exceeded
- */
-
-// Route to get VIN from license plate
-router.get('/lookup', getVinFromPlate);
+router.post('/lookup', async (req, res) => {
+  console.log('=== PLATE LOOKUP REQUEST STARTED ===');
+  console.log('Request body:', req.body);
+  
+  // Handle both { plate, state } and { params: { plate, state } }
+  const { plate, state } = req.body.params || req.body;
+  
+  if (!plate || !state) {
+    console.log('Missing plate or state');
+    return res.status(400).json({ error: 'Plate and state are required' });
+  }
+  
+  console.log('API Key exists:', !!process.env.PLATETOVIN_API_KEY);
+  
+  if (!process.env.PLATETOVIN_API_KEY) {
+    return res.status(500).json({ error: 'PlateToVin API key is not configured' });
+  }
+  
+  try {
+    console.log('Making request to PlateToVin API...');
+    console.log('Request data:', { state, plate });
+    
+    const response = await axios({
+      method: 'POST',
+      url: 'https://platetovin.com/api/convert',
+      headers: {
+        'Authorization': process.env.PLATETOVIN_API_KEY.trim(),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      data: {
+        state: state,
+        plate: plate
+      }
+    });
+    
+    console.log('SUCCESS! Response status:', response.status);
+    console.log('Response data:', response.data);
+    
+    res.json(response.data);
+  } catch (error) {
+    console.log('=== ERROR OCCURRED ===');
+    console.log('Error message:', error.message);
+    console.log('Response status:', error.response?.status);
+    console.log('Response data:', error.response?.data);
+    
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.message || error.response?.data || 'Failed to lookup license plate'
+    });
+  }
+});
 
 export default router;
