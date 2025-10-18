@@ -1,5 +1,9 @@
 // routes/research.service.simple.js - Simplified research service without expensive vectorization
+// import dotenv
+import dotenv from 'dotenv';
+dotenv.config();
 
+// 
 import express from 'express';
 import { ChatOpenAI } from '@langchain/openai';
 import { PromptTemplate } from '@langchain/core/prompts';
