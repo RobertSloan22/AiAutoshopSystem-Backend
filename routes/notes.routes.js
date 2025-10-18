@@ -14,7 +14,7 @@ import protectRoute from "../middleware/protectRoute.js";
 const router = express.Router();
 
 // All routes are protected with auth middleware
-router.use(protectRoute);
+router.use(verifyToken);
 
 // Create a new note
 router.post('/', createNote);

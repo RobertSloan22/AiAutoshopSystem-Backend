@@ -4,7 +4,7 @@ import protectRoute from "../middleware/protectRoute.js";
 
 const router = express.Router();
 
-router.post('/diagram-search', protectRoute, async (req, res) => {
+router.post('/diagram-search', async (req, res) => {
   try {
     const { query, apiKey, cx, vehicleInfo } = req.body;
     
@@ -62,7 +62,7 @@ router.post('/diagram-search', protectRoute, async (req, res) => {
   }
 });
 
-router.post('/proxy-image', protectRoute, async (req, res) => {
+router.post('/proxy-image', async (req, res) => {
   try {
     const { url } = req.body;
     const response = await fetch(url);

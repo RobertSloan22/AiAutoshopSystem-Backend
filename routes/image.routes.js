@@ -7,7 +7,7 @@ const router = express.Router();
 router.post('/images', protectRoute, async (req, res) => {
     try {
         const { imageUrl, thumbnailUrl, title, source, link, originalUrl } = req.body;
-        
+
         // Create image record
         const imageData = {
             title: title || 'Untitled',
@@ -18,14 +18,14 @@ router.post('/images', protectRoute, async (req, res) => {
             originalUrl: originalUrl || imageUrl,
             timestamp: new Date()
         };
-        
+
         const savedImage = await Image.create(imageData);
         res.status(201).json(savedImage);
     } catch (error) {
         console.error('Failed to save image:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to save image',
-            details: error.message 
+            details: error.message
         });
     }
 });
@@ -44,11 +44,11 @@ router.delete('/images/:id', protectRoute, async (req, res) => {
   try {
     const { id } = req.params;
     const deletedImage = await Image.findByIdAndDelete(id);
-    
+
     if (!deletedImage) {
       return res.status(404).json({ error: 'Image not found' });
     }
-    
+
     res.json({ message: 'Image deleted successfully' });
   } catch (error) {
     console.error('Failed to delete image:', error);

@@ -204,6 +204,13 @@ class OBD2AnalysisService {
   async analyzeSession(params) {
     try {
       const { sessionId, analysisType = 'summary', timeRange } = params;
+      
+      console.log('\n🔍 === OBD2 ANALYSIS START ===');
+      console.log('📋 Analysis Parameters:');
+      console.log('  SessionId:', sessionId);
+      console.log('  Analysis Type:', analysisType);
+      console.log('  Time Range:', timeRange ? JSON.stringify(timeRange) : 'Full session');
+      
       const { DiagnosticSession, OBD2DataPoint } = this.getModels();
 
       if (!DiagnosticSession || !OBD2DataPoint) {
@@ -211,10 +218,20 @@ class OBD2AnalysisService {
       }
 
       // Get session data
+      console.log('📊 Fetching session from database...');
       const session = await DiagnosticSession.findById(sessionId);
       if (!session) {
+        console.log('❌ Session not found:', sessionId);
         throw new Error(`Session not found: ${sessionId}`);
       }
+      
+      console.log('✅ Session found:');
+      console.log('  VehicleId:', session.vehicleId);
+      console.log('  Start Time:', session.startTime);
+      console.log('  End Time:', session.endTime);
+      console.log('  Duration:', session.duration, 'seconds');
+      console.log('  Status:', session.status);
+      console.log('  DataPoint Count (metadata):', session.dataPointCount);
 
       // Build query for data points
       let query = { sessionId: new mongoose.Types.ObjectId(sessionId) };
@@ -224,17 +241,65 @@ class OBD2AnalysisService {
         if (timeRange.end) query.timestamp.$lte = new Date(timeRange.end);
       }
 
+      console.log('📊 Fetching data points with query:', JSON.stringify(query));
       const dataPoints = await OBD2DataPoint.find(query).sort({ timestamp: 1 });
-
+      
+      console.log(`✅ Retrieved ${dataPoints.length} data points from database`);
+      
       if (dataPoints.length === 0) {
+        console.log('⚠️ No data points found for this session');
         return {
           success: false,
           message: 'No data points found for this session',
           sessionInfo: session
         };
       }
+      
+      // Log data sample
+      console.log('\n📊 Data Sample (First 3 points):');
+      dataPoints.slice(0, 3).forEach((dp, i) => {
+        console.log(`  Point ${i + 1}:`, {
+          timestamp: dp.timestamp,
+          rpm: dp.rpm,
+          speed: dp.speed,
+          engineTemp: dp.engineTemp,
+          throttlePosition: dp.throttlePosition,
+          engineLoad: dp.engineLoad,
+          fuelRate: dp.fuelRate,
+          maf: dp.maf
+        });
+      });
+      
+      // Log available parameters
+      const availableParams = new Set();
+      dataPoints.forEach(dp => {
+        Object.keys(dp.toObject()).forEach(key => {
+          if (dp[key] !== null && dp[key] !== undefined && 
+              !['_id', 'sessionId', 'timestamp', '__v'].includes(key)) {
+            availableParams.add(key);
+          }
+        });
+      });
+      console.log('📊 Available Parameters:', Array.from(availableParams).join(', '));
+      
+      // Log data quality metrics
+      const nullCounts = {};
+      Array.from(availableParams).forEach(param => {
+        nullCounts[param] = dataPoints.filter(dp => 
+          dp[param] === null || dp[param] === undefined
+        ).length;
+      });
+      console.log('📊 Data Quality (null counts):');
+      Object.entries(nullCounts).forEach(([param, count]) => {
+        const percentage = ((count / dataPoints.length) * 100).toFixed(1);
+        if (count > 0) {
+          console.log(`  ${param}: ${count}/${dataPoints.length} (${percentage}% null)`);
+        }
+      });
 
       // Perform analysis based on type
+      console.log(`\n🔬 Performing ${analysisType} analysis...`);
+      
       let analysis = {
         sessionInfo: {
           id: session._id,
@@ -249,37 +314,75 @@ class OBD2AnalysisService {
 
       switch (analysisType) {
         case 'summary':
+          console.log('  → Generating summary statistics...');
           analysis.summary = this.generateSummaryStats(dataPoints);
+          console.log('  ✅ Summary stats generated');
           break;
         case 'detailed':
+          console.log('  → Generating detailed analysis...');
           analysis.detailed = this.generateDetailedAnalysis(dataPoints);
+          console.log('  ✅ Detailed analysis generated');
           break;
         case 'anomalies':
+          console.log('  → Detecting anomalies...');
           analysis.anomalies = this.detectDataAnomalies(dataPoints);
+          console.log('  ✅ Anomaly detection complete');
           break;
         case 'performance':
+          console.log('  → Analyzing performance metrics...');
           analysis.performance = this.analyzePerformanceMetrics(dataPoints);
+          console.log('  ✅ Performance analysis complete');
           break;
         case 'fuel_economy':
+          console.log('  → Analyzing fuel economy...');
           analysis.fuelEconomy = this.analyzeFuelEconomy(dataPoints);
+          console.log('  ✅ Fuel economy analysis complete');
           break;
         case 'emissions':
+          console.log('  → Analyzing emissions...');
           analysis.emissions = this.analyzeEmissions(dataPoints);
+          console.log('  ✅ Emissions analysis complete');
           break;
         case 'comprehensive':
+          console.log('  → Generating comprehensive analysis (all types)...');
           analysis.summary = this.generateSummaryStats(dataPoints);
+          console.log('    ✅ Summary stats done');
           analysis.detailed = this.generateDetailedAnalysis(dataPoints);
+          console.log('    ✅ Detailed analysis done');
           analysis.anomalies = this.detectDataAnomalies(dataPoints);
+          console.log('    ✅ Anomaly detection done');
           analysis.performance = this.analyzePerformanceMetrics(dataPoints);
+          console.log('    ✅ Performance analysis done');
           analysis.fuelEconomy = this.analyzeFuelEconomy(dataPoints);
+          console.log('    ✅ Fuel economy analysis done');
           analysis.emissions = this.analyzeEmissions(dataPoints);
+          console.log('    ✅ Emissions analysis done');
           break;
       }
+
+      console.log('\n📊 Analysis Results Summary:');
+      if (analysis.summary) {
+        console.log('  Summary Stats:');
+        console.log('    Averages:', Object.keys(analysis.summary.averages || {}).length, 'parameters');
+        console.log('    Drive Time:', analysis.summary.driveStatistics?.totalTime, 'seconds');
+      }
+      if (analysis.anomalies) {
+        const anomalyCount = (analysis.anomalies.critical?.length || 0) + 
+                           (analysis.anomalies.warnings?.length || 0);
+        console.log('  Anomalies Found:', anomalyCount);
+      }
+      if (analysis.performance) {
+        console.log('  Performance Metrics:', Object.keys(analysis.performance || {}).length, 'categories');
+      }
+      
+      const recommendations = this.generateRecommendations(analysis, analysisType);
+      console.log('  Recommendations:', recommendations?.length || 0);
+      console.log('\n✅ === OBD2 ANALYSIS COMPLETE ===\n');
 
       return {
         success: true,
         analysis,
-        recommendations: this.generateRecommendations(analysis, analysisType)
+        recommendations
       };
 
     } catch (error) {
@@ -292,6 +395,8 @@ class OBD2AnalysisService {
   }
 
   generateSummaryStats(dataPoints) {
+    console.log('    📊 generateSummaryStats: Processing', dataPoints.length, 'data points');
+    
     const stats = {
       averages: {},
       maximums: {},
@@ -309,6 +414,16 @@ class OBD2AnalysisService {
         stats.maximums[param] = Math.max(...values);
         stats.minimums[param] = Math.min(...values);
         stats.ranges[param] = stats.maximums[param] - stats.minimums[param];
+        
+        console.log(`      ${param}:`, {
+          validValues: values.length,
+          avg: stats.averages[param].toFixed(2),
+          min: stats.minimums[param].toFixed(2),
+          max: stats.maximums[param].toFixed(2),
+          range: stats.ranges[param].toFixed(2)
+        });
+      } else {
+        console.log(`      ${param}: No valid data`);
       }
     });
 
@@ -325,6 +440,14 @@ class OBD2AnalysisService {
       maxSpeed: stats.maximums.speed || 0,
       distanceEstimate: (stats.averages.speed || 0) * (driveTime / 3600) // rough estimate
     };
+    
+    console.log('      Drive Stats:', {
+      totalTime: driveTime.toFixed(1) + 's',
+      idleTime: idleTime.toFixed(1) + 's',
+      idlePercentage: stats.driveStatistics.idlePercentage.toFixed(1) + '%',
+      avgSpeed: stats.driveStatistics.averageSpeed.toFixed(1),
+      distance: stats.driveStatistics.distanceEstimate.toFixed(2) + ' km'
+    });
 
     return stats;
   }

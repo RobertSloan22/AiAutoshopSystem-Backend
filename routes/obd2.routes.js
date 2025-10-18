@@ -1916,6 +1916,521 @@ router.get('/analysis/tools', (req, res) => {
   }
 });
 
+// =====================================================
+// OBD2 Session Analysis Integration Routes
+// =====================================================
+
+// Import analysis system integration
+import { spawn } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Analysis system configuration
+const ANALYSIS_SYSTEM_PORT = process.env.ANALYSIS_SYSTEM_PORT || 8080;
+const ANALYSIS_SYSTEM_URL = `http://localhost:${ANALYSIS_SYSTEM_PORT}`;
+const ANALYSIS_DIR = path.join(__dirname, '..', '../../../fast-agent', 'examples', 'data-analysis');
+
+// Track active analysis processes
+const activeAnalyses = new Map();
+
+/**
+ * Check if analysis system is running
+ */
+async function checkAnalysisSystem() {
+  try {
+    const response = await fetch(`${ANALYSIS_SYSTEM_URL}/health`);
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
+ * Start analysis system if not running
+ */
+async function ensureAnalysisSystemRunning() {
+  const isRunning = await checkAnalysisSystem();
+  if (isRunning) {
+    return true;
+  }
+
+  console.log('🚀 Starting analysis system...');
+  
+  try {
+    // Check if analysis directory exists
+    if (!fs.existsSync(ANALYSIS_DIR)) {
+      throw new Error(`Analysis directory not found: ${ANALYSIS_DIR}`);
+    }
+
+    const appPyPath = path.join(ANALYSIS_DIR, 'app.py');
+    if (!fs.existsSync(appPyPath)) {
+      throw new Error(`app.py not found in analysis directory`);
+    }
+
+    // Start analysis system
+    const analysisProcess = spawn('python', ['app.py'], {
+      cwd: ANALYSIS_DIR,
+      env: {
+        ...process.env,
+        PORT: ANALYSIS_SYSTEM_PORT,
+        OBD2_BACKEND_URL: process.env.OBD2_BACKEND_URL || 'http://localhost:5000'
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    // Wait for system to start
+    for (let i = 0; i < 30; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (await checkAnalysisSystem()) {
+        console.log('✅ Analysis system started successfully');
+        return true;
+      }
+    }
+
+    throw new Error('Analysis system failed to start within timeout');
+  } catch (error) {
+    console.error('❌ Failed to start analysis system:', error);
+    return false;
+  }
+}
+
+/**
+ * Fetch session data and prepare for analysis
+ */
+async function prepareSessionForAnalysis(sessionId) {
+  try {
+    // Get session info
+    const session = await DiagnosticSession.findById(sessionId).lean();
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    // Get session data points
+    const dataPoints = await OBD2DataPoint.find({ 
+      sessionId: new mongoose.Types.ObjectId(sessionId) 
+    }).sort({ timestamp: 1 }).lean();
+
+    if (dataPoints.length === 0) {
+      throw new Error('No data points found for this session');
+    }
+
+    // Convert to CSV format
+    const csvData = convertDataPointsToCSV(session, dataPoints);
+    
+    return {
+      session,
+      dataPoints,
+      csvData,
+      metadata: {
+        sessionId,
+        sessionName: session.sessionName || 'Unknown Session',
+        dataPointCount: dataPoints.length,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        vehicleInfo: session.vehicleInfo || {}
+      }
+    };
+  } catch (error) {
+    console.error('Error preparing session for analysis:', error);
+    throw error;
+  }
+}
+
+/**
+ * Convert data points to CSV format
+ */
+function convertDataPointsToCSV(session, dataPoints) {
+  if (dataPoints.length === 0) return '';
+
+  // Get all unique field names
+  const allFields = new Set(['timestamp']);
+  dataPoints.forEach(point => {
+    Object.keys(point).forEach(key => {
+      if (key !== '_id' && key !== '__v' && key !== 'sessionId') {
+        allFields.add(key);
+      }
+    });
+  });
+
+  const fields = Array.from(allFields);
+  
+  // Create CSV header
+  const header = fields.join(',');
+  
+  // Create CSV rows
+  const rows = dataPoints.map(point => {
+    return fields.map(field => {
+      let value = point[field] || '';
+      if (field === 'timestamp' && value) {
+        value = new Date(value).toISOString();
+      }
+      // Escape CSV values
+      if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+        value = `"${value.replace(/"/g, '""')}"`;
+      }
+      return value;
+    }).join(',');
+  });
+
+  return [header, ...rows].join('\n');
+}
+
+/**
+ * Send session data to analysis system
+ */
+async function sendSessionToAnalysisSystem(sessionData, analysisId) {
+  try {
+    // Ensure analysis system is running
+    await ensureAnalysisSystemRunning();
+
+    // Create a temporary CSV file
+    const tempDir = path.join(ANALYSIS_DIR, 'uploads');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const csvFileName = `session_${sessionData.metadata.sessionId}_${Date.now()}.csv`;
+    const csvFilePath = path.join(tempDir, csvFileName);
+    
+    fs.writeFileSync(csvFilePath, sessionData.csvData);
+
+    // Send analysis request to analysis system
+    const analysisRequest = {
+      filename: csvFileName,
+      session_metadata: sessionData.metadata,
+      analysis_type: 'comprehensive'
+    };
+
+    const response = await fetch(`${ANALYSIS_SYSTEM_URL}/run-analysis`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(analysisRequest)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Analysis system returned ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    
+    // Store analysis info
+    activeAnalyses.set(analysisId, {
+      id: analysisId,
+      sessionId: sessionData.metadata.sessionId,
+      status: 'running',
+      startTime: new Date(),
+      csvFile: csvFileName,
+      metadata: sessionData.metadata
+    });
+
+    return result;
+  } catch (error) {
+    console.error('Error sending session to analysis system:', error);
+    throw error;
+  }
+}
+
+/**
+ * Check analysis progress
+ */
+async function checkAnalysisProgress(analysisId) {
+  try {
+    const analysis = activeAnalyses.get(analysisId);
+    if (!analysis) {
+      return { status: 'not_found' };
+    }
+
+    // Check with analysis system
+    const response = await fetch(`${ANALYSIS_SYSTEM_URL}/analysis/status?id=${analysisId}`);
+    if (!response.ok) {
+      return { status: 'error', message: 'Failed to check analysis status' };
+    }
+
+    const status = await response.json();
+    
+    // Update our tracking
+    if (status.status === 'completed' || status.status === 'failed') {
+      analysis.status = status.status;
+      analysis.endTime = new Date();
+      analysis.duration = analysis.endTime - analysis.startTime;
+    }
+
+    return status;
+  } catch (error) {
+    console.error('Error checking analysis progress:', error);
+    return { status: 'error', message: error.message };
+  }
+}
+
+// =====================================================
+// Analysis Integration Routes
+// =====================================================
+
+// Get available sessions for analysis
+router.get('/analysis/sessions', async (req, res) => {
+  try {
+    const { status = 'active', limit = 50 } = req.query;
+    
+    let query = {};
+    if (status === 'active') {
+      query.status = 'active';
+    } else if (status === 'completed') {
+      query.status = 'completed';
+    }
+
+    const sessions = await DiagnosticSession.find(query)
+      .sort({ startTime: -1 })
+      .limit(parseInt(limit))
+      .select('_id sessionName startTime endTime status dataPointCount vehicleInfo userId')
+      .lean();
+
+    // Format sessions for frontend
+    const formattedSessions = sessions.map(session => ({
+      id: session._id.toString(),
+      sessionName: session.sessionName || 'Unnamed Session',
+      startTime: session.startTime,
+      endTime: session.endTime,
+      status: session.status,
+      dataPointCount: session.dataPointCount || 0,
+      duration: session.endTime ? 
+        Math.round((new Date(session.endTime) - new Date(session.startTime)) / 1000 / 60) : 
+        null,
+      vehicleInfo: session.vehicleInfo || {},
+      userId: session.userId
+    }));
+
+    res.json({
+      success: true,
+      sessions: formattedSessions,
+      count: formattedSessions.length,
+      status: status
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to get sessions for analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get sessions',
+      message: error.message
+    });
+  }
+});
+
+// Start analysis for a specific session
+router.post('/analysis/sessions/:sessionId/start', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { analysisType = 'comprehensive' } = req.body;
+
+    // Validate session ID
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid session ID format'
+      });
+    }
+
+    // Generate analysis ID
+    const analysisId = `analysis_${sessionId}_${Date.now()}`;
+
+    // Prepare session data
+    const sessionData = await prepareSessionForAnalysis(sessionId);
+
+    // Send to analysis system
+    const result = await sendSessionToAnalysisSystem(sessionData, analysisId);
+
+    res.json({
+      success: true,
+      analysisId: analysisId,
+      sessionId: sessionId,
+      message: 'Analysis started successfully',
+      sessionInfo: {
+        sessionName: sessionData.metadata.sessionName,
+        dataPointCount: sessionData.metadata.dataPointCount,
+        vehicleInfo: sessionData.metadata.vehicleInfo
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to start session analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start analysis',
+      message: error.message
+    });
+  }
+});
+
+// Get analysis status
+router.get('/analysis/:analysisId/status', async (req, res) => {
+  try {
+    const { analysisId } = req.params;
+    
+    const status = await checkAnalysisProgress(analysisId);
+    
+    res.json({
+      success: true,
+      analysisId: analysisId,
+      ...status
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to get analysis status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get analysis status',
+      message: error.message
+    });
+  }
+});
+
+// Get analysis results
+router.get('/analysis/:analysisId/results', async (req, res) => {
+  try {
+    const { analysisId } = req.params;
+    
+    const analysis = activeAnalyses.get(analysisId);
+    if (!analysis) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analysis not found'
+      });
+    }
+
+    // Get results from analysis system
+    const response = await fetch(`${ANALYSIS_SYSTEM_URL}/analysis/${analysisId}/results`);
+    if (!response.ok) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to get analysis results'
+      });
+    }
+
+    const results = await response.json();
+
+    res.json({
+      success: true,
+      analysisId: analysisId,
+      sessionId: analysis.sessionId,
+      results: results,
+      metadata: analysis.metadata
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to get analysis results:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get analysis results',
+      message: error.message
+    });
+  }
+});
+
+// Get analysis visualizations
+router.get('/analysis/:analysisId/visualizations', async (req, res) => {
+  try {
+    const { analysisId } = req.params;
+    
+    const analysis = activeAnalyses.get(analysisId);
+    if (!analysis) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analysis not found'
+      });
+    }
+
+    // Get visualizations from analysis system
+    const response = await fetch(`${ANALYSIS_SYSTEM_URL}/images`);
+    if (!response.ok) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to get visualizations'
+      });
+    }
+
+    const visualizations = await response.json();
+
+    res.json({
+      success: true,
+      analysisId: analysisId,
+      sessionId: analysis.sessionId,
+      visualizations: visualizations
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to get visualizations:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get visualizations',
+      message: error.message
+    });
+  }
+});
+
+// Download session data as CSV
+router.get('/analysis/sessions/:sessionId/download', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    // Validate session ID
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid session ID format'
+      });
+    }
+
+    // Prepare session data
+    const sessionData = await prepareSessionForAnalysis(sessionId);
+
+    // Set headers for CSV download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="session_${sessionId}_${Date.now()}.csv"`);
+
+    // Send CSV data
+    res.send(sessionData.csvData);
+
+  } catch (error) {
+    console.error('❌ Failed to download session data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to download session data',
+      message: error.message
+    });
+  }
+});
+
+// Get analysis system health
+router.get('/analysis/health', async (req, res) => {
+  try {
+    const isRunning = await checkAnalysisSystem();
+    
+    res.json({
+      success: true,
+      analysisSystem: {
+        running: isRunning,
+        url: ANALYSIS_SYSTEM_URL,
+        port: ANALYSIS_SYSTEM_PORT
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to check analysis system health:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check analysis system health',
+      message: error.message
+    });
+  }
+});
+
 // Health check endpoint
 router.get('/health', async (req, res) => {
   try {
@@ -1925,6 +2440,9 @@ router.get('/health', async (req, res) => {
     // Check Redis connection
     const redisHealth = await obd2RealtimeService.healthCheck();
 
+    // Check analysis system
+    const analysisSystemRunning = await checkAnalysisSystem();
+
     const overall = isConnected && redisHealth.status === 'up' ? 'healthy' : 'unhealthy';
 
     res.json({
@@ -1932,6 +2450,10 @@ router.get('/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       database: isConnected ? 'connected' : 'disconnected',
       redis: redisHealth,
+      analysisSystem: {
+        running: analysisSystemRunning,
+        url: ANALYSIS_SYSTEM_URL
+      },
       service: 'obd2'
     });
   } catch (error) {
@@ -1940,6 +2462,7 @@ router.get('/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       database: 'error',
       redis: { status: 'down', error: error.message },
+      analysisSystem: { running: false, error: error.message },
       error: error.message,
       service: 'obd2'
     });
