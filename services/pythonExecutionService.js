@@ -5,18 +5,16 @@ import fsSync from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import WebSocket from 'ws';
-
 import { registerImage } from '../routes/images.js';
 import Plot from '../models/plot.model.js';
 import OBD2Data from '../models/obd2Data.model.js';
 import mongoose from 'mongoose';
 import os from 'os';
 
-
 class PythonExecutionService {
   constructor() {
-    this.pythonServerUrl = process.env.PYTHON_SERVER_URL || 'http://localhost:8000';
-    this.pythonServerWsUrl = process.env.PYTHON_SERVER_WS_URL || 'ws://localhost:8000';
+    this.pythonServerUrl = process.env.PYTHON_SERVER_URL || 'http://localhost:8001';
+    this.pythonServerWsUrl = process.env.PYTHON_SERVER_WS_URL || 'ws://localhost:8001';
     this.isConnected = false;
     this.executionResults = new Map();
     // Use OS temp directory for cross-platform compatibility
@@ -40,9 +38,9 @@ class PythonExecutionService {
     try {
       const response = await axios.get(`${this.pythonServerUrl}/health`, { timeout: 5000 });
       this.isConnected = response.status === 200;
-      console.log('Python server connection status:', this.isConnected);
+      console.log('✅ Python server connection status:', this.isConnected);
     } catch (error) {
-      console.log('Python server not available:', error.message);
+      console.log('⚠️ Python server not available - will use local Python execution:', error.message);
       this.isConnected = false;
     }
   }
@@ -96,12 +94,6 @@ class PythonExecutionService {
         // Fallback to local execution
         console.log(`📐 PYTHON EXEC: Using local execution`);
         return await this.executeLocally(code, executionId, { ...options, save_plots, plot_filename });
-
-        return await this.executeViaServer(code, executionId, { save_plots, plot_filename });
-      } else {
-        // Fallback to local execution
-        return await this.executeLocally(code, executionId, { save_plots, plot_filename });
-
       }
     } catch (error) {
       console.error('Python execution error:', error);
@@ -149,7 +141,6 @@ class PythonExecutionService {
               case 'plot':
                 // Handle plot data (base64 encoded)
                 if (message.data && options.save_plots) {
-
                   const plotResult = await this.savePlot(
                     message.data, 
                     message.filename || options.plot_filename,
@@ -164,10 +155,6 @@ class PythonExecutionService {
                     }
                   );
                   plots.push(plotResult);
-
-                  const plotPath = await this.savePlot(message.data, message.filename || options.plot_filename);
-                  plots.push(plotPath);
-
                 }
                 break;
 
@@ -205,7 +192,7 @@ class PythonExecutionService {
         setTimeout(() => {
           ws.close();
           reject(new Error('Execution timeout'));
-        }, 30000); // 30 second timeout
+        }, 120000); // 120 second timeout (2 minutes) for complex plots
       });
 
     } catch (error) {
@@ -219,9 +206,8 @@ class PythonExecutionService {
     const tempFile = path.join(this.outputDir, `temp_${executionId}.py`);
     
     try {
-
+      // Wrap the code to capture plots if needed
       const wrappedCode = this.wrapCodeForExecution(code, { ...options, executionId });
-      const wrappedCode = this.wrapCodeForExecution(code, options);
       await fs.writeFile(tempFile, wrappedCode);
 
       return new Promise((resolve, reject) => {
@@ -327,10 +313,6 @@ class PythonExecutionService {
             plots.push({ path: plotPath, imageId });
           }
 
-          // Check for generated plots
-          const plots = await this.findGeneratedPlots(executionId);
-
-
           resolve({
             success: code === 0,
             output: output.join(''),
@@ -348,7 +330,7 @@ class PythonExecutionService {
         setTimeout(() => {
           pythonProcess.kill();
           reject(new Error('Execution timeout'));
-        }, 30000); // 30 second timeout
+        }, 120000); // 120 second timeout (2 minutes) for complex plots
       });
 
     } catch (error) {
@@ -363,7 +345,6 @@ class PythonExecutionService {
   }
 
   wrapCodeForExecution(code, options) {
-
     const executionId = options.executionId || 'unknown';
     const sessionId = options.sessionId || 'no_session';
     
@@ -429,7 +410,6 @@ if 'plt' in locals():
   }
 
   async savePlot(base64Data, filename, executionId, options = {}) {
-  async savePlot(base64Data, filename) {
     const plotFilename = filename || `plot_${Date.now()}`;
     const plotPath = path.join(this.outputDir, `${plotFilename}.png`);
     
@@ -502,8 +482,6 @@ if 'plt' in locals():
     }
     
     return { path: plotPath, imageId };
-    return plotPath;
-
   }
 
   async findGeneratedPlots(executionId) {
@@ -524,7 +502,6 @@ if 'plt' in locals():
           return false;
         }
       });
-      const plots = files.filter(f => f.endsWith('.png') && f.includes(String(executionId)));
       return plots.map(f => path.join(this.outputDir, f));
     } catch (error) {
       console.error('Error finding generated plots:', error);
@@ -577,7 +554,6 @@ if 'plt' in locals():
       return [];
     }
   }
-
 
   // Clean up old execution results and plots
   async cleanup(maxAgeMs = 60 * 60 * 1000) { // 1 hour default

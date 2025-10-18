@@ -143,6 +143,8 @@ router.get('/', async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
     
+    console.log('📊 GET /api/plots - Filters:', { executionId, sessionId, tag, tags, vin });
+    
     // Build query
     const query = {};
     
@@ -171,6 +173,8 @@ router.get('/', async (req, res) => {
     
     // Get total count for pagination
     const total = await Plot.countDocuments(query);
+    
+    console.log(`📊 Found ${plots.length} plots (total: ${total})`);
     
     // Transform to include virtual fields
     const plotList = plots.map(plot => ({
@@ -243,11 +247,15 @@ router.get('/session/:sessionId', async (req, res) => {
     const { sessionId } = req.params;
     const { limit = 50, includeData = false } = req.query;
     
+    console.log(`📊 GET /api/plots/session/${sessionId} - includeData: ${includeData}`);
+    
     const selectFields = includeData ? '' : '-imageData';
     const plots = await Plot.find({ sessionId })
       .select(selectFields)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit));
+    
+    console.log(`📊 Found ${plots.length} plots for session ${sessionId}`);
     
     if (includeData === 'true') {
       // Include base64 data for each plot

@@ -1,7 +1,7 @@
 import express from 'express';
 import { OpenAI } from 'openai';
 import { z } from 'zod';
-import PartsRetriever from '../parts.service.js';
+import PartsRetriever from '../services/parts.service.js';
 
 const router = express.Router();
 

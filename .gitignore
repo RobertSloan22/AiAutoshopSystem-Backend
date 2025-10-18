@@ -2,7 +2,7 @@ venv
 /venv
 /.venv
 .venv
-
+venv/
 
 # Dependencies
 node_modules/

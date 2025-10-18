@@ -560,6 +560,60 @@ app.use('/visualization', createProxyMiddleware({
 }));
 
 // =====================================================
+// Data Analysis System Integration
+// =====================================================
+
+// Proxy requests to the data analysis system
+app.use('/data-analysis', createProxyMiddleware({
+  target: 'http://localhost:8080',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/data-analysis': '' // Remove the prefix when forwarding to analysis server
+  },
+  onError: (err, req, res) => {
+    console.error('Data Analysis API error:', err);
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("Data Analysis service is currently unavailable");
+    }
+  }
+}));
+
+// Proxy requests to the analysis dashboard
+app.use('/analysis-dashboard', createProxyMiddleware({
+  target: 'http://localhost:8080',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/analysis-dashboard': '' // Remove the prefix when forwarding to analysis server
+  },
+  onError: (err, req, res) => {
+    console.error('Analysis Dashboard API error:', err);
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("Analysis Dashboard service is currently unavailable");
+    }
+  }
+}));
+
+// Proxy requests to the session analysis system
+app.use('/session-analysis', createProxyMiddleware({
+  target: 'http://localhost:8080',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/session-analysis': '' // Remove the prefix when forwarding to analysis server
+  },
+  onError: (err, req, res) => {
+    console.error('Session Analysis API error:', err);
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("Session Analysis service is currently unavailable");
+    }
+  }
+}));
+
+console.log('✅ Data Analysis System integrated via proxy');
+
+// =====================================================
 // OBD2 HTTP Service Integration
 // =====================================================
 

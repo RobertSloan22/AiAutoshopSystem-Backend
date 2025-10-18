@@ -6,7 +6,7 @@ import { PromptTemplate } from '@langchain/core/prompts';
 import { RunnableSequence } from '@langchain/core/runnables';
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { z } from 'zod';
-import PartsRetriever from '../services/parts.service.js';
+import PartsRetriever from '../parts.service.js';
 import crypto from 'crypto';
 import OpenAI from 'openai';
 
