@@ -74,6 +74,7 @@ import obd2Routes from './routes/obd2.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
 import diagnosticAgentsRoutes from './routes/diagnostic-agents.js';
 import uiGenerationRoutes from './routes/ui-generation.routes.js';
+import dynamicToolsRoutes from './routes/dynamicTools.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -647,6 +648,9 @@ app.use('/api/images', imagesRoutes);
 app.use('/api/plots', plotsRoutes);
 app.use('/api/plots/fallback', plotsFallbackRoutes);
 app.use('/api/ui', uiGenerationRoutes);
+
+// Register dynamic tools routes
+app.use('/api/dynamic-tools', dynamicToolsRoutes);
 
 // Register Eliza proxy router for direct communication with Eliza system
 app.use('/api/eliza-direct', elizaProxyRoutes);
