@@ -126,6 +126,177 @@ function formatToolsForOpenAI(tools) {
   }).filter(Boolean); // Remove any null/undefined tools
 }
 
+// Parse web search response to extract structured data
+function parseWebSearchResponse(response) {
+  const enhancedResponse = {
+    ...response,
+    parsed_data: {
+      web_searches: [],
+      citations: [],
+      parts_pricing: [],
+      retailers: []
+    }
+  };
+
+  if (!response.output || !Array.isArray(response.output)) {
+    return enhancedResponse;
+  }
+
+  // Extract web search calls and structured data
+  response.output.forEach(item => {
+    // Extract web search call information
+    if (item.type === 'web_search_call') {
+      enhancedResponse.parsed_data.web_searches.push({
+        id: item.id,
+        status: item.status,
+        action: item.action || null
+      });
+    }
+
+    // Extract message content with citations and parse for parts data
+    if (item.type === 'message' && item.content) {
+      item.content.forEach(content => {
+        if (content.type === 'output_text') {
+          // Extract citations
+          if (content.annotations) {
+            content.annotations.forEach(annotation => {
+              if (annotation.type === 'url_citation') {
+                const citation = {
+                  url: annotation.url,
+                  title: annotation.title,
+                  start_index: annotation.start_index,
+                  end_index: annotation.end_index,
+                  text_snippet: content.text.substring(annotation.start_index, annotation.end_index)
+                };
+                
+                // Identify retailer from URL
+                const retailer = identifyRetailer(annotation.url);
+                if (retailer) {
+                  citation.retailer = retailer;
+                  if (!enhancedResponse.parsed_data.retailers.find(r => r.name === retailer)) {
+                    enhancedResponse.parsed_data.retailers.push({ name: retailer, citations: 1 });
+                  } else {
+                    enhancedResponse.parsed_data.retailers.find(r => r.name === retailer).citations++;
+                  }
+                }
+                
+                enhancedResponse.parsed_data.citations.push(citation);
+              }
+            });
+          }
+
+          // Parse text for parts pricing information
+          const pricingData = extractPricingData(content.text);
+          enhancedResponse.parsed_data.parts_pricing.push(...pricingData);
+        }
+      });
+    }
+  });
+
+  return enhancedResponse;
+}
+
+// Identify retailer from URL
+function identifyRetailer(url) {
+  const retailers = {
+    'autozone.com': 'AutoZone',
+    'advanceautoparts.com': 'Advance Auto Parts',
+    'oreillyauto.com': "O'Reilly Auto Parts",
+    'partsgeek.com': 'PartsGeek',
+    'rockauto.com': 'RockAuto',
+    'amazon.com': 'Amazon',
+    'buybrakes.com': 'BuyBrakes.com',
+    'toyotapartsdeal.com': 'Toyota Parts Deal',
+    'gmpartsdirect.com': 'GM Parts Direct',
+    'fordparts.com': 'Ford Parts',
+    'napa.com': 'NAPA Auto Parts',
+    'partsauthority.com': 'Parts Authority'
+  };
+  
+  for (const [domain, name] of Object.entries(retailers)) {
+    if (url.includes(domain)) {
+      return name;
+    }
+  }
+  return null;
+}
+
+// Extract pricing data from text using regex patterns
+function extractPricingData(text) {
+  const pricingData = [];
+  
+  // Pattern to match pricing information
+  const pricePattern = /(?:\$|USD\s?)(\d+(?:\.\d{2})?(?:\s?-\s?\$?\d+(?:\.\d{2})?)?)/g;
+  const partNamePattern = /(?:^|\n)\*\*([^*]+)\*\*/gm;
+  
+  let match;
+  const prices = [];
+  const partNames = [];
+  
+  // Extract prices
+  while ((match = pricePattern.exec(text)) !== null) {
+    const priceStr = match[1];
+    const priceRange = priceStr.includes('-') 
+      ? priceStr.split('-').map(p => parseFloat(p.replace('$', '').trim()))
+      : [parseFloat(priceStr)];
+    
+    prices.push({
+      raw: match[0],
+      min: Math.min(...priceRange),
+      max: priceRange.length > 1 ? Math.max(...priceRange) : Math.min(...priceRange),
+      range: priceRange.length > 1
+    });
+  }
+  
+  // Extract part names
+  while ((match = partNamePattern.exec(text)) !== null) {
+    partNames.push(match[1].trim());
+  }
+  
+  // Combine part names with prices (best effort matching)
+  partNames.forEach((name, index) => {
+    const priceInfo = prices[index] || null;
+    pricingData.push({
+      part_name: name,
+      price_info: priceInfo,
+      brand: extractBrand(name),
+      category: categorizePart(name)
+    });
+  });
+  
+  return pricingData;
+}
+
+// Extract brand from part name
+function extractBrand(partName) {
+  const brands = ['EBC', 'Duralast', 'Carquest', 'Toyota', 'PowerStop', 'Bosch', 'AC Delco', 'Motorcraft', 'OEM'];
+  for (const brand of brands) {
+    if (partName.toLowerCase().includes(brand.toLowerCase())) {
+      return brand;
+    }
+  }
+  return 'Generic';
+}
+
+// Categorize part type
+function categorizePart(partName) {
+  const categories = {
+    'brake': ['brake', 'pad', 'rotor', 'disc'],
+    'engine': ['oil', 'filter', 'spark', 'plug'],
+    'electrical': ['battery', 'alternator', 'starter'],
+    'suspension': ['shock', 'strut', 'spring'],
+    'body': ['headlight', 'taillight', 'bumper', 'mirror']
+  };
+  
+  const nameLower = partName.toLowerCase();
+  for (const [category, keywords] of Object.entries(categories)) {
+    if (keywords.some(keyword => nameLower.includes(keyword))) {
+      return category;
+    }
+  }
+  return 'other';
+}
+
 // Debug helper for tool formatting
 function debugToolsFormat(tools, context = '') {
   console.log(`=== TOOLS DEBUG ${context} ===`);
@@ -179,8 +350,12 @@ router.post('/turn_response', async (req, res) => {
     console.log('Received messages:', messages);
     console.log('Received tools:', tools);
 
+    // Add OpenAI native web search tool for parts pricing and availability
+    const webSearchTool = { type: 'web_search' };
+    const allTools = [...(tools || []), webSearchTool];
+
     // FINAL FIX: Apply proper tool formatting
-    const formattedTools = formatToolsForOpenAI(tools || []);
+    const formattedTools = formatToolsForOpenAI(allTools);
     
     // Debug the formatting
     debugToolsFormat(formattedTools, 'AFTER FORMATTING');
@@ -263,8 +438,9 @@ router.post('/turn_response', async (req, res) => {
       });
 
     } else {
-      // Handle regular JSON response
-      res.json(response);
+      // Handle regular JSON response - Parse and enhance web search results
+      const enhancedResponse = parseWebSearchResponse(response);
+      res.json(enhancedResponse);
     }
 
   } catch (error) {

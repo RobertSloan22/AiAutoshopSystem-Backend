@@ -15,8 +15,6 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { specs } from './swagger.js';
 import lmStudioRoutes from './routes/lmStudio.routes.js';
 import licensePlateRoutes from './routes/licensePlate.routes.js';
-import blenderRoutes from './routes/blenderRoutes.js';
-import { initializeBlender } from './blender.js';
 import authRoutes from "./routes/auth.routes.js";
 import researchRoutes from './routes/research.routes.js';
 import researchServiceRoutes from './routes/research.service.simple.js';
@@ -79,7 +77,7 @@ import dynamicToolsRoutes from './routes/dynamicTools.routes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = process.env.PORT || 5000; // Using 5002 to avoid conflicts
+const PORT = process.env.PORT || 5005;
 
 // Create Express app and HTTP server
 const app = express();
@@ -87,7 +85,7 @@ const server = http.createServer(app);
 
 // Connect to MongoDB first
 console.log('Connecting to MongoDB...');
-mongoose.connect(process.env.MONGO_DB_URI)
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((error) => {
     console.error('MongoDB connection error:', error);
@@ -229,8 +227,6 @@ app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
 
-// Initialize Blender functionality
-initializeBlender(app);
 
 // Proxy middleware setup
 // Proxy requests to Eliza system
@@ -962,6 +958,9 @@ import { RealtimeRelay } from './services/RealtimeRelay.js';
 // Import child_process to start agent service
 import { spawn } from 'child_process';
 
+// Global reference to the agent service process
+let agentServiceProcess = null;
+
 // Start the server
 server.listen(PORT, async () => {
   console.log(`Server Running on port ${PORT}`);
@@ -1037,10 +1036,14 @@ server.listen(PORT, async () => {
 
   // Start the separate agent service server
   console.log('🚀 Starting Agent Research Service...');
-  const agentServiceProcess = spawn('npm', ['start'], {
+  agentServiceProcess = spawn('npm', ['start'], {
     cwd: path.join(__dirname, 'agent-service'),
     stdio: 'inherit',
-    shell: true
+    shell: true,
+    env: {
+      ...process.env,
+      PORT: '3003' // Force the agent service to use port 3003
+    }
   });
 
   agentServiceProcess.on('error', (error) => {
@@ -1049,6 +1052,7 @@ server.listen(PORT, async () => {
 
   agentServiceProcess.on('exit', (code) => {
     console.warn(`⚠️ Agent Research Service exited with code ${code}`);
+    agentServiceProcess = null;
   });
 
   console.log('✅ Agent Research Service started on port 3003');
@@ -1070,13 +1074,47 @@ server.listen(PORT, async () => {
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, cleaning up services...');
+  
+  // Cleanup OBD2 services
   obd2RealtimeService.shutdown();
+  
+  // Cleanup agent service
+  if (agentServiceProcess && !agentServiceProcess.killed) {
+    console.log('Shutting down agent service...');
+    agentServiceProcess.kill('SIGTERM');
+    
+    // Force kill after 5 seconds if not closed gracefully
+    setTimeout(() => {
+      if (agentServiceProcess && !agentServiceProcess.killed) {
+        console.log('Force killing agent service...');
+        agentServiceProcess.kill('SIGKILL');
+      }
+    }, 5000);
+  }
+  
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   console.log('SIGINT received, cleaning up services...');
+  
+  // Cleanup OBD2 services
   obd2RealtimeService.shutdown();
+  
+  // Cleanup agent service
+  if (agentServiceProcess && !agentServiceProcess.killed) {
+    console.log('Shutting down agent service...');
+    agentServiceProcess.kill('SIGTERM');
+    
+    // Force kill after 5 seconds if not closed gracefully
+    setTimeout(() => {
+      if (agentServiceProcess && !agentServiceProcess.killed) {
+        console.log('Force killing agent service...');
+        agentServiceProcess.kill('SIGKILL');
+      }
+    }, 5000);
+  }
+  
   process.exit(0);
 });
 

@@ -21,16 +21,21 @@ RUN apk add --no-cache \
     freetype \
     harfbuzz \
     ca-certificates \
-    ttf-freefont
+    ttf-freefont \
+    mongodb-tools \
+    curl \
+    wget
 
-# Set environment variables for Puppeteer
+# Set environment variables for Puppeteer and MongoDB
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    NODE_ENV=production \
+    PORT=5005
 
 # Create app directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better caching
 COPY package*.json ./
 
 # Install Node.js dependencies with retry logic and increased timeouts
@@ -47,11 +52,12 @@ RUN pip3 install --no-cache-dir -r requirements.txt --break-system-packages || t
 # Copy application source
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p uploads logs temp
+# Create necessary directories with proper permissions
+RUN mkdir -p uploads logs temp && \
+    chmod 755 uploads logs temp
 
 # Expose the port the app runs on
-EXPOSE 3001
+EXPOSE 5005
 
 # Use non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
@@ -60,9 +66,44 @@ RUN addgroup -g 1001 -S nodejs && \
 
 USER nodejs
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3001/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); })"
+# Enhanced health check with MongoDB connectivity test
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3 \
+    CMD node -e "\
+    const http = require('http'); \
+    const { MongoClient } = require('mongodb'); \
+    \
+    const checkHealth = async () => { \
+      try { \
+        // Check HTTP server \
+        const httpPromise = new Promise((resolve, reject) => { \
+          const req = http.get('http://localhost:5005/health', (res) => { \
+            resolve(res.statusCode === 200); \
+          }); \
+          req.on('error', reject); \
+          req.setTimeout(5000, () => reject(new Error('HTTP timeout'))); \
+        }); \
+        \
+        // Check MongoDB connection \
+        const mongoPromise = new Promise(async (resolve, reject) => { \
+          try { \
+            const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://admin:password123@mongodb:27017/autoshop?authSource=admin'); \
+            await client.connect(); \
+            await client.db().admin().ping(); \
+            await client.close(); \
+            resolve(true); \
+          } catch (error) { \
+            reject(error); \
+          } \
+        }); \
+        \
+        const [httpOk, mongoOk] = await Promise.all([httpPromise, mongoPromise]); \
+        process.exit(httpOk && mongoOk ? 0 : 1); \
+      } catch (error) { \
+        console.error('Health check failed:', error.message); \
+        process.exit(1); \
+      } \
+    }; \
+    checkHealth();"
 
 # Start the application
 CMD ["node", "server.js"]
