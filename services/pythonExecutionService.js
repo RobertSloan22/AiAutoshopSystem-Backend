@@ -801,7 +801,9 @@ if 'rpm' in df.columns and df['rpm'].notna().sum() > 0:
         'avg': float(df['rpm'].mean()),
         'max': float(df['rpm'].max()),
         'min': float(df['rpm'].min()),
-        'std': float(df['rpm'].std())
+        'std': float(df['rpm'].std()),
+        'median': float(df['rpm'].median()),
+        'p95': float(df['rpm'].quantile(0.95))
     }
     analysis_results['metrics']['rpm'] = rpm_stats
     print(f"RPM - Avg: {rpm_stats['avg']:.0f}, Max: {rpm_stats['max']:.0f}, Range: {rpm_stats['max'] - rpm_stats['min']:.0f}")
@@ -810,7 +812,9 @@ if 'speed' in df.columns and df['speed'].notna().sum() > 0:
     speed_stats = {
         'avg': float(df['speed'].mean()),
         'max': float(df['speed'].max()),
-        'min': float(df['speed'].min())
+        'min': float(df['speed'].min()),
+        'median': float(df['speed'].median()),
+        'p95': float(df['speed'].quantile(0.95))
     }
     analysis_results['metrics']['speed'] = speed_stats
     print(f"Speed - Avg: {speed_stats['avg']:.1f} km/h, Max: {speed_stats['max']:.1f} km/h")
@@ -818,7 +822,9 @@ if 'speed' in df.columns and df['speed'].notna().sum() > 0:
 if 'engineLoad' in df.columns and df['engineLoad'].notna().sum() > 0:
     load_stats = {
         'avg': float(df['engineLoad'].mean()),
-        'max': float(df['engineLoad'].max())
+        'max': float(df['engineLoad'].max()),
+        'median': float(df['engineLoad'].median()),
+        'p95': float(df['engineLoad'].quantile(0.95))
     }
     analysis_results['metrics']['engineLoad'] = load_stats
     print(f"Engine Load - Avg: {load_stats['avg']:.1f}%, Max: {load_stats['max']:.1f}%")
@@ -838,41 +844,216 @@ if 'engineLoad' in analysis_results['metrics']:
         analysis_results['recommendations'].append("Consider lighter acceleration for better efficiency")
 
 ${generatePlots ? `
-# Generate performance plots
+# Generate professional performance plots
 if len(df) > 1:
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle('Performance Analysis Dashboard', fontsize=16, fontweight='bold')
+    # Set professional styling
+    plt.style.use('default')
+    sns.set_palette("husl")
     
-    # RPM over time
+    # Create high-quality figure
+    fig = plt.figure(figsize=(16, 12), dpi=300, facecolor='white')
+    fig.patch.set_facecolor('white')
+    
+    # Define color scheme
+    primary_color = '#2E86AB'
+    secondary_color = '#A23B72'
+    accent_color = '#F18F01'
+    warning_color = '#C73E1D'
+    
+    # Create grid layout
+    gs = fig.add_gridspec(3, 3, height_ratios=[1, 1, 0.8], hspace=0.3, wspace=0.3)
+    
+    # Main title with professional styling
+    fig.suptitle('Vehicle Performance Analysis Dashboard', 
+                fontsize=20, fontweight='bold', y=0.95, color='#2c3e50')
+    
+    # RPM Analysis (Top Left)
     if 'rpm' in df.columns and df['rpm'].notna().sum() > 0:
-        axes[0,0].plot(df['timestamp'], df['rpm'], linewidth=1, alpha=0.7)
-        axes[0,0].set_title('Engine RPM Over Time')
-        axes[0,0].set_ylabel('RPM')
-        axes[0,0].grid(True, alpha=0.3)
+        ax1 = fig.add_subplot(gs[0, 0])
+        rpm_data = df['rpm'].dropna()
+        
+        # Time series with moving average
+        ax1.plot(df['timestamp'], df['rpm'], color=primary_color, linewidth=1.5, alpha=0.7, label='RPM')
+        if len(rpm_data) > 20:
+            rpm_ma = rpm_data.rolling(window=20, center=True).mean()
+            ax1.plot(df['timestamp'][rpm_data.index], rpm_ma, 
+                    color=warning_color, linewidth=3, alpha=0.9, label='Trend (20pt MA)')
+        
+        # Add reference lines
+        if 'avg' in analysis_results['metrics']['rpm']:
+            avg_rpm = analysis_results['metrics']['rpm']['avg']
+            ax1.axhline(y=avg_rpm, color='gray', linestyle='--', alpha=0.6, label=f'Average ({avg_rpm:.0f})')
+        
+        ax1.set_title('Engine RPM Over Time', fontsize=14, fontweight='bold', pad=15)
+        ax1.set_ylabel('RPM', fontsize=12)
+        ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax1.legend(fontsize=10)
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
     
-    # Speed over time
+    # Speed Analysis (Top Middle)
     if 'speed' in df.columns and df['speed'].notna().sum() > 0:
-        axes[0,1].plot(df['timestamp'], df['speed'], linewidth=1, alpha=0.7, color='orange')
-        axes[0,1].set_title('Vehicle Speed Over Time')
-        axes[0,1].set_ylabel('Speed (km/h)')
-        axes[0,1].grid(True, alpha=0.3)
+        ax2 = fig.add_subplot(gs[0, 1])
+        speed_data = df['speed'].dropna()
+        
+        ax2.plot(df['timestamp'], df['speed'], color=secondary_color, linewidth=1.5, alpha=0.7, label='Speed')
+        if len(speed_data) > 20:
+            speed_ma = speed_data.rolling(window=20, center=True).mean()
+            ax2.plot(df['timestamp'][speed_data.index], speed_ma, 
+                    color=accent_color, linewidth=3, alpha=0.9, label='Trend (20pt MA)')
+        
+        # Speed zones
+        ax2.axhline(y=50, color='green', linestyle=':', alpha=0.6, label='City Speed')
+        ax2.axhline(y=100, color='orange', linestyle=':', alpha=0.6, label='Highway Speed')
+        
+        ax2.set_title('Vehicle Speed Over Time', fontsize=14, fontweight='bold', pad=15)
+        ax2.set_ylabel('Speed (km/h)', fontsize=12)
+        ax2.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax2.legend(fontsize=10)
+        ax2.spines['top'].set_visible(False)
+        ax2.spines['right'].set_visible(False)
     
-    # Engine Load over time
+    # Engine Load Analysis (Top Right)
     if 'engineLoad' in df.columns and df['engineLoad'].notna().sum() > 0:
-        axes[1,0].plot(df['timestamp'], df['engineLoad'], linewidth=1, alpha=0.7, color='red')
-        axes[1,0].set_title('Engine Load Over Time')
-        axes[1,0].set_ylabel('Load (%)')
-        axes[1,0].grid(True, alpha=0.3)
+        ax3 = fig.add_subplot(gs[0, 2])
+        load_data = df['engineLoad'].dropna()
+        
+        ax3.plot(df['timestamp'], df['engineLoad'], color=accent_color, linewidth=1.5, alpha=0.7)
+        ax3.fill_between(df['timestamp'], df['engineLoad'], alpha=0.2, color=accent_color)
+        
+        # Load zones
+        ax3.axhline(y=25, color='green', linestyle='--', alpha=0.7, label='Light Load')
+        ax3.axhline(y=50, color='orange', linestyle='--', alpha=0.7, label='Moderate Load')
+        ax3.axhline(y=75, color='red', linestyle='--', alpha=0.7, label='Heavy Load')
+        
+        ax3.set_title('Engine Load Over Time', fontsize=14, fontweight='bold', pad=15)
+        ax3.set_ylabel('Load (%)', fontsize=12)
+        ax3.set_ylim(0, 100)
+        ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax3.legend(fontsize=10)
+        ax3.spines['top'].set_visible(False)
+        ax3.spines['right'].set_visible(False)
     
-    # RPM vs Speed scatter
+    # RPM vs Speed Correlation (Middle Left)
     if 'rpm' in df.columns and 'speed' in df.columns:
+        ax4 = fig.add_subplot(gs[1, 0])
         valid_data = df.dropna(subset=['rpm', 'speed'])
-        if len(valid_data) > 0:
-            axes[1,1].scatter(valid_data['speed'], valid_data['rpm'], alpha=0.5)
-            axes[1,1].set_title('RPM vs Speed Relationship')
-            axes[1,1].set_xlabel('Speed (km/h)')
-            axes[1,1].set_ylabel('RPM')
-            axes[1,1].grid(True, alpha=0.3)
+        if len(valid_data) > 10:
+            # Scatter plot with density
+            scatter = ax4.scatter(valid_data['speed'], valid_data['rpm'], 
+                               c=valid_data.index, cmap='viridis', alpha=0.6, s=30)
+            
+            # Trend line
+            if len(valid_data) > 3:
+                z = np.polyfit(valid_data['speed'], valid_data['rpm'], 1)
+                p = np.poly1d(z)
+                ax4.plot(valid_data['speed'], p(valid_data['speed']), 
+                        color=warning_color, linestyle='--', linewidth=2, alpha=0.8)
+            
+            ax4.set_title('RPM vs Speed Correlation', fontsize=14, fontweight='bold', pad=15)
+            ax4.set_xlabel('Speed (km/h)', fontsize=12)
+            ax4.set_ylabel('RPM', fontsize=12)
+            ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+            
+            # Add correlation coefficient
+            corr = valid_data['rpm'].corr(valid_data['speed'])
+            ax4.text(0.05, 0.95, f'r = {corr:.3f}', transform=ax4.transAxes, 
+                    fontsize=11, bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+        
+        ax4.spines['top'].set_visible(False)
+        ax4.spines['right'].set_visible(False)
+    
+    # Performance Distribution (Middle Center)
+    if 'rpm' in df.columns or 'speed' in df.columns or 'engineLoad' in df.columns:
+        ax5 = fig.add_subplot(gs[1, 1])
+        
+        distributions = []
+        labels = []
+        colors = []
+        
+        if 'rpm' in df.columns and df['rpm'].notna().sum() > 0:
+            distributions.append(df['rpm'].dropna() / 1000)  # Scale RPM for comparison
+            labels.append('RPM (×1000)')
+            colors.append(primary_color)
+        
+        if 'speed' in df.columns and df['speed'].notna().sum() > 0:
+            distributions.append(df['speed'].dropna())
+            labels.append('Speed (km/h)')
+            colors.append(secondary_color)
+        
+        if 'engineLoad' in df.columns and df['engineLoad'].notna().sum() > 0:
+            distributions.append(df['engineLoad'].dropna())
+            labels.append('Engine Load (%)')
+            colors.append(accent_color)
+        
+        if distributions:
+            box_plot = ax5.boxplot(distributions, labels=labels, patch_artist=True, 
+                                  boxprops=dict(alpha=0.7), medianprops=dict(color='black', linewidth=2))
+            
+            for patch, color in zip(box_plot['boxes'], colors):
+                patch.set_facecolor(color)
+            
+            ax5.set_title('Performance Metrics Distribution', fontsize=14, fontweight='bold', pad=15)
+            ax5.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+            ax5.spines['top'].set_visible(False)
+            ax5.spines['right'].set_visible(False)
+    
+    # Performance Summary (Middle Right)
+    ax6 = fig.add_subplot(gs[1, 2])
+    ax6.axis('off')
+    
+    # Create summary text
+    summary_text = "Performance Summary\\n\\n"
+    
+    if 'rpm' in analysis_results['metrics']:
+        rpm_stats = analysis_results['metrics']['rpm']
+        summary_text += f"RPM Statistics:\\n"
+        summary_text += f"  Average: {rpm_stats['avg']:.0f}\\n"
+        summary_text += f"  Range: {rpm_stats['min']:.0f} - {rpm_stats['max']:.0f}\\n"
+        summary_text += f"  95th %ile: {rpm_stats['p95']:.0f}\\n\\n"
+    
+    if 'speed' in analysis_results['metrics']:
+        speed_stats = analysis_results['metrics']['speed']
+        summary_text += f"Speed Statistics:\\n"
+        summary_text += f"  Average: {speed_stats['avg']:.1f} km/h\\n"
+        summary_text += f"  Range: {speed_stats['min']:.0f} - {speed_stats['max']:.0f}\\n"
+        summary_text += f"  95th %ile: {speed_stats['p95']:.1f}\\n\\n"
+    
+    if 'engineLoad' in analysis_results['metrics']:
+        load_stats = analysis_results['metrics']['engineLoad']
+        summary_text += f"Engine Load Statistics:\\n"
+        summary_text += f"  Average: {load_stats['avg']:.1f}%\\n"
+        summary_text += f"  Maximum: {load_stats['max']:.1f}%\\n"
+        summary_text += f"  95th %ile: {load_stats['p95']:.1f}%\\n"
+    
+    ax6.text(0.1, 0.9, summary_text, transform=ax6.transAxes, fontsize=11, 
+            verticalalignment='top', fontfamily='monospace',
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#f8f9fa", edgecolor="#dee2e6"))
+    
+    # Insights and Recommendations (Bottom Span)
+    ax7 = fig.add_subplot(gs[2, :])
+    ax7.axis('off')
+    
+    insights_text = ""
+    if analysis_results['insights']:
+        insights_text += "Key Insights:\\n"
+        for i, insight in enumerate(analysis_results['insights'], 1):
+            insights_text += f"  {i}. {insight}\\n"
+    
+    if analysis_results['recommendations']:
+        insights_text += "\\nRecommendations:\\n"
+        for i, rec in enumerate(analysis_results['recommendations'], 1):
+            insights_text += f"  {i}. {rec}\\n"
+    
+    if insights_text:
+        ax7.text(0.05, 0.9, insights_text, transform=ax7.transAxes, fontsize=12, 
+                verticalalignment='top', color='#2c3e50',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="#e8f4f8", edgecolor="#2E86AB", alpha=0.8))
+    
+    # Add timestamp
+    timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    fig.text(0.99, 0.01, f"Generated: {timestamp}", ha='right', va='bottom', 
+            fontsize=9, alpha=0.7, style='italic')
     
     plt.tight_layout()
     plt.show()
@@ -898,57 +1079,125 @@ analysis_results = {
     'issues': [],
     'warnings': [],
     'recommendations': [],
-    'sensor_health': {}
+    'sensor_health': {},
+    'health_score': 0
 }
 
 # Engine temperature analysis
 if 'engineTemp' in df.columns and df['engineTemp'].notna().sum() > 0:
-    temp_avg = float(df['engineTemp'].mean())
-    temp_max = float(df['engineTemp'].max())
+    temp_data = df['engineTemp'].dropna()
+    temp_avg = float(temp_data.mean())
+    temp_max = float(temp_data.max())
+    temp_min = float(temp_data.min())
+    temp_std = float(temp_data.std())
     
     analysis_results['sensor_health']['engine_temperature'] = {
         'avg': temp_avg,
         'max': temp_max,
-        'status': 'normal'
+        'min': temp_min,
+        'std': temp_std,
+        'status': 'normal',
+        'score': 100
     }
     
-    if temp_max > 105:
+    if temp_max > 110:
+        analysis_results['issues'].append("Critical engine overheating detected (>110°C)")
+        analysis_results['sensor_health']['engine_temperature']['status'] = 'critical'
+        analysis_results['sensor_health']['engine_temperature']['score'] = 20
+        analysis_results['recommendations'].append("Immediate cooling system inspection required")
+    elif temp_max > 105:
         analysis_results['issues'].append("Engine overheating detected (>105°C)")
         analysis_results['sensor_health']['engine_temperature']['status'] = 'critical'
+        analysis_results['sensor_health']['engine_temperature']['score'] = 40
+        analysis_results['recommendations'].append("Check cooling system, thermostat, and coolant levels")
     elif temp_avg > 95:
         analysis_results['warnings'].append("Engine running hot (avg >95°C)")
         analysis_results['sensor_health']['engine_temperature']['status'] = 'warning'
+        analysis_results['sensor_health']['engine_temperature']['score'] = 70
 
 # Oxygen sensor analysis
 if 'o2B1S1Voltage' in df.columns and df['o2B1S1Voltage'].notna().sum() > 0:
     o2_data = df['o2B1S1Voltage'].dropna()
     o2_avg = float(o2_data.mean())
     o2_std = float(o2_data.std())
+    o2_min = float(o2_data.min())
+    o2_max = float(o2_data.max())
     
     analysis_results['sensor_health']['oxygen_sensor'] = {
         'avg_voltage': o2_avg,
         'variability': o2_std,
-        'status': 'normal'
+        'min_voltage': o2_min,
+        'max_voltage': o2_max,
+        'status': 'normal',
+        'score': 100
     }
     
-    if o2_avg < 0.2 or o2_avg > 0.8:
-        analysis_results['warnings'].append(f"O2 sensor voltage unusual ({o2_avg:.2f}V)")
+    # O2 sensor should switch between rich (0.8V) and lean (0.2V)
+    if o2_std < 0.1:
+        analysis_results['warnings'].append(f"O2 sensor may be sluggish (low variability: {o2_std:.3f}V)")
         analysis_results['sensor_health']['oxygen_sensor']['status'] = 'warning'
+        analysis_results['sensor_health']['oxygen_sensor']['score'] = 60
+    elif o2_avg < 0.1 or o2_avg > 0.9:
+        analysis_results['warnings'].append(f"O2 sensor voltage outside normal range ({o2_avg:.2f}V)")
+        analysis_results['sensor_health']['oxygen_sensor']['status'] = 'warning'
+        analysis_results['sensor_health']['oxygen_sensor']['score'] = 70
 
 # Fuel trim analysis
 if 'fuelTrimShortB1' in df.columns and df['fuelTrimShortB1'].notna().sum() > 0:
     ft_data = df['fuelTrimShortB1'].dropna()
     ft_avg = float(ft_data.mean())
+    ft_std = float(ft_data.std())
+    ft_max = float(abs(ft_data).max())
     
     analysis_results['sensor_health']['fuel_trim'] = {
         'short_term_avg': ft_avg,
-        'status': 'normal'
+        'variability': ft_std,
+        'max_absolute': ft_max,
+        'status': 'normal',
+        'score': 100
     }
     
-    if abs(ft_avg) > 10:
-        analysis_results['warnings'].append(f"High fuel trim detected ({ft_avg:.1f}%)")
+    if ft_max > 25:
+        analysis_results['issues'].append(f"Severe fuel trim deviation detected ({ft_max:.1f}%)")
+        analysis_results['sensor_health']['fuel_trim']['status'] = 'critical'
+        analysis_results['sensor_health']['fuel_trim']['score'] = 30
+        analysis_results['recommendations'].append("Major fuel system or air intake issue - professional diagnosis required")
+    elif ft_max > 15:
+        analysis_results['warnings'].append(f"High fuel trim detected ({ft_max:.1f}%)")
         analysis_results['sensor_health']['fuel_trim']['status'] = 'warning'
-        analysis_results['recommendations'].append("Check for vacuum leaks or fuel system issues")
+        analysis_results['sensor_health']['fuel_trim']['score'] = 60
+        analysis_results['recommendations'].append("Check for vacuum leaks, dirty air filter, or fuel injector issues")
+    elif ft_max > 10:
+        analysis_results['warnings'].append(f"Moderate fuel trim detected ({ft_avg:.1f}%)")
+        analysis_results['sensor_health']['fuel_trim']['status'] = 'warning'
+        analysis_results['sensor_health']['fuel_trim']['score'] = 80
+
+# Battery voltage analysis
+if 'batteryVoltage' in df.columns and df['batteryVoltage'].notna().sum() > 0:
+    batt_data = df['batteryVoltage'].dropna()
+    batt_avg = float(batt_data.mean())
+    batt_min = float(batt_data.min())
+    
+    analysis_results['sensor_health']['battery'] = {
+        'avg_voltage': batt_avg,
+        'min_voltage': batt_min,
+        'status': 'normal',
+        'score': 100
+    }
+    
+    if batt_min < 11.5:
+        analysis_results['issues'].append(f"Critical battery voltage drop ({batt_min:.1f}V)")
+        analysis_results['sensor_health']['battery']['status'] = 'critical'
+        analysis_results['sensor_health']['battery']['score'] = 20
+    elif batt_avg < 12.0:
+        analysis_results['warnings'].append(f"Low battery voltage detected ({batt_avg:.1f}V)")
+        analysis_results['sensor_health']['battery']['status'] = 'warning'
+        analysis_results['sensor_health']['battery']['score'] = 60
+
+# Calculate overall health score
+sensor_scores = [sensor.get('score', 100) for sensor in analysis_results['sensor_health'].values()]
+if sensor_scores:
+    analysis_results['health_score'] = sum(sensor_scores) / len(sensor_scores)
 
 # Overall health assessment
 issue_count = len(analysis_results['issues'])
@@ -964,53 +1213,252 @@ else:
     analysis_results['health_status'] = 'excellent'
 
 print(f"Overall Health Status: {analysis_results['health_status'].upper()}")
+print(f"Health Score: {analysis_results['health_score']:.1f}/100")
 print(f"Issues: {issue_count}, Warnings: {warning_count}")
 
 ${generatePlots ? `
-# Generate diagnostic plots
+# Generate professional diagnostic plots
 if len(df) > 1:
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle('Diagnostic Analysis Dashboard', fontsize=16, fontweight='bold')
+    # Set professional styling
+    plt.style.use('default')
     
-    # Engine temperature
+    # Create high-quality figure
+    fig = plt.figure(figsize=(18, 14), dpi=300, facecolor='white')
+    fig.patch.set_facecolor('white')
+    
+    # Professional color scheme
+    temp_color = '#E74C3C'      # Red for temperature
+    o2_color = '#3498DB'        # Blue for O2
+    fuel_color = '#9B59B6'      # Purple for fuel
+    battery_color = '#F39C12'   # Orange for battery
+    normal_color = '#27AE60'    # Green for normal ranges
+    warning_color = '#F39C12'   # Orange for warnings
+    critical_color = '#E74C3C'  # Red for critical
+    
+    # Create grid layout
+    gs = fig.add_gridspec(3, 3, height_ratios=[1, 1, 0.6], hspace=0.35, wspace=0.3)
+    
+    # Main title
+    status_color = {'excellent': '#27AE60', 'good': '#2ECC71', 'fair': '#F39C12', 'poor': '#E74C3C'}.get(
+        analysis_results['health_status'], '#2C3E50')
+    fig.suptitle(f'Diagnostic Analysis Dashboard - Status: {analysis_results["health_status"].upper()}', 
+                fontsize=20, fontweight='bold', y=0.95, color=status_color)
+    
+    # Engine Temperature (Top Left)
     if 'engineTemp' in df.columns and df['engineTemp'].notna().sum() > 0:
-        axes[0,0].plot(df['timestamp'], df['engineTemp'], linewidth=1, color='red')
-        axes[0,0].axhline(y=90, color='orange', linestyle='--', label='Warning (90°C)')
-        axes[0,0].axhline(y=105, color='red', linestyle='--', label='Critical (105°C)')
-        axes[0,0].set_title('Engine Temperature')
-        axes[0,0].set_ylabel('Temperature (°C)')
-        axes[0,0].legend()
-        axes[0,0].grid(True, alpha=0.3)
+        ax1 = fig.add_subplot(gs[0, 0])
+        temp_data = df['engineTemp'].dropna()
+        
+        # Plot temperature with gradient fill
+        ax1.plot(df['timestamp'], df['engineTemp'], color=temp_color, linewidth=2, alpha=0.8)
+        ax1.fill_between(df['timestamp'], df['engineTemp'], alpha=0.2, color=temp_color)
+        
+        # Add critical thresholds
+        ax1.axhline(y=85, color=normal_color, linestyle='-', alpha=0.7, linewidth=2, label='Normal (85°C)')
+        ax1.axhline(y=95, color=warning_color, linestyle='--', alpha=0.8, linewidth=2, label='Warning (95°C)')
+        ax1.axhline(y=105, color=critical_color, linestyle='--', alpha=0.8, linewidth=2, label='Critical (105°C)')
+        
+        # Highlight critical zones
+        ax1.axhspan(105, ax1.get_ylim()[1], alpha=0.1, color=critical_color)
+        ax1.axhspan(95, 105, alpha=0.1, color=warning_color)
+        
+        ax1.set_title('Engine Temperature Analysis', fontsize=14, fontweight='bold', pad=15)
+        ax1.set_ylabel('Temperature (°C)', fontsize=12)
+        ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax1.legend(fontsize=10, loc='upper left')
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+        
+        # Add statistics box
+        temp_stats = analysis_results['sensor_health'].get('engine_temperature', {})
+        stats_text = f"Avg: {temp_stats.get('avg', 0):.1f}°C\\nMax: {temp_stats.get('max', 0):.1f}°C\\nScore: {temp_stats.get('score', 100):.0f}/100"
+        ax1.text(0.02, 0.98, stats_text, transform=ax1.transAxes, fontsize=10, 
+                verticalalignment='top', bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
     
-    # O2 sensor voltage
+    # O2 Sensor Voltage (Top Middle)
     if 'o2B1S1Voltage' in df.columns and df['o2B1S1Voltage'].notna().sum() > 0:
-        axes[0,1].plot(df['timestamp'], df['o2B1S1Voltage'], linewidth=1, color='blue')
-        axes[0,1].axhline(y=0.45, color='green', linestyle='--', label='Ideal (0.45V)')
-        axes[0,1].set_title('O2 Sensor Voltage (Bank 1 Sensor 1)')
-        axes[0,1].set_ylabel('Voltage (V)')
-        axes[0,1].legend()
-        axes[0,1].grid(True, alpha=0.3)
+        ax2 = fig.add_subplot(gs[0, 1])
+        
+        ax2.plot(df['timestamp'], df['o2B1S1Voltage'], color=o2_color, linewidth=1.5, alpha=0.8)
+        
+        # O2 sensor reference ranges
+        ax2.axhline(y=0.45, color=normal_color, linestyle='-', alpha=0.8, linewidth=2, label='Stoichiometric (0.45V)')
+        ax2.axhspan(0.2, 0.8, alpha=0.1, color=normal_color, label='Normal Range')
+        ax2.axhline(y=0.2, color='gray', linestyle=':', alpha=0.6, label='Lean (0.2V)')
+        ax2.axhline(y=0.8, color='gray', linestyle=':', alpha=0.6, label='Rich (0.8V)')
+        
+        ax2.set_title('O2 Sensor Voltage (Bank 1, Sensor 1)', fontsize=14, fontweight='bold', pad=15)
+        ax2.set_ylabel('Voltage (V)', fontsize=12)
+        ax2.set_ylim(0, 1.0)
+        ax2.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax2.legend(fontsize=9, loc='upper right')
+        ax2.spines['top'].set_visible(False)
+        ax2.spines['right'].set_visible(False)
+        
+        # Add statistics
+        o2_stats = analysis_results['sensor_health'].get('oxygen_sensor', {})
+        stats_text = f"Avg: {o2_stats.get('avg_voltage', 0):.3f}V\\nStd: {o2_stats.get('variability', 0):.3f}V\\nScore: {o2_stats.get('score', 100):.0f}/100"
+        ax2.text(0.02, 0.98, stats_text, transform=ax2.transAxes, fontsize=10, 
+                verticalalignment='top', bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
     
-    # Fuel trim
+    # Fuel Trim Analysis (Top Right)
     if 'fuelTrimShortB1' in df.columns and df['fuelTrimShortB1'].notna().sum() > 0:
-        axes[1,0].plot(df['timestamp'], df['fuelTrimShortB1'], linewidth=1, color='purple')
-        axes[1,0].axhline(y=0, color='green', linestyle='-', label='Ideal (0%)')
-        axes[1,0].axhline(y=10, color='orange', linestyle='--', label='Warning (+10%)')
-        axes[1,0].axhline(y=-10, color='orange', linestyle='--', label='Warning (-10%)')
-        axes[1,0].set_title('Short Term Fuel Trim')
-        axes[1,0].set_ylabel('Fuel Trim (%)')
-        axes[1,0].legend()
-        axes[1,0].grid(True, alpha=0.3)
+        ax3 = fig.add_subplot(gs[0, 2])
+        
+        ax3.plot(df['timestamp'], df['fuelTrimShortB1'], color=fuel_color, linewidth=1.5, alpha=0.8)
+        ax3.axhline(y=0, color=normal_color, linestyle='-', alpha=0.8, linewidth=2, label='Ideal (0%)')
+        
+        # Fuel trim zones
+        ax3.axhspan(-5, 5, alpha=0.1, color=normal_color, label='Normal Range')
+        ax3.axhspan(-10, -5, alpha=0.1, color=warning_color)
+        ax3.axhspan(5, 10, alpha=0.1, color=warning_color)
+        ax3.axhspan(-25, -10, alpha=0.1, color=critical_color)
+        ax3.axhspan(10, 25, alpha=0.1, color=critical_color)
+        
+        ax3.axhline(y=10, color=warning_color, linestyle='--', alpha=0.7, label='Warning (±10%)')
+        ax3.axhline(y=-10, color=warning_color, linestyle='--', alpha=0.7)
+        ax3.axhline(y=25, color=critical_color, linestyle='--', alpha=0.7, label='Critical (±25%)')
+        ax3.axhline(y=-25, color=critical_color, linestyle='--', alpha=0.7)
+        
+        ax3.set_title('Short Term Fuel Trim (Bank 1)', fontsize=14, fontweight='bold', pad=15)
+        ax3.set_ylabel('Fuel Trim (%)', fontsize=12)
+        ax3.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax3.legend(fontsize=9, loc='upper right')
+        ax3.spines['top'].set_visible(False)
+        ax3.spines['right'].set_visible(False)
+        
+        # Add statistics
+        ft_stats = analysis_results['sensor_health'].get('fuel_trim', {})
+        stats_text = f"Avg: {ft_stats.get('short_term_avg', 0):.1f}%\\nMax: ±{ft_stats.get('max_absolute', 0):.1f}%\\nScore: {ft_stats.get('score', 100):.0f}/100"
+        ax3.text(0.02, 0.98, stats_text, transform=ax3.transAxes, fontsize=10, 
+                verticalalignment='top', bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
     
-    # Battery voltage
+    # Battery Voltage (Middle Left)
     if 'batteryVoltage' in df.columns and df['batteryVoltage'].notna().sum() > 0:
-        axes[1,1].plot(df['timestamp'], df['batteryVoltage'], linewidth=1, color='orange')
-        axes[1,1].axhline(y=12.6, color='green', linestyle='--', label='Good (12.6V)')
-        axes[1,1].axhline(y=12.0, color='orange', linestyle='--', label='Low (12.0V)')
-        axes[1,1].set_title('Battery Voltage')
-        axes[1,1].set_ylabel('Voltage (V)')
-        axes[1,1].legend()
-        axes[1,1].grid(True, alpha=0.3)
+        ax4 = fig.add_subplot(gs[1, 0])
+        
+        ax4.plot(df['timestamp'], df['batteryVoltage'], color=battery_color, linewidth=1.5, alpha=0.8)
+        ax4.fill_between(df['timestamp'], df['batteryVoltage'], alpha=0.2, color=battery_color)
+        
+        # Battery voltage thresholds
+        ax4.axhline(y=12.6, color=normal_color, linestyle='-', alpha=0.8, linewidth=2, label='Fully Charged (12.6V)')
+        ax4.axhline(y=12.0, color=warning_color, linestyle='--', alpha=0.7, label='Warning (12.0V)')
+        ax4.axhline(y=11.5, color=critical_color, linestyle='--', alpha=0.7, label='Critical (11.5V)')
+        
+        # Highlight zones
+        ax4.axhspan(ax4.get_ylim()[0], 11.5, alpha=0.1, color=critical_color)
+        ax4.axhspan(11.5, 12.0, alpha=0.1, color=warning_color)
+        
+        ax4.set_title('Battery Voltage Monitoring', fontsize=14, fontweight='bold', pad=15)
+        ax4.set_ylabel('Voltage (V)', fontsize=12)
+        ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax4.legend(fontsize=10, loc='lower right')
+        ax4.spines['top'].set_visible(False)
+        ax4.spines['right'].set_visible(False)
+        
+        # Add statistics
+        batt_stats = analysis_results['sensor_health'].get('battery', {})
+        stats_text = f"Avg: {batt_stats.get('avg_voltage', 0):.2f}V\\nMin: {batt_stats.get('min_voltage', 0):.2f}V\\nScore: {batt_stats.get('score', 100):.0f}/100"
+        ax4.text(0.02, 0.98, stats_text, transform=ax4.transAxes, fontsize=10, 
+                verticalalignment='top', bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    
+    # Health Score Gauge (Middle Center)
+    ax5 = fig.add_subplot(gs[1, 1])
+    
+    # Create circular gauge
+    health_score = analysis_results.get('health_score', 0)
+    
+    # Define score ranges and colors
+    if health_score >= 90:
+        score_color = '#27AE60'
+        score_label = 'Excellent'
+    elif health_score >= 75:
+        score_color = '#2ECC71'
+        score_label = 'Good'
+    elif health_score >= 50:
+        score_color = '#F39C12'
+        score_label = 'Fair'
+    else:
+        score_color = '#E74C3C'
+        score_label = 'Poor'
+    
+    # Create pie chart for health score
+    sizes = [health_score, 100 - health_score]
+    colors = [score_color, '#ECF0F1']
+    
+    wedges, texts = ax5.pie(sizes, colors=colors, startangle=90, counterclock=False,
+                           wedgeprops=dict(width=0.3, edgecolor='white', linewidth=2))
+    
+    # Add center text
+    ax5.text(0, 0, f'{health_score:.0f}\\n{score_label}', ha='center', va='center',
+            fontsize=16, fontweight='bold', color=score_color)
+    
+    ax5.set_title('Overall Health Score', fontsize=14, fontweight='bold', pad=15)
+    
+    # Sensor Status Summary (Middle Right)
+    ax6 = fig.add_subplot(gs[1, 2])
+    ax6.axis('off')
+    
+    # Create status summary
+    status_text = "Sensor Status Summary\\n\\n"
+    
+    for sensor, data in analysis_results['sensor_health'].items():
+        sensor_name = sensor.replace('_', ' ').title()
+        status = data.get('status', 'unknown')
+        score = data.get('score', 0)
+        
+        status_icon = {'excellent': '✓', 'normal': '✓', 'good': '!', 'warning': '⚠', 'critical': '✗', 'poor': '✗'}.get(status, '?')
+        status_color_map = {'excellent': '#27AE60', 'normal': '#27AE60', 'good': '#2ECC71', 'warning': '#F39C12', 'critical': '#E74C3C', 'poor': '#E74C3C'}
+        
+        status_text += f"{status_icon} {sensor_name}\\n"
+        status_text += f"   Score: {score:.0f}/100\\n"
+        status_text += f"   Status: {status.title()}\\n\\n"
+    
+    ax6.text(0.1, 0.9, status_text, transform=ax6.transAxes, fontsize=11, 
+            verticalalignment='top', fontfamily='monospace',
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#f8f9fa", edgecolor="#dee2e6"))
+    
+    # Issues and Recommendations (Bottom Span)
+    ax7 = fig.add_subplot(gs[2, :])
+    ax7.axis('off')
+    
+    info_text = ""
+    
+    if analysis_results['issues']:
+        info_text += "🔴 CRITICAL ISSUES:\\n"
+        for i, issue in enumerate(analysis_results['issues'], 1):
+            info_text += f"  {i}. {issue}\\n"
+        info_text += "\\n"
+    
+    if analysis_results['warnings']:
+        info_text += "🟡 WARNINGS:\\n"
+        for i, warning in enumerate(analysis_results['warnings'], 1):
+            info_text += f"  {i}. {warning}\\n"
+        info_text += "\\n"
+    
+    if analysis_results['recommendations']:
+        info_text += "💡 RECOMMENDATIONS:\\n"
+        for i, rec in enumerate(analysis_results['recommendations'], 1):
+            info_text += f"  {i}. {rec}\\n"
+    
+    if not info_text:
+        info_text = "✅ All systems are operating within normal parameters."
+    
+    # Color code the background based on health status
+    bg_color = {'excellent': '#e8f5e8', 'good': '#e8f5e8', 'fair': '#fff3cd', 'poor': '#f8d7da'}
+    border_color = {'excellent': '#27AE60', 'good': '#27AE60', 'fair': '#F39C12', 'poor': '#E74C3C'}
+    
+    ax7.text(0.05, 0.9, info_text, transform=ax7.transAxes, fontsize=11, 
+            verticalalignment='top', color='#2c3e50',
+            bbox=dict(boxstyle="round,pad=0.5", 
+                     facecolor=bg_color.get(analysis_results['health_status'], '#f8f9fa'),
+                     edgecolor=border_color.get(analysis_results['health_status'], '#dee2e6'), 
+                     alpha=0.9))
+    
+    # Add timestamp and metadata
+    timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    fig.text(0.99, 0.01, f"Generated: {timestamp}", ha='right', va='bottom', 
+            fontsize=9, alpha=0.7, style='italic')
     
     plt.tight_layout()
     plt.show()

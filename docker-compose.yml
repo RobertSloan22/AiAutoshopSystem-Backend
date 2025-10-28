@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     platform: linux/amd64  # Ensure compatibility with Mac M1/M2
-    container_name: ai-autoshop-backend
+    container_name: automotive-diagnostics-ai
     ports:
       - "5005:5005"     
       - "3001:3001"     

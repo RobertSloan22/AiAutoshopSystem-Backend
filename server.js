@@ -21,6 +21,7 @@ import researchServiceRoutes from './routes/research.service.simple.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
 import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
 import integratedResearchRoutes from './routes/integrated-research.routes.js';
+import deepResearchRoutes from './routes/deepResearch.routes.js';
 import researchResultRoutes from './routes/researchResult.routes.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
@@ -628,6 +629,8 @@ app.use("/api/researcho3/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
 // Integrated research bot - direct endpoint
 app.use("/api/integrated-research", integratedResearchRoutes);
+// Deep research service with OpenAI Agents SDK
+app.use("/api/deep-research", deepResearchRoutes);
 
 // Research progress tracking
 import researchProgressRoutes from './routes/researchProgress.routes.js';
@@ -849,6 +852,7 @@ app.get('/', (req, res) => {
           <h3>Available Proxy Routes:</h3>
           <ul>
             <li><span class="route">/api/*</span> - Main backend services</li>
+            <li><span class="route">/api/deep-research</span> - Deep Research with OpenAI Agents SDK</li>
             <li><span class="route">/eliza</span> - Eliza chat system</li>
             <li><span class="route">/ws</span> - WebSocket server</li>
             <li><span class="route">/research-ws</span> - Research WebSocket server</li>
