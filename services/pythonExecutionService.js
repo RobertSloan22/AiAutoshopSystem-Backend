@@ -211,11 +211,25 @@ class PythonExecutionService {
       await fs.writeFile(tempFile, wrappedCode);
 
       return new Promise((resolve, reject) => {
-        // Use the Python from virtual environment
+        // Determine Python path based on environment
         const isWindows = process.platform === 'win32';
-        const pythonPath = isWindows 
-          ? path.join(process.cwd(), 'venv', 'Scripts', 'python.exe')
-          : path.join(process.cwd(), 'venv', 'bin', 'python');
+        const isDocker = process.env.NODE_ENV === 'production' || process.env.DOCKER_ENV === 'true';
+        
+        let pythonPath;
+        
+        if (isDocker) {
+          // In Docker container, use global Python3
+          pythonPath = 'python3';
+        } else {
+          // In development, use virtual environment
+          pythonPath = isWindows 
+            ? path.join(process.cwd(), 'venv', 'Scripts', 'python.exe')
+            : path.join(process.cwd(), 'venv', 'bin', 'python');
+        }
+        
+        console.log(`🐍 PYTHON EXEC: Using Python path: ${pythonPath}`);
+        console.log(`🐍 PYTHON EXEC: Environment: ${isDocker ? 'Docker' : 'Development'}`);
+        
         const pythonProcess = spawn(pythonPath, [tempFile], {
           env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
         });

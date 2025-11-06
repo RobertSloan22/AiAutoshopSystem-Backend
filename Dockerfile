@@ -30,7 +30,8 @@ RUN apk add --no-cache \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
     NODE_ENV=production \
-    PORT=5005
+    PORT=5005 \
+    DOCKER_ENV=true
 
 # Create app directory
 WORKDIR /app

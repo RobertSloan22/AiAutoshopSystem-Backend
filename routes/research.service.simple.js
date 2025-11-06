@@ -9,6 +9,10 @@ import { z } from 'zod';
 import PartsRetriever from '../services/parts.service.js';
 import crypto from 'crypto';
 import OpenAI from 'openai';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const router = express.Router();
 const openaiClient = new OpenAI({
