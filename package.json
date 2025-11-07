@@ -70,6 +70,7 @@
     "pdfjs-dist": "^4.8.69",
     "prop-types": "^15.8.1",
     "puppeteer": "^21.9.0",
+    "pydantic": "^0.0.1-security",
     "react-beautiful-dnd": "^13.1.1",
     "react-big-calendar": "^1.15.0",
     "react-feather": "^2.0.10",

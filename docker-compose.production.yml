@@ -3,10 +3,7 @@ version: '3.8'
 services:
   backend:
     image: robertsloan2023mit/autoshop-backend:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    platform: linux/amd64  # Ensure compatibility with Mac M1/M2
+    platform: linux/amd64
     container_name: automotive-diagnostics-ai
     ports:
       - "5005:5005"     
@@ -29,21 +26,20 @@ services:
   mongodb:
     image: mongo:7      
     container_name: autoshop-mongodb
-    platform: linux/amd64  # Ensure compatibility with Mac M1/M2        
+    platform: linux/amd64
     ports:
       - "27017:27017"   
     environment:        
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-password123}        
-      MONGO_INITDB_DATABASE: autoshop
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123        
+      MONGO_INITDB_DATABASE: automotivedb
     volumes:
       - mongodb_data:/data/db
-      - ./mongo-init:/docker-entrypoint-initdb.d:ro
     networks:
       - autoshop-network
     restart: unless-stopped
     healthcheck:        
-      test: ["CMD", "mongosh", "--username", "${MONGO_USERNAME:-admin}", "--password", "${MONGO_PASSWORD:-password123}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]     
+      test: ["CMD", "mongosh", "--username", "admin", "--password", "password123", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]     
       interval: 30s     
       timeout: 10s      
       retries: 5        
@@ -52,7 +48,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: autoshop-redis
-    platform: linux/amd64  # Ensure compatibility with Mac M1/M2        
+    platform: linux/amd64
     ports:
       - "6379:6379"     
     volumes:
@@ -60,11 +56,11 @@ services:
     networks:
       - autoshop-network
     restart: unless-stopped
-    command: redis-server --bind 0.0.0.0 --protected-mode yes --requirepass ${REDIS_PASSWORD:-redis123} --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes --appendfsync everysec --notify-keyspace-events Ex
+    command: redis-server --bind 0.0.0.0 --protected-mode yes --requirepass redis123 --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes --appendfsync everysec --notify-keyspace-events Ex
     environment:
       - REDIS_REPLICATION_MODE=master
     healthcheck:        
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]        
+      test: ["CMD", "redis-cli", "-a", "redis123", "ping"]        
       interval: 15s     
       timeout: 5s      
       retries: 5        
@@ -73,7 +69,7 @@ services:
   chromadb:
     image: chromadb/chroma:latest
     container_name: autoshop-chromadb
-    platform: linux/amd64  # Ensure compatibility with Mac M1/M2        
+    platform: linux/amd64
     ports:
       - "8000:8000"     
     volumes:

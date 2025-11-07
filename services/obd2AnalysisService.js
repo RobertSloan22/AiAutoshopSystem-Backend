@@ -468,37 +468,175 @@ class OBD2AnalysisService {
     const health = {
       score: 100,
       issues: [],
-      metrics: {}
+      warnings: [],
+      metrics: {},
+      technician_notes: []
     };
 
-    // Check for high engine temperatures
-    const highTempPoints = dataPoints.filter(dp => dp.engineTemp > 220);
-    if (highTempPoints.length > 0) {
-      health.score -= 10;
-      health.issues.push({
-        severity: 'warning',
-        description: `Engine temperature exceeded 220°F ${highTempPoints.length} times`,
-        recommendation: 'Check cooling system'
-      });
+    // PROFESSIONAL TEMPERATURE ANALYSIS - More sensitive for early detection
+    const engineTemps = dataPoints.map(dp => dp.engineTemp).filter(t => t != null && t > 0);
+    if (engineTemps.length > 0) {
+      const avgTemp = engineTemps.reduce((a, b) => a + b, 0) / engineTemps.length;
+      const maxTemp = Math.max(...engineTemps);
+      const minTemp = Math.min(...engineTemps);
+      const tempVariance = this.calculateVariance(engineTemps);
+      
+      // Professional diagnostic temperature thresholds (°F)
+      const criticalTempPoints = dataPoints.filter(dp => dp.engineTemp > 230);  // Immediate damage risk
+      const highTempPoints = dataPoints.filter(dp => dp.engineTemp > 210);     // Concerning
+      const warmTempPoints = dataPoints.filter(dp => dp.engineTemp > 200);     // Watch closely
+      const coolTempPoints = dataPoints.filter(dp => dp.engineTemp < 160);     // Too cool
+      
+      if (criticalTempPoints.length > 0) {
+        health.score -= 40;
+        health.issues.push({
+          severity: 'critical',
+          description: `CRITICAL: Engine temperature exceeded 230°F ${criticalTempPoints.length} times (Max: ${maxTemp.toFixed(1)}°F)`,
+          recommendation: 'IMMEDIATE attention required - Risk of engine damage. Check cooling system, head gasket, water pump',
+          technical_priority: 1
+        });
+      } else if (highTempPoints.length > 0) {
+        health.score -= 25;
+        health.issues.push({
+          severity: 'high',
+          description: `Engine overheating detected: ${highTempPoints.length} instances above 210°F (Max: ${maxTemp.toFixed(1)}°F)`,
+          recommendation: 'Check thermostat, coolant level/condition, radiator efficiency, cooling fan operation',
+          technical_priority: 2
+        });
+      } else if (warmTempPoints.length > dataPoints.length * 0.1) {
+        health.score -= 12;
+        health.warnings.push({
+          severity: 'warning',
+          description: `Engine running warm: ${warmTempPoints.length} readings above 200°F (Avg: ${avgTemp.toFixed(1)}°F)`,
+          recommendation: 'Monitor cooling system - may indicate developing issue',
+          technical_priority: 3
+        });
+      }
+
+      if (coolTempPoints.length > dataPoints.length * 0.5) {
+        health.score -= 8;
+        health.warnings.push({
+          severity: 'warning',
+          description: `Engine not reaching optimal operating temperature (${coolTempPoints.length} readings below 160°F)`,
+          recommendation: 'Check thermostat operation - may be stuck open',
+          technical_priority: 4
+        });
+      }
+
+      // Temperature stability analysis
+      if (tempVariance > 15) {
+        health.score -= 10;
+        health.warnings.push({
+          severity: 'warning',
+          description: `Unstable engine temperature (variance: ${tempVariance.toFixed(1)}°F)`,
+          recommendation: 'Check cooling system components for intermittent issues',
+          technical_priority: 3
+        });
+      }
+
+      health.metrics.temperature = {
+        average: avgTemp,
+        maximum: maxTemp,
+        minimum: minTemp,
+        variance: tempVariance,
+        stability: tempVariance < 10 ? 'stable' : tempVariance < 20 ? 'moderate' : 'unstable'
+      };
     }
 
-    // Check for rough idle
-    const idlePoints = dataPoints.filter(dp => dp.speed === 0 && dp.rpm > 0);
+    // PROFESSIONAL IDLE ANALYSIS - More sensitive for technicians
+    const idlePoints = dataPoints.filter(dp => dp.speed === 0 && dp.rpm > 0 && dp.rpm < 1200);
     if (idlePoints.length > 10) {
-      const rpmVariance = this.calculateVariance(idlePoints.map(dp => dp.rpm));
-      if (rpmVariance > 100) {
-        health.score -= 15;
+      const rpmValues = idlePoints.map(dp => dp.rpm);
+      const rpmVariance = this.calculateVariance(rpmValues);
+      const avgIdleRpm = rpmValues.reduce((a, b) => a + b, 0) / rpmValues.length;
+      
+      // Professional idle quality thresholds
+      if (rpmVariance > 75) {  // Tightened from 100
+        health.score -= 20;
         health.issues.push({
+          severity: 'high',
+          description: `Rough idle detected - RPM variance: ${rpmVariance.toFixed(1)} (Avg: ${avgIdleRpm.toFixed(0)} RPM)`,
+          recommendation: 'Immediate diagnosis needed: Check for vacuum leaks, dirty throttle body, worn spark plugs, fuel injector issues',
+          technical_priority: 2
+        });
+      } else if (rpmVariance > 50) {  // Earlier warning
+        health.score -= 12;
+        health.warnings.push({
           severity: 'warning',
-          description: 'High RPM variance detected at idle',
-          recommendation: 'Check for vacuum leaks, dirty MAF sensor, or worn spark plugs'
+          description: `Idle quality concern - RPM variance: ${rpmVariance.toFixed(1)} (Avg: ${avgIdleRpm.toFixed(0)} RPM)`,
+          recommendation: 'Monitor idle quality - may indicate developing ignition/fuel system issues',
+          technical_priority: 3
+        });
+      }
+
+      // Idle RPM range analysis
+      if (avgIdleRpm > 900) {
+        health.score -= 8;
+        health.warnings.push({
+          severity: 'warning',
+          description: `High idle RPM detected: ${avgIdleRpm.toFixed(0)} RPM`,
+          recommendation: 'Check for vacuum leaks, throttle position sensor, IAC valve issues',
+          technical_priority: 3
+        });
+      } else if (avgIdleRpm < 600) {
+        health.score -= 10;
+        health.warnings.push({
+          severity: 'warning',
+          description: `Low idle RPM detected: ${avgIdleRpm.toFixed(0)} RPM`,
+          recommendation: 'Check idle air control, fuel delivery, engine timing',
+          technical_priority: 3
+        });
+      }
+
+      health.metrics.idle = {
+        average_rpm: avgIdleRpm,
+        rpm_variance: rpmVariance,
+        stability: rpmVariance < 30 ? 'excellent' : rpmVariance < 50 ? 'good' : rpmVariance < 75 ? 'fair' : 'poor',
+        sample_count: idlePoints.length
+      };
+    }
+
+    // PROFESSIONAL ENGINE LOAD ANALYSIS
+    const loadPoints = dataPoints.filter(dp => dp.engineLoad != null);
+    if (loadPoints.length > 0) {
+      const highLoadPoints = dataPoints.filter(dp => dp.engineLoad > 85);  // Tightened from 80
+      const avgLoad = loadPoints.reduce((sum, dp) => sum + dp.engineLoad, 0) / loadPoints.length;
+      
+      health.metrics.engineLoad = {
+        average: avgLoad,
+        high_load_percentage: (highLoadPoints.length / dataPoints.length) * 100,
+        max_load: Math.max(...loadPoints.map(dp => dp.engineLoad))
+      };
+
+      if (highLoadPoints.length > dataPoints.length * 0.3) {
+        health.score -= 15;
+        health.warnings.push({
+          severity: 'warning',
+          description: `Frequent high engine load detected (${((highLoadPoints.length / dataPoints.length) * 100).toFixed(1)}% of readings >85%)`,
+          recommendation: 'Monitor engine performance - may indicate restricted air intake, exhaust restriction, or engine wear',
+          technical_priority: 3
         });
       }
     }
 
-    // Check engine load patterns
-    const highLoadPoints = dataPoints.filter(dp => dp.engineLoad > 80);
-    health.metrics.highLoadPercentage = (highLoadPoints.length / dataPoints.length) * 100;
+    // COMPOUND PENALTY SYSTEM - Professional diagnostic approach
+    const totalIssues = health.issues.length;
+    const totalWarnings = health.warnings.length;
+    
+    if (totalIssues >= 2) {
+      const compoundPenalty = Math.min(totalIssues * 8, 25);
+      health.score -= compoundPenalty;
+      health.technician_notes.push(`Multiple concurrent issues detected - compound diagnostic complexity penalty applied (-${compoundPenalty} points)`);
+    }
+
+    if (totalWarnings >= 3) {
+      const warningPenalty = Math.min(totalWarnings * 3, 15);
+      health.score -= warningPenalty;
+      health.technician_notes.push(`Multiple warning indicators - early intervention recommended (-${warningPenalty} points)`);
+    }
+
+    // Ensure score doesn't go below 0
+    health.score = Math.max(0, health.score);
 
     return health;
   }
@@ -725,26 +863,155 @@ class OBD2AnalysisService {
   generateRecommendations(analysis, analysisType) {
     const recommendations = [];
 
-    // Generate recommendations based on analysis type and findings
-    if (analysis.summary?.driveStatistics?.idlePercentage > 20) {
+    // PROFESSIONAL RECOMMENDATION SYSTEM - More sensitive and actionable
+    
+    // Engine Health Recommendations
+    if (analysis.detailed?.engineHealth) {
+      const engineHealth = analysis.detailed.engineHealth;
+      
+      if (engineHealth.issues && engineHealth.issues.length > 0) {
+        engineHealth.issues.forEach(issue => {
+          recommendations.push({
+            category: 'engine_health',
+            priority: issue.technical_priority <= 2 ? 'critical' : 'high',
+            severity: issue.severity,
+            message: issue.description,
+            action: issue.recommendation,
+            technical_priority: issue.technical_priority,
+            system: 'engine'
+          });
+        });
+      }
+      
+      if (engineHealth.warnings && engineHealth.warnings.length > 0) {
+        engineHealth.warnings.forEach(warning => {
+          recommendations.push({
+            category: 'engine_monitoring',
+            priority: 'medium',
+            severity: warning.severity,
+            message: warning.description,
+            action: warning.recommendation,
+            technical_priority: warning.technical_priority || 3,
+            system: 'engine'
+          });
+        });
+      }
+    }
+    
+    // Fuel System Recommendations
+    if (analysis.detailed?.fuelSystem?.fuelTrimAnalysis?.assessment) {
+      const fuelAssessment = analysis.detailed.fuelSystem.fuelTrimAnalysis.assessment;
+      
+      if (fuelAssessment.status !== 'normal' && fuelAssessment.technical_recommendations) {
+        fuelAssessment.technical_recommendations.forEach(rec => {
+          recommendations.push({
+            category: 'fuel_system',
+            priority: fuelAssessment.severity === 'critical' ? 'critical' : 
+                     fuelAssessment.severity === 'high' ? 'high' : 'medium',
+            severity: fuelAssessment.severity,
+            message: fuelAssessment.message,
+            action: rec,
+            technical_priority: fuelAssessment.priority,
+            system: 'fuel'
+          });
+        });
+      }
+    }
+
+    // Professional Idle Time Analysis - More detailed
+    if (analysis.summary?.driveStatistics?.idlePercentage > 30) {
+      recommendations.push({
+        category: 'operation_efficiency',
+        priority: 'medium',
+        message: `Excessive idle time detected (${analysis.summary.driveStatistics.idlePercentage.toFixed(1)}%)`,
+        action: 'Investigate cause of excessive idling - may indicate driver behavior or operational inefficiency',
+        technical_priority: 4,
+        system: 'operational'
+      });
+    } else if (analysis.summary?.driveStatistics?.idlePercentage > 15) {
       recommendations.push({
         category: 'fuel_efficiency',
-        priority: 'medium',
-        message: 'High idle time detected',
-        action: 'Consider turning off engine during long stops to save fuel'
+        priority: 'low',
+        message: `Elevated idle time (${analysis.summary.driveStatistics.idlePercentage.toFixed(1)}%)`,
+        action: 'Consider idle reduction strategies for improved fuel economy',
+        technical_priority: 5,
+        system: 'operational'
       });
     }
 
-    if (analysis.anomalies?.count > 10) {
+    // Professional Anomaly Analysis - More granular
+    if (analysis.anomalies?.count > 25) {
       recommendations.push({
-        category: 'maintenance',
+        category: 'system_integrity',
+        priority: 'critical',
+        message: `CRITICAL: ${analysis.anomalies.count} sensor anomalies detected`,
+        action: 'IMMEDIATE comprehensive diagnostic scan required - multiple system failures possible',
+        technical_priority: 1,
+        system: 'sensors'
+      });
+    } else if (analysis.anomalies?.count > 15) {
+      recommendations.push({
+        category: 'sensor_health',
         priority: 'high',
-        message: 'Multiple sensor anomalies detected',
-        action: 'Schedule diagnostic check to investigate sensor readings'
+        message: `${analysis.anomalies.count} sensor anomalies detected`,
+        action: 'Schedule comprehensive diagnostic evaluation - multiple sensor concerns identified',
+        technical_priority: 2,
+        system: 'sensors'
+      });
+    } else if (analysis.anomalies?.count > 8) {  // Lowered from 10
+      recommendations.push({
+        category: 'preventive_maintenance',
+        priority: 'medium',
+        message: `${analysis.anomalies.count} sensor anomalies detected`,
+        action: 'Monitor sensor performance - early indication of developing issues',
+        technical_priority: 3,
+        system: 'sensors'
       });
     }
 
-    return recommendations;
+    // Emissions System Recommendations
+    if (analysis.detailed?.emissionSystem?.catalystEfficiency) {
+      const catEff = analysis.detailed.emissionSystem.catalystEfficiency;
+      if (catEff.status === 'poor' || (catEff.estimatedEfficiency && catEff.estimatedEfficiency < 65)) {
+        recommendations.push({
+          category: 'emissions',
+          priority: 'critical',
+          message: `Catalyst efficiency critically low (${catEff.estimatedEfficiency?.toFixed(1) || 'N/A'}%)`,
+          action: 'IMMEDIATE catalyst system diagnosis required - emissions compliance at risk',
+          technical_priority: 1,
+          system: 'emissions'
+        });
+      } else if (catEff.status === 'marginal' || (catEff.estimatedEfficiency && catEff.estimatedEfficiency < 80)) {
+        recommendations.push({
+          category: 'emissions',
+          priority: 'high',
+          message: `Catalyst efficiency declining (${catEff.estimatedEfficiency?.toFixed(1) || 'N/A'}%)`,
+          action: 'Schedule catalyst system evaluation - efficiency below optimal levels',
+          technical_priority: 2,
+          system: 'emissions'
+        });
+      }
+    }
+
+    // Performance Pattern Analysis
+    if (analysis.detailed?.performanceMetrics?.acceleration) {
+      const accel = analysis.detailed.performanceMetrics.acceleration;
+      if (accel.zeroToSixty && accel.zeroToSixty.time > 15) {
+        recommendations.push({
+          category: 'performance',
+          priority: 'medium',
+          message: `Slow acceleration detected (0-60: ${accel.zeroToSixty.time.toFixed(1)}s)`,
+          action: 'Evaluate engine performance, air intake, and exhaust system restrictions',
+          technical_priority: 3,
+          system: 'performance'
+        });
+      }
+    }
+
+    // Sort recommendations by technical priority
+    recommendations.sort((a, b) => (a.technical_priority || 5) - (b.technical_priority || 5));
+
+    return recommendations.slice(0, 15); // Limit to top 15 most important recommendations
   }
 
   analyzePerformanceMetrics(dataPoints) {
@@ -835,17 +1102,90 @@ class OBD2AnalysisService {
   assessFuelTrimHealth(shortTerm, longTerm) {
     const avgShort = shortTerm.reduce((a, b) => a + b, 0) / shortTerm.length || 0;
     const avgLong = longTerm.reduce((a, b) => a + b, 0) / longTerm.length || 0;
+    const maxShortAbs = Math.max(...shortTerm.map(Math.abs));
+    const maxLongAbs = Math.max(...longTerm.map(Math.abs));
+    
+    // PROFESSIONAL FUEL TRIM THRESHOLDS - More sensitive for technicians
+    let status = 'normal';
+    let message = 'Fuel trims within acceptable range';
+    let severity = 'normal';
+    let technical_recommendations = [];
+    let priority = 5;
+    
+    // Critical thresholds - immediate attention needed
+    if (Math.abs(avgShort) > 15 || Math.abs(avgLong) > 12 || maxShortAbs > 20 || maxLongAbs > 18) {
+      status = 'critical';
+      severity = 'critical';
+      priority = 1;
+      message = `CRITICAL fuel trim deviation detected - Short: ${avgShort.toFixed(1)}%, Long: ${avgLong.toFixed(1)}%`;
+      
+      if (avgShort > 15 || avgLong > 12) {
+        technical_recommendations.push('Lean condition detected - Check for vacuum leaks, low fuel pressure, dirty MAF sensor');
+        technical_recommendations.push('Perform smoke test for intake leaks, test fuel pump pressure and volume');
+      } else if (avgShort < -15 || avgLong < -12) {
+        technical_recommendations.push('Rich condition detected - Check for leaking fuel injectors, faulty O2 sensors, excessive fuel pressure');
+        technical_recommendations.push('Test fuel pressure regulator, check for carbon canister purge issues');
+      }
+    }
+    // High concern thresholds - needs attention soon
+    else if (Math.abs(avgShort) > 10 || Math.abs(avgLong) > 8 || maxShortAbs > 12 || maxLongAbs > 10) {
+      status = 'high_concern';
+      severity = 'high';
+      priority = 2;
+      message = `Significant fuel trim deviation - Short: ${avgShort.toFixed(1)}%, Long: ${avgLong.toFixed(1)}%`;
+      
+      if (avgShort > 10 || avgLong > 8) {
+        technical_recommendations.push('Developing lean condition - Monitor closely, check air intake system integrity');
+      } else {
+        technical_recommendations.push('Developing rich condition - Check fuel system components, O2 sensor response');
+      }
+    }
+    // Warning thresholds - monitor closely
+    else if (Math.abs(avgShort) > 6 || Math.abs(avgLong) > 5 || maxShortAbs > 8 || maxLongAbs > 7) {
+      status = 'warning';
+      severity = 'warning';
+      priority = 3;
+      message = `Elevated fuel trims detected - Short: ${avgShort.toFixed(1)}%, Long: ${avgLong.toFixed(1)}%`;
+      technical_recommendations.push('Early indication of fuel system drift - schedule diagnostic evaluation');
+    }
+    // Watch thresholds - document for trend analysis
+    else if (Math.abs(avgShort) > 3 || Math.abs(avgLong) > 3) {
+      status = 'watch';
+      severity = 'info';
+      priority = 4;
+      message = `Fuel trims showing minor deviation - Short: ${avgShort.toFixed(1)}%, Long: ${avgLong.toFixed(1)}%`;
+      technical_recommendations.push('Document values for trend analysis - system adapting normally');
+    }
 
-    if (Math.abs(avgShort) > 10 || Math.abs(avgLong) > 10) {
-      return {
-        status: 'needs_attention',
-        message: 'Fuel trims indicate potential air/fuel mixture issue'
-      };
+    // Fuel trim stability analysis
+    const shortVariance = this.calculateVariance(shortTerm);
+    const longVariance = this.calculateVariance(longTerm);
+    
+    let stability_issues = [];
+    if (shortVariance > 5) {
+      stability_issues.push(`Unstable short-term fuel trim (variance: ${shortVariance.toFixed(1)}%)`);
+    }
+    if (longVariance > 3) {
+      stability_issues.push(`Unstable long-term fuel trim (variance: ${longVariance.toFixed(1)}%)`);
     }
 
     return {
-      status: 'normal',
-      message: 'Fuel trims within normal range'
+      status,
+      message,
+      severity,
+      priority,
+      technical_recommendations,
+      stability_issues,
+      metrics: {
+        short_term_avg: avgShort,
+        long_term_avg: avgLong,
+        short_term_max: maxShortAbs,
+        long_term_max: maxLongAbs,
+        short_term_variance: shortVariance,
+        long_term_variance: longVariance,
+        adaptation_quality: (shortVariance < 3 && longVariance < 2) ? 'excellent' : 
+                           (shortVariance < 5 && longVariance < 3) ? 'good' : 'poor'
+      }
     };
   }
 
@@ -1768,35 +2108,165 @@ class OBD2AnalysisService {
   calculateOverallHealth(analysis) {
     let healthScore = 100;
     const issues = [];
+    const warnings = [];
+    const technician_notes = [];
+    let priority_items = [];
 
-    // Deduct points for various issues
+    // PROFESSIONAL ENGINE HEALTH ASSESSMENT - Higher penalty for issues
     if (analysis.detailed?.engineHealth?.score) {
       const engineScore = analysis.detailed.engineHealth.score;
       if (engineScore < 100) {
-        healthScore -= (100 - engineScore) * 0.3;
-        if (engineScore < 70) issues.push('Engine health concerns');
+        const enginePenalty = (100 - engineScore) * 0.6;  // Increased from 0.3
+        healthScore -= enginePenalty;
+        
+        if (engineScore < 50) {
+          issues.push('CRITICAL engine health issues detected');
+          priority_items.push({priority: 1, system: 'engine', severity: 'critical'});
+        } else if (engineScore < 75) {
+          issues.push('Significant engine health concerns');
+          priority_items.push({priority: 2, system: 'engine', severity: 'high'});
+        } else if (engineScore < 90) {
+          warnings.push('Engine performance degradation detected');
+          priority_items.push({priority: 3, system: 'engine', severity: 'warning'});
+        }
+        
+        technician_notes.push(`Engine health score: ${engineScore.toFixed(1)}/100 (penalty: -${enginePenalty.toFixed(1)} points)`);
       }
     }
 
-    if (analysis.anomalies?.count > 20) {
-      healthScore -= 10;
-      issues.push('Multiple sensor anomalies detected');
+    // PROFESSIONAL ANOMALY THRESHOLD - More sensitive
+    if (analysis.anomalies?.count > 10) {  // Lowered from 20
+      const anomalyPenalty = Math.min(analysis.anomalies.count * 1.2, 20);
+      healthScore -= anomalyPenalty;
+      
+      if (analysis.anomalies.count > 25) {
+        issues.push(`CRITICAL: ${analysis.anomalies.count} sensor anomalies detected`);
+        priority_items.push({priority: 1, system: 'sensors', severity: 'critical'});
+      } else if (analysis.anomalies.count > 15) {
+        issues.push(`Multiple sensor anomalies detected (${analysis.anomalies.count})`);
+        priority_items.push({priority: 2, system: 'sensors', severity: 'high'});
+      } else {
+        warnings.push(`Elevated sensor anomaly count (${analysis.anomalies.count})`);
+        priority_items.push({priority: 3, system: 'sensors', severity: 'warning'});
+      }
+      
+      technician_notes.push(`Anomaly penalty: -${anomalyPenalty.toFixed(1)} points for ${analysis.anomalies.count} anomalies`);
     }
 
-    if (analysis.detailed?.emissionSystem?.catalystEfficiency?.status === 'poor') {
-      healthScore -= 15;
-      issues.push('Catalyst efficiency degraded');
+    // PROFESSIONAL CATALYST EFFICIENCY - More granular assessment
+    if (analysis.detailed?.emissionSystem?.catalystEfficiency) {
+      const catStatus = analysis.detailed.emissionSystem.catalystEfficiency.status;
+      const catEfficiency = analysis.detailed.emissionSystem.catalystEfficiency.estimatedEfficiency || 0;
+      
+      if (catStatus === 'poor' || catEfficiency < 60) {
+        healthScore -= 25;  // Increased penalty
+        issues.push(`CRITICAL: Catalyst efficiency critically low (${catEfficiency.toFixed(1)}%)`);
+        priority_items.push({priority: 1, system: 'emissions', severity: 'critical'});
+      } else if (catStatus === 'marginal' || catEfficiency < 75) {
+        healthScore -= 15;
+        issues.push(`Catalyst efficiency below acceptable levels (${catEfficiency.toFixed(1)}%)`);
+        priority_items.push({priority: 2, system: 'emissions', severity: 'high'});
+      } else if (catEfficiency < 85) {
+        healthScore -= 8;
+        warnings.push(`Catalyst efficiency declining (${catEfficiency.toFixed(1)}%)`);
+        priority_items.push({priority: 3, system: 'emissions', severity: 'warning'});
+      }
     }
 
-    if (analysis.detailed?.fuelSystem?.fuelTrimAnalysis?.assessment?.status === 'needs_attention') {
-      healthScore -= 10;
-      issues.push('Fuel system adjustment needed');
+    // PROFESSIONAL FUEL SYSTEM ASSESSMENT - More detailed evaluation
+    if (analysis.detailed?.fuelSystem?.fuelTrimAnalysis?.assessment) {
+      const fuelStatus = analysis.detailed.fuelSystem.fuelTrimAnalysis.assessment.status;
+      const fuelSeverity = analysis.detailed.fuelSystem.fuelTrimAnalysis.assessment.severity;
+      const fuelPriority = analysis.detailed.fuelSystem.fuelTrimAnalysis.assessment.priority || 5;
+      
+      if (fuelStatus === 'critical') {
+        healthScore -= 20;
+        issues.push('CRITICAL fuel system deviation detected');
+        priority_items.push({priority: 1, system: 'fuel', severity: 'critical'});
+      } else if (fuelStatus === 'high_concern') {
+        healthScore -= 15;
+        issues.push('Significant fuel system concerns');
+        priority_items.push({priority: 2, system: 'fuel', severity: 'high'});
+      } else if (fuelStatus === 'warning') {
+        healthScore -= 10;
+        warnings.push('Fuel system adaptation concerns');
+        priority_items.push({priority: 3, system: 'fuel', severity: 'warning'});
+      } else if (fuelStatus === 'watch') {
+        healthScore -= 5;
+        warnings.push('Fuel system showing minor deviations');
+        priority_items.push({priority: 4, system: 'fuel', severity: 'info'});
+      }
+    }
+
+    // COMPOUND PENALTY FOR MULTIPLE SYSTEMS - Professional diagnostic approach
+    const criticalSystems = priority_items.filter(item => item.priority <= 2).length;
+    const warningSystems = priority_items.filter(item => item.priority === 3).length;
+    
+    if (criticalSystems >= 3) {
+      const compoundPenalty = criticalSystems * 8;
+      healthScore -= compoundPenalty;
+      technician_notes.push(`Multiple critical systems affected - compound penalty: -${compoundPenalty} points`);
+      issues.push('MULTIPLE CRITICAL SYSTEMS require immediate attention');
+    } else if (criticalSystems >= 2) {
+      const compoundPenalty = 10;
+      healthScore -= compoundPenalty;
+      technician_notes.push(`Multiple systems compromised - diagnostic complexity penalty: -${compoundPenalty} points`);
+    }
+
+    if (warningSystems >= 4) {
+      const warningPenalty = warningSystems * 2;
+      healthScore -= warningPenalty;
+      technician_notes.push(`Multiple warning systems - preventive maintenance recommended: -${warningPenalty} points`);
+    }
+
+    // Ensure score doesn't go below 0
+    healthScore = Math.max(0, Math.round(healthScore));
+
+    // PROFESSIONAL RATING SCALE - More stringent for technicians
+    let rating, diagnostic_priority, recommended_action;
+    
+    if (healthScore >= 95) {
+      rating = 'Excellent';
+      diagnostic_priority = 'routine';
+      recommended_action = 'Continue normal maintenance schedule';
+    } else if (healthScore >= 85) {
+      rating = 'Good';
+      diagnostic_priority = 'routine';
+      recommended_action = 'Minor attention items - schedule during next service';
+    } else if (healthScore >= 75) {
+      rating = 'Fair';
+      diagnostic_priority = 'moderate';
+      recommended_action = 'Schedule diagnostic evaluation within 1-2 weeks';
+    } else if (healthScore >= 60) {
+      rating = 'Poor';
+      diagnostic_priority = 'high';
+      recommended_action = 'Schedule diagnostic appointment this week';
+    } else if (healthScore >= 40) {
+      rating = 'Critical';
+      diagnostic_priority = 'urgent';
+      recommended_action = 'Schedule immediate diagnostic evaluation';
+    } else {
+      rating = 'Failing';
+      diagnostic_priority = 'emergency';
+      recommended_action = 'IMMEDIATE professional diagnosis required - potential safety concern';
     }
 
     return {
-      score: Math.max(0, Math.round(healthScore)),
-      rating: healthScore > 85 ? 'Excellent' : healthScore > 70 ? 'Good' : healthScore > 55 ? 'Fair' : 'Poor',
-      issues: issues
+      score: healthScore,
+      rating,
+      diagnostic_priority,
+      recommended_action,
+      issues,
+      warnings,
+      technician_notes,
+      priority_items: priority_items.sort((a, b) => a.priority - b.priority),
+      systems_affected: priority_items.length,
+      critical_systems_count: criticalSystems,
+      professional_assessment: {
+        immediate_action_required: criticalSystems > 0,
+        preventive_maintenance_due: warningSystems >= 2,
+        system_degradation_trend: healthScore < 80 ? 'declining' : 'stable'
+      }
     };
   }
 

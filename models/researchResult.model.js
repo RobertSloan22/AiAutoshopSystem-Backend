@@ -45,11 +45,11 @@ const researchResultSchema = new mongoose.Schema(
     dtcCode: String,
     
     // Add these UUID fields to handle different ID formats
-    researchId: { type: String, index: true }, // UUID from research system
-    uuid: { type: String, index: true },       // Alternative UUID field
-    originalId: { type: String, index: true }, // Original ID from request
+    researchId: { type: String }, // UUID from research system
+    uuid: { type: String },       // Alternative UUID field
+    originalId: { type: String }, // Original ID from request
     sessionId: { type: String, index: true },  // Session ID if available
-    traceId: { type: String, index: true },    // Trace ID for debugging
+    traceId: { type: String },    // Trace ID for debugging
     
     createdAt: {
       type: Date,
