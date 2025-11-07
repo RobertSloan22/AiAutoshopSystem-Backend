@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Diagnostic Agent Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .diagnostics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .diagnostic-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        .diagnostic-card.high {
+            border-left-color: #dc3545;
+            background: #f8e6e7;
+        }
+        .diagnostic-card.medium {
+            border-left-color: #ffc107;
+            background: #fff8e1;
+        }
+        .diagnostic-card.low {
+            border-left-color: #28a745;
+            background: #e8f5e8;
+        }
+        .probability {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .probability.high { color: #dc3545; }
+        .probability.medium { color: #ffc107; }
+        .probability.low { color: #28a745; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button.primary {
+            background-color: #007bff;
+            color: white;
+        }
+        button.secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        input {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Real-Time OBD2 Diagnostic Agent</h1>
+        
+        <div class="controls">
+            <input type="text" id="sessionId" placeholder="Enter Session ID" value="">
+            <button id="startMonitoring" class="primary">Start Monitoring</button>
+            <button id="stopMonitoring" class="secondary" disabled>Stop Monitoring</button>
+            <button id="connectStream" class="primary" disabled>Connect Stream</button>
+            <span id="status" class="status disconnected">Disconnected</span>
+        </div>
+
+        <div id="diagnostics" class="diagnostics-grid">
+            <!-- Diagnostic cards will be populated here -->
+        </div>
+
+        <h3>Activity Log</h3>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        class DiagnosticAgentClient {
+            constructor() {
+                this.baseUrl = 'http://localhost:5005/api/obd2';
+                this.eventSource = null;
+                this.sessionId = null;
+                this.isMonitoring = false;
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                document.getElementById('startMonitoring').addEventListener('click', () => this.startMonitoring());
+                document.getElementById('stopMonitoring').addEventListener('click', () => this.stopMonitoring());
+                document.getElementById('connectStream').addEventListener('click', () => this.connectStream());
+            }
+
+            async startMonitoring() {
+                this.sessionId = document.getElementById('sessionId').value.trim();
+                if (!this.sessionId) {
+                    this.log('❌ Please enter a valid Session ID');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${this.baseUrl}/sessions/${this.sessionId}/diagnostic-monitoring/start`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            vehicleContext: {
+                                make: 'Toyota',
+                                model: 'Camry',
+                                year: '2018'
+                            },
+                            options: {
+                                analysisInterval: 60000, // 1 minute
+                                minDataPoints: 5,
+                                enablePredictive: true
+                            }
+                        })
+                    });
+
+                    const result = await response.json();
+                    if (result.success) {
+                        this.isMonitoring = true;
+                        this.updateUI();
+                        this.log(`✅ Started monitoring session: ${this.sessionId}`);
+                        document.getElementById('connectStream').disabled = false;
+                    } else {
+                        this.log(`❌ Failed to start monitoring: ${result.error}`);
+                    }
+                } catch (error) {
+                    this.log(`❌ Error starting monitoring: ${error.message}`);
+                }
+            }
+
+            async stopMonitoring() {
+                if (!this.sessionId) return;
+
+                try {
+                    const response = await fetch(`${this.baseUrl}/sessions/${this.sessionId}/diagnostic-monitoring/stop`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    const result = await response.json();
+                    if (result.success) {
+                        this.isMonitoring = false;
+                        this.updateUI();
+                        this.log(`🛑 Stopped monitoring session: ${this.sessionId}`);
+                        this.disconnectStream();
+                    }
+                } catch (error) {
+                    this.log(`❌ Error stopping monitoring: ${error.message}`);
+                }
+            }
+
+            connectStream() {
+                if (!this.sessionId) return;
+
+                this.log(`🔌 Connecting to diagnostic stream...`);
+                this.eventSource = new EventSource(`${this.baseUrl}/sessions/${this.sessionId}/diagnostic-stream`);
+
+                this.eventSource.onopen = () => {
+                    this.log(`✅ Connected to diagnostic stream`);
+                    this.updateConnectionStatus(true);
+                };
+
+                this.eventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleStreamMessage(data);
+                    } catch (error) {
+                        this.log(`❌ Error parsing stream data: ${error.message}`);
+                    }
+                };
+
+                this.eventSource.onerror = (error) => {
+                    this.log(`❌ Stream connection error`);
+                    this.updateConnectionStatus(false);
+                };
+            }
+
+            disconnectStream() {
+                if (this.eventSource) {
+                    this.eventSource.close();
+                    this.eventSource = null;
+                    this.updateConnectionStatus(false);
+                    this.log(`🔌 Disconnected from diagnostic stream`);
+                }
+            }
+
+            handleStreamMessage(data) {
+                switch (data.type) {
+                    case 'connection':
+                        this.log(`🔗 ${data.message}`);
+                        break;
+                    
+                    case 'diagnostic_update':
+                        this.log(`📊 Diagnostic update: ${data.dataPointsAnalyzed} data points analyzed`);
+                        this.updateDiagnosticsDisplay(data.diagnostics);
+                        break;
+                    
+                    case 'analysis_error':
+                        this.log(`❌ Analysis error: ${data.error}`);
+                        break;
+                    
+                    case 'heartbeat':
+                        // Silent heartbeat
+                        break;
+                    
+                    default:
+                        this.log(`📦 Unknown message type: ${data.type}`);
+                }
+            }
+
+            updateDiagnosticsDisplay(diagnostics) {
+                const diagnosticsContainer = document.getElementById('diagnostics');
+                diagnosticsContainer.innerHTML = '';
+
+                // Define user-friendly labels
+                const labels = {
+                    vacuum_leak: 'Vacuum Leak',
+                    fuel_mixture_rich: 'Rich Fuel Mixture',
+                    fuel_mixture_lean: 'Lean Fuel Mixture',
+                    egr_valve_issue: 'EGR Valve Issue',
+                    mass_air_flow_sensor: 'MAF Sensor Issue',
+                    oxygen_sensor_b1s1: 'O2 Sensor B1S1',
+                    oxygen_sensor_b1s2: 'O2 Sensor B1S2',
+                    catalytic_converter: 'Catalytic Converter',
+                    fuel_injector_issue: 'Fuel Injector Issue',
+                    intake_manifold_issue: 'Intake Manifold',
+                    pcv_valve_issue: 'PCV Valve Issue',
+                    fuel_pump_weak: 'Weak Fuel Pump',
+                    carbon_buildup: 'Carbon Buildup',
+                    timing_issue: 'Timing Issue',
+                    overall_engine_health: 'Overall Engine Health'
+                };
+
+                Object.entries(diagnostics).forEach(([key, probability]) => {
+                    const card = document.createElement('div');
+                    const severity = this.getSeverityLevel(probability);
+                    
+                    card.className = `diagnostic-card ${severity}`;
+                    card.innerHTML = `
+                        <h4>${labels[key] || key}</h4>
+                        <div class="probability ${severity}">${probability}%</div>
+                    `;
+                    
+                    diagnosticsContainer.appendChild(card);
+                });
+            }
+
+            getSeverityLevel(probability) {
+                if (probability >= 70) return 'high';
+                if (probability >= 30) return 'medium';
+                return 'low';
+            }
+
+            updateConnectionStatus(connected) {
+                const status = document.getElementById('status');
+                status.textContent = connected ? 'Connected' : 'Disconnected';
+                status.className = `status ${connected ? 'connected' : 'disconnected'}`;
+            }
+
+            updateUI() {
+                document.getElementById('startMonitoring').disabled = this.isMonitoring;
+                document.getElementById('stopMonitoring').disabled = !this.isMonitoring;
+            }
+
+            log(message) {
+                const logContainer = document.getElementById('log');
+                const timestamp = new Date().toLocaleTimeString();
+                logContainer.innerHTML += `[${timestamp}] ${message}\n`;
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+        }
+
+        // Initialize the client
+        const diagnosticClient = new DiagnosticAgentClient();
+    </script>
+</body>
+</html>

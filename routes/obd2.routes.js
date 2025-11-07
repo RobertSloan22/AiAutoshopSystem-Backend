@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import obd2RealtimeService from '../services/OBD2RealtimeService.js';
 import OBD2AnalysisService from '../services/obd2AnalysisService.js';
 import ResponsesAPIService from '../services/responsesService.js';
+import realtimeDiagnosticAgent from '../services/realtimeDiagnosticAgent.js';
 
 const router = express.Router();
 
@@ -2466,6 +2467,191 @@ router.get('/health', async (req, res) => {
       error: error.message,
       service: 'obd2'
     });
+  }
+});
+
+// ==================== REAL-TIME DIAGNOSTIC AGENT ROUTES ====================
+
+// Start real-time diagnostic monitoring for a session
+router.post('/sessions/:sessionId/diagnostic-monitoring/start', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { vehicleContext, options = {} } = req.body;
+
+    // Verify session exists and is active
+    const session = await DiagnosticSession.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.status !== 'active') {
+      return res.status(400).json({ error: 'Session must be active for diagnostic monitoring' });
+    }
+
+    await realtimeDiagnosticAgent.startMonitoring(sessionId, vehicleContext || session.vehicleInfo, options);
+
+    console.log(`🤖 Started diagnostic monitoring for session: ${sessionId}`);
+
+    res.json({
+      success: true,
+      sessionId,
+      message: 'Real-time diagnostic monitoring started',
+      monitoringOptions: {
+        analysisInterval: options.analysisInterval || 60000,
+        minDataPoints: options.minDataPoints || 10,
+        enablePredictive: options.enablePredictive !== false
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to start diagnostic monitoring:', error);
+    res.status(500).json({ error: 'Failed to start diagnostic monitoring' });
+  }
+});
+
+// Stop real-time diagnostic monitoring for a session
+router.post('/sessions/:sessionId/diagnostic-monitoring/stop', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    await realtimeDiagnosticAgent.stopMonitoring(sessionId);
+
+    console.log(`🛑 Stopped diagnostic monitoring for session: ${sessionId}`);
+
+    res.json({
+      success: true,
+      sessionId,
+      message: 'Real-time diagnostic monitoring stopped'
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to stop diagnostic monitoring:', error);
+    res.status(500).json({ error: 'Failed to stop diagnostic monitoring' });
+  }
+});
+
+// Get real-time diagnostic probabilities stream via SSE
+router.get('/sessions/:sessionId/diagnostic-stream', (req, res) => {
+  const { sessionId } = req.params;
+
+  // Set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
+
+  console.log(`🤖 Client connected to diagnostic stream: ${sessionId}`);
+
+  // Send initial connection
+  res.write(`data: ${JSON.stringify({
+    type: 'connection',
+    sessionId,
+    timestamp: Date.now(),
+    message: 'Diagnostic stream connected'
+  })}\n\n`);
+
+  // Diagnostic update handler
+  const diagnosticUpdateHandler = (data) => {
+    if (data.sessionId === sessionId) {
+      res.write(`data: ${JSON.stringify({
+        type: 'diagnostic_update',
+        sessionId: data.sessionId,
+        timestamp: data.timestamp,
+        diagnostics: data.diagnostics,
+        dataPointsAnalyzed: data.dataPointsAnalyzed,
+        vehicleContext: data.vehicleContext
+      })}\n\n`);
+    }
+  };
+
+  // Analysis error handler
+  const analysisErrorHandler = (data) => {
+    if (data.sessionId === sessionId) {
+      res.write(`data: ${JSON.stringify({
+        type: 'analysis_error',
+        sessionId: data.sessionId,
+        timestamp: Date.now(),
+        error: data.error
+      })}\n\n`);
+    }
+  };
+
+  // Listen for diagnostic updates
+  realtimeDiagnosticAgent.on('diagnosticUpdate', diagnosticUpdateHandler);
+  realtimeDiagnosticAgent.on('analysisError', analysisErrorHandler);
+
+  // Heartbeat to keep connection alive
+  const heartbeat = setInterval(() => {
+    res.write(`data: ${JSON.stringify({
+      type: 'heartbeat',
+      timestamp: Date.now()
+    })}\n\n`);
+  }, 30000);
+
+  // Handle client disconnect
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    realtimeDiagnosticAgent.off('diagnosticUpdate', diagnosticUpdateHandler);
+    realtimeDiagnosticAgent.off('analysisError', analysisErrorHandler);
+    console.log(`🔌 Diagnostic stream client disconnected: ${sessionId}`);
+  });
+});
+
+// Get current diagnostic history for a session
+router.get('/sessions/:sessionId/diagnostic-history', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const history = realtimeDiagnosticAgent.getDiagnosticHistory(sessionId);
+
+    res.json({
+      success: true,
+      sessionId,
+      history,
+      count: history.length
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to get diagnostic history:', error);
+    res.status(500).json({ error: 'Failed to get diagnostic history' });
+  }
+});
+
+// Get diagnostic agent status
+router.get('/diagnostic-agent/status', (req, res) => {
+  try {
+    const status = realtimeDiagnosticAgent.getMonitoringStatus();
+
+    res.json({
+      success: true,
+      agent: status,
+      timestamp: Date.now()
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to get agent status:', error);
+    res.status(500).json({ error: 'Failed to get agent status' });
+  }
+});
+
+// Enable/disable diagnostic agent
+router.put('/diagnostic-agent/toggle', (req, res) => {
+  try {
+    const { enabled } = req.body;
+    realtimeDiagnosticAgent.setEnabled(enabled);
+
+    res.json({
+      success: true,
+      enabled: enabled,
+      message: `Diagnostic agent ${enabled ? 'enabled' : 'disabled'}`,
+      timestamp: Date.now()
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to toggle agent:', error);
+    res.status(500).json({ error: 'Failed to toggle diagnostic agent' });
   }
 });
 

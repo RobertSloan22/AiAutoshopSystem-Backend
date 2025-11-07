@@ -12,8 +12,9 @@ class OBD2RealtimeService {
         this.dataCache = new Map();
         this.isInitialized = false;
         
-        // Configuration
-        this.REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+        // Configuration  
+        const redisPassword = process.env.REDIS_PASSWORD;
+        this.REDIS_URL = process.env.REDIS_URL || (redisPassword ? `redis://:${redisPassword}@localhost:6379` : 'redis://localhost:6379');
         this.CACHE_TTL = 300; // 5 minutes
         this.MAX_CACHE_SIZE = 1000;
         this.CLEANUP_INTERVAL = 60000; // 1 minute
@@ -148,7 +149,11 @@ class OBD2RealtimeService {
             const channel = `session:${sessionId}:updates`;
             
             // Create new subscriber for this connection
-            const subscriber = new Redis(this.REDIS_URL);
+            const subscriber = new Redis(this.REDIS_URL, {
+                retryDelayOnFailover: 100,
+                maxRetriesPerRequest: 3,
+                lazyConnect: true
+            });
             
             subscriber.subscribe(channel);
             subscriber.on('message', (receivedChannel, message) => {
