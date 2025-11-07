@@ -1097,37 +1097,72 @@ analysis_results = {
     'health_score': 0
 }
 
-# Engine temperature analysis
+# PROFESSIONAL ENGINE TEMPERATURE ANALYSIS - Technician-grade thresholds
 if 'engineTemp' in df.columns and df['engineTemp'].notna().sum() > 0:
     temp_data = df['engineTemp'].dropna()
     temp_avg = float(temp_data.mean())
     temp_max = float(temp_data.max())
     temp_min = float(temp_data.min())
     temp_std = float(temp_data.std())
+    temp_median = float(temp_data.median())
+    temp_p95 = float(temp_data.quantile(0.95))
+    
+    # Count temperature threshold violations for professional analysis
+    critical_temp_count = len(temp_data[temp_data > 112])  # >230°F
+    high_temp_count = len(temp_data[temp_data > 99])       # >210°F  
+    warm_temp_count = len(temp_data[temp_data > 93])       # >200°F
+    cool_temp_count = len(temp_data[temp_data < 71])       # <160°F
     
     analysis_results['sensor_health']['engine_temperature'] = {
         'avg': temp_avg,
         'max': temp_max,
         'min': temp_min,
+        'median': temp_median,
+        'p95': temp_p95,
         'std': temp_std,
         'status': 'normal',
-        'score': 100
+        'score': 100,
+        'critical_events': critical_temp_count,
+        'high_temp_events': high_temp_count,
+        'warm_temp_events': warm_temp_count,
+        'cool_temp_events': cool_temp_count,
+        'technical_assessment': 'within_normal_range'
     }
     
-    if temp_max > 110:
-        analysis_results['issues'].append("Critical engine overheating detected (>110°C)")
+    # CRITICAL: Immediate damage risk (>230°F/112°C)
+    if critical_temp_count > 0:
+        analysis_results['issues'].append(f"CRITICAL: Engine temperature exceeded 230°F ({temp_max:.1f}°F max) - {critical_temp_count} times")
         analysis_results['sensor_health']['engine_temperature']['status'] = 'critical'
-        analysis_results['sensor_health']['engine_temperature']['score'] = 20
-        analysis_results['recommendations'].append("Immediate cooling system inspection required")
-    elif temp_max > 105:
-        analysis_results['issues'].append("Engine overheating detected (>105°C)")
+        analysis_results['sensor_health']['engine_temperature']['score'] = 15
+        analysis_results['sensor_health']['engine_temperature']['technical_assessment'] = 'immediate_damage_risk'
+        analysis_results['recommendations'].append("IMMEDIATE SHUTDOWN - Risk of engine damage. Check cooling system, head gasket, water pump pressure")
+    # HIGH: Overheating concern (>210°F/99°C)
+    elif high_temp_count > 0:
+        analysis_results['issues'].append(f"HIGH: Engine overheating detected ({temp_max:.1f}°F max) - {high_temp_count} instances above 210°F")
         analysis_results['sensor_health']['engine_temperature']['status'] = 'critical'
-        analysis_results['sensor_health']['engine_temperature']['score'] = 40
-        analysis_results['recommendations'].append("Check cooling system, thermostat, and coolant levels")
-    elif temp_avg > 95:
-        analysis_results['warnings'].append("Engine running hot (avg >95°C)")
+        analysis_results['sensor_health']['engine_temperature']['score'] = 35
+        analysis_results['sensor_health']['engine_temperature']['technical_assessment'] = 'overheating_condition'
+        analysis_results['recommendations'].append("Priority repair: Check thermostat, coolant condition, radiator efficiency, cooling fan operation")
+    # WARNING: Running warm (>200°F/93°C)
+    elif warm_temp_count > len(temp_data) * 0.1:
+        analysis_results['warnings'].append(f"WARNING: Engine running warm ({temp_avg:.1f}°F avg) - {warm_temp_count} readings above 200°F")
         analysis_results['sensor_health']['engine_temperature']['status'] = 'warning'
         analysis_results['sensor_health']['engine_temperature']['score'] = 70
+        analysis_results['sensor_health']['engine_temperature']['technical_assessment'] = 'elevated_operating_temp'
+        analysis_results['recommendations'].append("Schedule diagnostic: Monitor cooling system - may indicate developing thermal management issue")
+    # INFO: Too cool - thermostat issue (<160°F/71°C)  
+    elif cool_temp_count > len(temp_data) * 0.5:
+        analysis_results['warnings'].append(f"INFO: Engine not reaching operating temperature ({temp_avg:.1f}°F avg) - {cool_temp_count} readings below 160°F")
+        analysis_results['sensor_health']['engine_temperature']['status'] = 'info'
+        analysis_results['sensor_health']['engine_temperature']['score'] = 85
+        analysis_results['sensor_health']['engine_temperature']['technical_assessment'] = 'thermostat_concern'
+        analysis_results['recommendations'].append("Check thermostat operation - may be stuck open or incorrect temperature rating")
+    
+    # Temperature stability analysis for technicians
+    if temp_std > 8:  # More sensitive variance detection
+        analysis_results['warnings'].append(f"Temperature instability detected (std dev: {temp_std:.1f}°F)")
+        analysis_results['sensor_health']['engine_temperature']['score'] = min(analysis_results['sensor_health']['engine_temperature']['score'], 75)
+        analysis_results['recommendations'].append("Check cooling system components for intermittent operation")
 
 # Oxygen sensor analysis
 if 'o2B1S1Voltage' in df.columns and df['o2B1S1Voltage'].notna().sum() > 0:
@@ -1156,35 +1191,87 @@ if 'o2B1S1Voltage' in df.columns and df['o2B1S1Voltage'].notna().sum() > 0:
         analysis_results['sensor_health']['oxygen_sensor']['status'] = 'warning'
         analysis_results['sensor_health']['oxygen_sensor']['score'] = 70
 
-# Fuel trim analysis
+# PROFESSIONAL FUEL TRIM ANALYSIS - Technician-grade thresholds
 if 'fuelTrimShortB1' in df.columns and df['fuelTrimShortB1'].notna().sum() > 0:
     ft_data = df['fuelTrimShortB1'].dropna()
     ft_avg = float(ft_data.mean())
     ft_std = float(ft_data.std())
-    ft_max = float(abs(ft_data).max())
+    ft_max_abs = float(abs(ft_data).max())
+    ft_min = float(ft_data.min())
+    ft_max = float(ft_data.max())
+    
+    # Professional fuel trim thresholds
+    critical_lean_count = len(ft_data[ft_data > 15])      # Severe lean >15%
+    critical_rich_count = len(ft_data[ft_data < -15])     # Severe rich <-15%  
+    high_lean_count = len(ft_data[ft_data > 10])          # High lean >10%
+    high_rich_count = len(ft_data[ft_data < -10])         # High rich <-10%
+    moderate_lean_count = len(ft_data[ft_data > 6])       # Moderate lean >6%
+    moderate_rich_count = len(ft_data[ft_data < -6])      # Moderate rich <-6%
     
     analysis_results['sensor_health']['fuel_trim'] = {
         'short_term_avg': ft_avg,
         'variability': ft_std,
-        'max_absolute': ft_max,
+        'max_absolute': ft_max_abs,
+        'min_value': ft_min,
+        'max_value': ft_max,
         'status': 'normal',
-        'score': 100
+        'score': 100,
+        'critical_lean_events': critical_lean_count,
+        'critical_rich_events': critical_rich_count,
+        'high_lean_events': high_lean_count,
+        'high_rich_events': high_rich_count,
+        'moderate_lean_events': moderate_lean_count,
+        'moderate_rich_events': moderate_rich_count,
+        'technical_assessment': 'within_acceptable_range'
     }
     
-    if ft_max > 25:
-        analysis_results['issues'].append(f"Severe fuel trim deviation detected ({ft_max:.1f}%)")
+    # CRITICAL: Severe fuel trim deviation (>±15% or persistent >±12%)
+    if ft_max_abs > 18 or critical_lean_count > 0 or critical_rich_count > 0:
+        analysis_results['issues'].append(f"CRITICAL: Severe fuel trim deviation ({ft_avg:.1f}% avg, {ft_max_abs:.1f}% max)")
         analysis_results['sensor_health']['fuel_trim']['status'] = 'critical'
-        analysis_results['sensor_health']['fuel_trim']['score'] = 30
-        analysis_results['recommendations'].append("Major fuel system or air intake issue - professional diagnosis required")
-    elif ft_max > 15:
-        analysis_results['warnings'].append(f"High fuel trim detected ({ft_max:.1f}%)")
+        analysis_results['sensor_health']['fuel_trim']['score'] = 25
+        analysis_results['sensor_health']['fuel_trim']['technical_assessment'] = 'critical_fuel_system_fault'
+        if ft_avg > 15:
+            analysis_results['recommendations'].append("CRITICAL LEAN: Major vacuum leak or fuel delivery failure - immediate diagnosis required")
+        elif ft_avg < -15:
+            analysis_results['recommendations'].append("CRITICAL RICH: Leaking injectors or O2 sensor failure - immediate diagnosis required")
+        else:
+            analysis_results['recommendations'].append("Severe fuel trim instability - major fuel/air metering problem")
+    
+    # HIGH: Significant fuel trim deviation (>±10% average or frequent >±12%)
+    elif ft_max_abs > 12 or abs(ft_avg) > 10 or (high_lean_count + high_rich_count) > len(ft_data) * 0.2:
+        analysis_results['issues'].append(f"HIGH: Significant fuel trim deviation ({ft_avg:.1f}% avg, {ft_max_abs:.1f}% max)")
+        analysis_results['sensor_health']['fuel_trim']['status'] = 'high_concern'
+        analysis_results['sensor_health']['fuel_trim']['score'] = 50
+        analysis_results['sensor_health']['fuel_trim']['technical_assessment'] = 'significant_adaptation_required'
+        if ft_avg > 8:
+            analysis_results['recommendations'].append("HIGH LEAN condition: Check intake manifold, vacuum hoses, MAF sensor, fuel pressure")
+        elif ft_avg < -8:
+            analysis_results['recommendations'].append("HIGH RICH condition: Check fuel pressure regulator, O2 sensors, injector leakage")
+        else:
+            analysis_results['recommendations'].append("Unstable fuel trims - check fuel pump performance and intake system integrity")
+    
+    # WARNING: Moderate fuel trim concern (>±6% or frequent >±8%)
+    elif ft_max_abs > 8 or abs(ft_avg) > 6 or (moderate_lean_count + moderate_rich_count) > len(ft_data) * 0.3:
+        analysis_results['warnings'].append(f"WARNING: Elevated fuel trims ({ft_avg:.1f}% avg, {ft_max_abs:.1f}% max)")
         analysis_results['sensor_health']['fuel_trim']['status'] = 'warning'
-        analysis_results['sensor_health']['fuel_trim']['score'] = 60
-        analysis_results['recommendations'].append("Check for vacuum leaks, dirty air filter, or fuel injector issues")
-    elif ft_max > 10:
-        analysis_results['warnings'].append(f"Moderate fuel trim detected ({ft_avg:.1f}%)")
-        analysis_results['sensor_health']['fuel_trim']['status'] = 'warning'
-        analysis_results['sensor_health']['fuel_trim']['score'] = 80
+        analysis_results['sensor_health']['fuel_trim']['score'] = 75
+        analysis_results['sensor_health']['fuel_trim']['technical_assessment'] = 'moderate_adaptation_concern'
+        analysis_results['recommendations'].append("Monitor fuel system - early indication of developing air/fuel control issue")
+    
+    # INFO: Minor adaptation (>±3%)
+    elif abs(ft_avg) > 3 or ft_max_abs > 5:
+        analysis_results['warnings'].append(f"INFO: Minor fuel trim adaptation ({ft_avg:.1f}% avg)")
+        analysis_results['sensor_health']['fuel_trim']['status'] = 'info'
+        analysis_results['sensor_health']['fuel_trim']['score'] = 90
+        analysis_results['sensor_health']['fuel_trim']['technical_assessment'] = 'normal_adaptation'
+        analysis_results['recommendations'].append("Document for trend analysis - system adapting to maintain stoichiometric ratio")
+    
+    # Fuel trim stability analysis for technicians
+    if ft_std > 4:  # More sensitive stability detection
+        analysis_results['warnings'].append(f"Fuel trim instability detected (std dev: {ft_std:.1f}%)")
+        analysis_results['sensor_health']['fuel_trim']['score'] = min(analysis_results['sensor_health']['fuel_trim']['score'], 70)
+        analysis_results['recommendations'].append("Check for intermittent vacuum leaks or fuel delivery issues")
 
 # Battery voltage analysis
 if 'batteryVoltage' in df.columns and df['batteryVoltage'].notna().sum() > 0:
