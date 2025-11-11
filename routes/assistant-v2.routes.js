@@ -31,7 +31,7 @@ const getOrCreateAssistant = async () => {
   const assistant = await openai.beta.assistants.create({
     name: 'File Analysis Assistant',
     instructions: 'You are a helpful assistant that can analyze and answer questions about uploaded files.',
-    model: 'gpt-4-turbo-preview',
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini', // Changed from gpt-4-turbo-preview for cost savings
     tools: [{ type: 'file_search' }],
   });
   

@@ -419,7 +419,7 @@ Never use placeholder values like "Refer to manufacturer specifications" or "Che
 `);
 
     const chatModel = new ChatOpenAI({
-      modelName: 'o3-mini',
+      modelName: process.env.OPENAI_MODEL || 'gpt-4o-mini', // Changed from o3-mini for cost savings
       openAIApiKey: process.env.OPENAI_API_KEY,
       configuration: {
         timeout: 120000,  // 2 minute timeout
@@ -604,7 +604,7 @@ router.post('/technical-details', async (req, res) => {
   
   try {
     const chatModel = new ChatOpenAI({
-      modelName: 'o3-mini',
+      modelName: process.env.OPENAI_MODEL || 'gpt-4o-mini', // Changed from o3-mini for cost savings
       openAIApiKey: process.env.OPENAI_API_KEY,
       configuration: {
         timeout: 60000
@@ -857,7 +857,7 @@ router.post('/service-bulletin', async (req, res) => {
   
   try {
     const chatModel = new ChatOpenAI({
-      modelName: 'o3-mini',
+      modelName: process.env.OPENAI_MODEL || 'gpt-4o-mini', // Changed from o3-mini for cost savings
       openAIApiKey: process.env.OPENAI_API_KEY,
     });
     

@@ -304,7 +304,7 @@ async function getInitialAssessment(vehicleInfo, symptoms) {
     4. Safety considerations`;
 
     const completion = await openaiClient.chat.completions.create({
-        model: "gpt-4-turbo-preview",
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini", // Changed from gpt-4-turbo-preview for cost savings
         messages: [{ role: "user", content: prompt }],
         temperature: 0.7,
         max_tokens: 1000

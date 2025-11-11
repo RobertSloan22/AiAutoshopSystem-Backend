@@ -1,0 +1,23 @@
+{
+  "analysis_id": "realtime-obd2-analysis-1762655779269-65jzvck7n",
+  "parameters": [
+    "rpm",
+    "speed",
+    "engineLoad",
+    "throttlePosition",
+    "engineTemp",
+    "fuelTrimShortB1",
+    "fuelTrimLongB1",
+    "fuelTrimShortB2",
+    "fuelTrimLongB2",
+    "o2B1S1Voltage",
+    "o2B1S2Voltage",
+    "o2B2S1Voltage",
+    "o2B2S2Voltage"
+  ],
+  "interval": 5,
+  "thresholds": {},
+  "style": "dashboard",
+  "started_at": "2025-11-09T02:36:20.177964",
+  "status": "active"
+}
