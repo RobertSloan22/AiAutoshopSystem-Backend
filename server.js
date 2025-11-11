@@ -108,6 +108,7 @@ const allowedOrigins = [
   'http://localhost:3001',
   'http://localhost:8080',
   'http://localhost:8081',
+  'http://192.168.1.143:5173',
   'http://localhost:8000',
   'https://dist-buvoyv9rj-robmit2023s-projects.vercel.app/backgrounddashboard',
   // IP addresses
