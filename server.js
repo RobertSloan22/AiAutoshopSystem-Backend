@@ -78,7 +78,7 @@ import dynamicToolsRoutes from './routes/dynamicTools.routes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = process.env.PORT || 5005;
+const PORT = process.env.PORT || 5000;
 
 // Create Express app and HTTP server
 const app = express();

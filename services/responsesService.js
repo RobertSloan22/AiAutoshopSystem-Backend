@@ -58,11 +58,21 @@ class ResponsesAPIService {
     // Build messages array with conversation history
     let messages = [{ role: 'system', content: systemPrompt }];
 
+    // SAFEGUARD: Limit conversation history to prevent excessive token costs
+    const MAX_HISTORY_MESSAGES = 10; // Limit to last 10 messages to control token usage
+    
     // Add conversation history if conversationId is provided
     if (conversationId && this.conversationHistory.has(conversationId)) {
       const history = this.conversationHistory.get(conversationId);
       // Add previous messages (excluding system messages to avoid duplicates)
-      const historyMessages = history.messages.filter(msg => msg.role !== 'system');
+      let historyMessages = history.messages.filter(msg => msg.role !== 'system');
+      
+      // SAFEGUARD: Truncate history to prevent excessive tokens
+      if (historyMessages.length > MAX_HISTORY_MESSAGES) {
+        console.log(`🔧 CONTEXT: Truncating conversation history from ${historyMessages.length} to ${MAX_HISTORY_MESSAGES} messages to prevent excessive token costs`);
+        historyMessages = historyMessages.slice(-MAX_HISTORY_MESSAGES);
+      }
+      
       messages.push(...historyMessages);
     }
 
@@ -86,8 +96,6 @@ class ResponsesAPIService {
         customerContext,
         conversationId,
         obd2SessionId,
-        conversationId,
-        obd2SessionId,
         createdAt: Date.now()
       });
 
@@ -96,11 +104,11 @@ class ResponsesAPIService {
       console.error('Failed to create OpenAI stream with primary model:', error);
 
       // Try fallback model if primary fails
-      return this.createFallbackStreamingSession(message, vehicleContext, customerContext, conversationId);
+      return this.createFallbackStreamingSession(message, vehicleContext, customerContext, conversationId, obd2SessionId);
     }
   }
 
-  async createFallbackStreamingSession(message, vehicleContext = {}, customerContext = {}, conversationId = null) {
+  async createFallbackStreamingSession(message, vehicleContext = {}, customerContext = {}, conversationId = null, obd2SessionId = null) {
     const sessionId = `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // Build system prompt with context
@@ -109,11 +117,21 @@ class ResponsesAPIService {
     // Build messages array with conversation history
     let messages = [{ role: 'system', content: systemPrompt }];
 
+    // SAFEGUARD: Limit conversation history to prevent excessive token costs
+    const MAX_HISTORY_MESSAGES = 10; // Limit to last 10 messages to control token usage
+    
     // Add conversation history if conversationId is provided
     if (conversationId && this.conversationHistory.has(conversationId)) {
       const history = this.conversationHistory.get(conversationId);
       // Add previous messages (excluding system messages to avoid duplicates)
-      const historyMessages = history.messages.filter(msg => msg.role !== 'system');
+      let historyMessages = history.messages.filter(msg => msg.role !== 'system');
+      
+      // SAFEGUARD: Truncate history to prevent excessive tokens
+      if (historyMessages.length > MAX_HISTORY_MESSAGES) {
+        console.log(`🔧 CONTEXT: Truncating conversation history from ${historyMessages.length} to ${MAX_HISTORY_MESSAGES} messages to prevent excessive token costs`);
+        historyMessages = historyMessages.slice(-MAX_HISTORY_MESSAGES);
+      }
+      
       messages.push(...historyMessages);
     }
 
@@ -138,8 +156,6 @@ class ResponsesAPIService {
           messages,
           vehicleContext,
           customerContext,
-          conversationId,
-          obd2SessionId,
           conversationId,
           obd2SessionId,
           createdAt: Date.now(),
@@ -314,6 +330,13 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
       throw new Error('Session not found');
     }
 
+    // SAFEGUARD: Limit number of tool calls to prevent excessive execution
+    const MAX_TOOL_CALLS = 5;
+    if (toolCalls.length > MAX_TOOL_CALLS) {
+      console.warn(`⚠️ TOOL CALL LIMIT: Too many tool calls (${toolCalls.length}), limiting to ${MAX_TOOL_CALLS}`);
+      toolCalls = toolCalls.slice(0, MAX_TOOL_CALLS);
+    }
+
     // Skip tool processing for fallback sessions
     if (session.fallback) {
       console.log('Skipping tool processing for fallback session');
@@ -359,7 +382,6 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
             {
               save_plots: parameters.save_plots !== false,
               plot_filename: parameters.plot_filename,
-              sessionId: session.obd2SessionId || sessionId, // Use OBD2 session ID if available
               sessionId: session.obd2SessionId || sessionId, // Use OBD2 session ID if available
               vehicleContext: session.vehicleContext,
               customerContext: session.customerContext,

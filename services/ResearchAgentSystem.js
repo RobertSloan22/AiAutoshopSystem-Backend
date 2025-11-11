@@ -30,8 +30,9 @@ const ResearchState = z.object({
 });
 
 // Initialize OpenAI chat model
+// Using gpt-4o-mini for 95% cost savings compared to gpt-4-turbo
 const model = new ChatOpenAI({
-  modelName: process.env.OPENAI_MODEL || 'gpt-4-turbo',
+  modelName: process.env.OPENAI_MODEL || 'gpt-4o-mini', // Changed from gpt-4-turbo for cost optimization
   temperature: 0.2,
 });
 

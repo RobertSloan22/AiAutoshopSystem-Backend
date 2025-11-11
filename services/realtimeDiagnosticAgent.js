@@ -11,10 +11,10 @@ class RealtimeDiagnosticAgent extends EventEmitter {
         this.responsesService = new ResponsesAPIService();
         this.activeAnalysis = new Map(); // sessionId -> analysis state
         this.analysisInterval = 60000; // 1 minute
-        this.isEnabled = true;
+        this.isEnabled = false; // DISABLED: Not currently needed
         this.diagnosticPrompts = this.buildDiagnosticPrompts();
-        
-        console.log('🤖 Real-time Diagnostic Agent initialized');
+
+        console.log('🤖 Real-time Diagnostic Agent initialized (DISABLED)');
     }
 
     // Start monitoring a session for real-time diagnostic analysis
@@ -25,7 +25,7 @@ class RealtimeDiagnosticAgent extends EventEmitter {
         }
 
         console.log(`🔍 Starting real-time diagnostic monitoring for session: ${sessionId}`);
-        
+
         const analysisState = {
             sessionId,
             vehicleContext,
@@ -49,7 +49,7 @@ class RealtimeDiagnosticAgent extends EventEmitter {
         );
 
         this.activeAnalysis.set(sessionId, analysisState);
-        
+
         // Emit monitoring started event
         this.emit('monitoringStarted', { sessionId, vehicleContext });
     }
@@ -95,11 +95,13 @@ class RealtimeDiagnosticAgent extends EventEmitter {
             // Calculate diagnostic probabilities using both AI and mathematical models
             let diagnosticProbabilities = {};
 
+            // DISABLED: AI analysis to save API credits
+            // Only use mathematical calculations instead
             // First, try AI analysis
-            const aiResponse = await this.getAIAnalysis(analysisPrompt, analysisState.vehicleContext, sessionId);
-            if (aiResponse) {
-                diagnosticProbabilities = this.parseDiagnosticResponse(aiResponse);
-            }
+            // const aiResponse = await this.getAIAnalysis(analysisPrompt, analysisState.vehicleContext, sessionId);
+            // if (aiResponse) {
+            //     diagnosticProbabilities = this.parseDiagnosticResponse(aiResponse);
+            // }
 
             // Generate mathematical model calculations as backup/validation
             const dataStats = this.calculateDataStatistics(recentData);

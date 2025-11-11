@@ -126,177 +126,6 @@ function formatToolsForOpenAI(tools) {
   }).filter(Boolean); // Remove any null/undefined tools
 }
 
-// Parse web search response to extract structured data
-function parseWebSearchResponse(response) {
-  const enhancedResponse = {
-    ...response,
-    parsed_data: {
-      web_searches: [],
-      citations: [],
-      parts_pricing: [],
-      retailers: []
-    }
-  };
-
-  if (!response.output || !Array.isArray(response.output)) {
-    return enhancedResponse;
-  }
-
-  // Extract web search calls and structured data
-  response.output.forEach(item => {
-    // Extract web search call information
-    if (item.type === 'web_search_call') {
-      enhancedResponse.parsed_data.web_searches.push({
-        id: item.id,
-        status: item.status,
-        action: item.action || null
-      });
-    }
-
-    // Extract message content with citations and parse for parts data
-    if (item.type === 'message' && item.content) {
-      item.content.forEach(content => {
-        if (content.type === 'output_text') {
-          // Extract citations
-          if (content.annotations) {
-            content.annotations.forEach(annotation => {
-              if (annotation.type === 'url_citation') {
-                const citation = {
-                  url: annotation.url,
-                  title: annotation.title,
-                  start_index: annotation.start_index,
-                  end_index: annotation.end_index,
-                  text_snippet: content.text.substring(annotation.start_index, annotation.end_index)
-                };
-                
-                // Identify retailer from URL
-                const retailer = identifyRetailer(annotation.url);
-                if (retailer) {
-                  citation.retailer = retailer;
-                  if (!enhancedResponse.parsed_data.retailers.find(r => r.name === retailer)) {
-                    enhancedResponse.parsed_data.retailers.push({ name: retailer, citations: 1 });
-                  } else {
-                    enhancedResponse.parsed_data.retailers.find(r => r.name === retailer).citations++;
-                  }
-                }
-                
-                enhancedResponse.parsed_data.citations.push(citation);
-              }
-            });
-          }
-
-          // Parse text for parts pricing information
-          const pricingData = extractPricingData(content.text);
-          enhancedResponse.parsed_data.parts_pricing.push(...pricingData);
-        }
-      });
-    }
-  });
-
-  return enhancedResponse;
-}
-
-// Identify retailer from URL
-function identifyRetailer(url) {
-  const retailers = {
-    'autozone.com': 'AutoZone',
-    'advanceautoparts.com': 'Advance Auto Parts',
-    'oreillyauto.com': "O'Reilly Auto Parts",
-    'partsgeek.com': 'PartsGeek',
-    'rockauto.com': 'RockAuto',
-    'amazon.com': 'Amazon',
-    'buybrakes.com': 'BuyBrakes.com',
-    'toyotapartsdeal.com': 'Toyota Parts Deal',
-    'gmpartsdirect.com': 'GM Parts Direct',
-    'fordparts.com': 'Ford Parts',
-    'napa.com': 'NAPA Auto Parts',
-    'partsauthority.com': 'Parts Authority'
-  };
-  
-  for (const [domain, name] of Object.entries(retailers)) {
-    if (url.includes(domain)) {
-      return name;
-    }
-  }
-  return null;
-}
-
-// Extract pricing data from text using regex patterns
-function extractPricingData(text) {
-  const pricingData = [];
-  
-  // Pattern to match pricing information
-  const pricePattern = /(?:\$|USD\s?)(\d+(?:\.\d{2})?(?:\s?-\s?\$?\d+(?:\.\d{2})?)?)/g;
-  const partNamePattern = /(?:^|\n)\*\*([^*]+)\*\*/gm;
-  
-  let match;
-  const prices = [];
-  const partNames = [];
-  
-  // Extract prices
-  while ((match = pricePattern.exec(text)) !== null) {
-    const priceStr = match[1];
-    const priceRange = priceStr.includes('-') 
-      ? priceStr.split('-').map(p => parseFloat(p.replace('$', '').trim()))
-      : [parseFloat(priceStr)];
-    
-    prices.push({
-      raw: match[0],
-      min: Math.min(...priceRange),
-      max: priceRange.length > 1 ? Math.max(...priceRange) : Math.min(...priceRange),
-      range: priceRange.length > 1
-    });
-  }
-  
-  // Extract part names
-  while ((match = partNamePattern.exec(text)) !== null) {
-    partNames.push(match[1].trim());
-  }
-  
-  // Combine part names with prices (best effort matching)
-  partNames.forEach((name, index) => {
-    const priceInfo = prices[index] || null;
-    pricingData.push({
-      part_name: name,
-      price_info: priceInfo,
-      brand: extractBrand(name),
-      category: categorizePart(name)
-    });
-  });
-  
-  return pricingData;
-}
-
-// Extract brand from part name
-function extractBrand(partName) {
-  const brands = ['EBC', 'Duralast', 'Carquest', 'Toyota', 'PowerStop', 'Bosch', 'AC Delco', 'Motorcraft', 'OEM'];
-  for (const brand of brands) {
-    if (partName.toLowerCase().includes(brand.toLowerCase())) {
-      return brand;
-    }
-  }
-  return 'Generic';
-}
-
-// Categorize part type
-function categorizePart(partName) {
-  const categories = {
-    'brake': ['brake', 'pad', 'rotor', 'disc'],
-    'engine': ['oil', 'filter', 'spark', 'plug'],
-    'electrical': ['battery', 'alternator', 'starter'],
-    'suspension': ['shock', 'strut', 'spring'],
-    'body': ['headlight', 'taillight', 'bumper', 'mirror']
-  };
-  
-  const nameLower = partName.toLowerCase();
-  for (const [category, keywords] of Object.entries(categories)) {
-    if (keywords.some(keyword => nameLower.includes(keyword))) {
-      return category;
-    }
-  }
-  return 'other';
-}
-
 // Debug helper for tool formatting
 function debugToolsFormat(tools, context = '') {
   console.log(`=== TOOLS DEBUG ${context} ===`);
@@ -350,12 +179,8 @@ router.post('/turn_response', async (req, res) => {
     console.log('Received messages:', messages);
     console.log('Received tools:', tools);
 
-    // Add OpenAI native web search tool for parts pricing and availability
-    const webSearchTool = { type: 'web_search' };
-    const allTools = [...(tools || []), webSearchTool];
-
     // FINAL FIX: Apply proper tool formatting
-    const formattedTools = formatToolsForOpenAI(allTools);
+    const formattedTools = formatToolsForOpenAI(tools || []);
     
     // Debug the formatting
     debugToolsFormat(formattedTools, 'AFTER FORMATTING');
@@ -438,9 +263,8 @@ router.post('/turn_response', async (req, res) => {
       });
 
     } else {
-      // Handle regular JSON response - Parse and enhance web search results
-      const enhancedResponse = parseWebSearchResponse(response);
-      res.json(enhancedResponse);
+      // Handle regular JSON response
+      res.json(response);
     }
 
   } catch (error) {
@@ -896,6 +720,11 @@ router.post('/chat/analyze', async (req, res) => {
     const obd2SessionId = obd2SessionMatch ? obd2SessionMatch[1] : null;
     console.log('  Extracted OBD2 SessionId:', obd2SessionId);
 
+    // SAFEGUARD: Limit tool call rounds to prevent excessive API calls
+    const MAX_TOOL_CALL_ROUNDS = 2; // Maximum 2 rounds of tool calls
+    const MAX_TOOL_CALLS_PER_ROUND = 5; // Maximum 5 tool calls per round
+    let toolCallRoundCount = 0;
+
     // Create a streaming session with the question
     const { sessionId, stream } = await responsesService.createStreamingSession(
       question,
@@ -912,87 +741,103 @@ router.post('/chat/analyze', async (req, res) => {
     let pythonOutput = '';
 
     // Process the stream to collect the full response
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-      
-      if (delta?.content) {
-        fullResponse += delta.content;
-      }
+    let currentStream = stream;
+    let shouldContinue = true;
 
-      if (delta?.tool_calls) {
-        for (const toolCallDelta of delta.tool_calls) {
-          if (toolCallDelta.index !== undefined) {
-            if (!toolCalls[toolCallDelta.index]) {
-              toolCalls[toolCallDelta.index] = {
-                id: toolCallDelta.id,
-                type: 'function',
-                function: { name: '', arguments: '' }
-              };
-            }
-
-            if (toolCallDelta.function?.name) {
-              toolCalls[toolCallDelta.index].function.name += toolCallDelta.function.name;
-            }
-            if (toolCallDelta.function?.arguments) {
-              toolCalls[toolCallDelta.index].function.arguments += toolCallDelta.function.arguments;
-            }
-          }
-        }
-      }
-
-      if (chunk.choices[0]?.finish_reason === 'tool_calls') {
-        // Add the assistant message with tool_calls to conversation
-        const session = responsesService.getSession(sessionId);
-        if (session) {
-          const assistantMessage = {
-            role: 'assistant',
-            content: fullResponse || null,
-            tool_calls: toolCalls
-          };
-          session.messages.push(assistantMessage);
-        }
+    while (shouldContinue && toolCallRoundCount < MAX_TOOL_CALL_ROUNDS) {
+      for await (const chunk of currentStream) {
+        const delta = chunk.choices[0]?.delta;
         
-        // Process tool calls and extract plot data
-        const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
-        
-        // Check if any tool calls were Python executions with plots
-        for (let i = 0; i < toolCalls.length; i++) {
-          if (toolCalls[i].function.name === 'execute_python_code') {
-            try {
-              const args = JSON.parse(toolCalls[i].function.arguments);
-              pythonCode = args.code || '';
-              
-              // Parse the tool result to extract plot information
-              const resultContent = JSON.parse(toolResults[i].content);
-              if (resultContent.success) {
-                pythonOutput = resultContent.output || '';
-                if (resultContent.plots && resultContent.plots.length > 0) {
-                  plotResults = resultContent.plots;
-                }
+        if (delta?.content) {
+          fullResponse += delta.content;
+        }
+
+        if (delta?.tool_calls) {
+          for (const toolCallDelta of delta.tool_calls) {
+            if (toolCallDelta.index !== undefined) {
+              if (!toolCalls[toolCallDelta.index]) {
+                toolCalls[toolCallDelta.index] = {
+                  id: toolCallDelta.id,
+                  type: 'function',
+                  function: { name: '', arguments: '' }
+                };
               }
-            } catch (e) {
-              console.error('Error parsing Python tool results:', e);
+
+              if (toolCallDelta.function?.name) {
+                toolCalls[toolCallDelta.index].function.name += toolCallDelta.function.name;
+              }
+              if (toolCallDelta.function?.arguments) {
+                toolCalls[toolCallDelta.index].function.arguments += toolCallDelta.function.arguments;
+              }
             }
           }
         }
 
-        // Continue the conversation after tool execution
-        const continuedStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
-        
-        for await (const continueChunk of continuedStream) {
-          const continueDelta = continueChunk.choices[0]?.delta;
-          if (continueDelta?.content) {
-            fullResponse += continueDelta.content;
+        if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+          // SAFEGUARD: Limit number of tool calls per round
+          if (toolCalls.length > MAX_TOOL_CALLS_PER_ROUND) {
+            console.warn(`⚠️ TOOL CALL LIMIT: Too many tool calls (${toolCalls.length}), limiting to ${MAX_TOOL_CALLS_PER_ROUND}`);
+            toolCalls = toolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
           }
-          if (continueChunk.choices[0]?.finish_reason === 'stop') {
+
+          toolCallRoundCount++;
+          console.log(`🔧 TOOL CALL ROUND ${toolCallRoundCount}/${MAX_TOOL_CALL_ROUNDS}: Processing ${toolCalls.length} tool calls`);
+
+          // SAFEGUARD: Prevent excessive tool call rounds
+          if (toolCallRoundCount >= MAX_TOOL_CALL_ROUNDS) {
+            console.warn(`⚠️ TOOL CALL ROUND LIMIT: Maximum tool call rounds (${MAX_TOOL_CALL_ROUNDS}) reached. Stopping to prevent excessive API calls.`);
+            fullResponse += '\n\n[Note: Tool call limit reached to prevent excessive API usage]';
+            shouldContinue = false;
             break;
           }
-        }
-        break;
-      }
 
-      if (chunk.choices[0]?.finish_reason === 'stop') {
-        break;
+          // Add the assistant message with tool_calls to conversation
+          const session = responsesService.getSession(sessionId);
+          if (session) {
+            const assistantMessage = {
+              role: 'assistant',
+              content: fullResponse || null,
+              tool_calls: toolCalls
+            };
+            session.messages.push(assistantMessage);
+          }
+          
+          // Process tool calls and extract plot data
+          const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
+          
+          // Check if any tool calls were Python executions with plots
+          for (let i = 0; i < toolCalls.length; i++) {
+            if (toolCalls[i].function.name === 'execute_python_code') {
+              try {
+                const args = JSON.parse(toolCalls[i].function.arguments);
+                pythonCode = args.code || '';
+                
+                // Parse the tool result to extract plot information
+                const resultContent = JSON.parse(toolResults[i].content);
+                if (resultContent.success) {
+                  pythonOutput = resultContent.output || '';
+                  if (resultContent.plots && resultContent.plots.length > 0) {
+                    plotResults = resultContent.plots;
+                  }
+                }
+              } catch (e) {
+                console.error('Error parsing Python tool results:', e);
+              }
+            }
+          }
+
+          // Continue the conversation after tool execution
+          currentStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
+          
+          // Reset toolCalls for next round
+          toolCalls = [];
+          break; // Break out of inner loop to process next round
+        }
+
+        if (chunk.choices[0]?.finish_reason === 'stop') {
+          shouldContinue = false;
+          break;
+        }
       }
     }
 
