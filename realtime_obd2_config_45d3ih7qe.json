@@ -1,0 +1,19 @@
+{
+  "analysis_id": "realtime-obd2-analysis-1762964118943-45d3ih7qe",
+  "parameters": [
+    "o2B1S1Voltage",
+    "o2B1S2Voltage",
+    "o2B1S3Voltage",
+    "o2B1S4Voltage",
+    "o2B2S1Voltage",
+    "o2B2S2Voltage",
+    "rpm",
+    "speed",
+    "engineTemp"
+  ],
+  "interval": 5,
+  "thresholds": {},
+  "style": "diagnostic",
+  "started_at": "2025-11-12T16:15:19.910697",
+  "status": "active"
+}

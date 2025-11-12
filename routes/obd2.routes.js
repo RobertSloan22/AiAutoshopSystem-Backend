@@ -2,14 +2,20 @@
 
 import express from 'express';
 import mongoose from 'mongoose';
+import OpenAI from 'openai';
 import obd2RealtimeService from '../services/OBD2RealtimeService.js';
 import OBD2AnalysisService from '../services/obd2AnalysisService.js';
+import PythonExecutionService from '../services/pythonExecutionService.js';
+import obd2AnalyticsPackService from '../services/obd2AnalyticsPackService.js';
 // import ResponsesAPIService from '../services/responsesService.js'; // Reserved for future use
 
 const router = express.Router();
 
 // Initialize analysis service
 const analysisService = new OBD2AnalysisService();
+
+// Initialize Python execution service for visualizations
+const pythonService = new PythonExecutionService();
 
 // Initialize responses service for enhanced analysis with visuals
 // const responsesService = new ResponsesAPIService(); // Reserved for future use
@@ -1375,6 +1381,462 @@ router.post('/sessions/:sessionId/data', async (req, res) => {
 // OBD2 Data Analysis Endpoints
 // =====================================================
 
+// Helper function to generate comprehensive analysis with visualizations, anomaly detection, DTC analysis, and health scoring
+// eslint-disable-next-line no-unused-vars
+async function performEnhancedAnalysis(sessionId, session, dataPoints, dtcCodes = [], analysisType = 'comprehensive', includeVisualization = true) {
+  const results = {
+    visualizations: [],
+    anomalies: { inRange: [], outOfRange: [], critical: [] },
+    dtcAnalysis: {},
+    correlations: {},
+    healthScores: {},
+    comprehensiveReport: {}
+  };
+
+  console.log(`🔍 Starting enhanced analysis for session ${sessionId}`);
+  console.log(`📊 Data points: ${dataPoints.length}, DTC codes: ${dtcCodes.length}`);
+
+  // STEP 1: Generate initial visualizations of the data
+  if (includeVisualization && dataPoints.length > 0) {
+    console.log('📈 STEP 1: Generating initial data visualizations...');
+    
+    try {
+      // Prepare data for visualization
+      const visualizationData = dataPoints.map(dp => ({
+        timestamp: dp.timestamp,
+        rpm: dp.rpm,
+        speed: dp.speed,
+        engineTemp: dp.engineTemp,
+        throttlePosition: dp.throttlePosition,
+        engineLoad: dp.engineLoad,
+        maf: dp.maf,
+        map: dp.map,
+        fuelTrimShortB1: dp.fuelTrimShortB1,
+        fuelTrimLongB1: dp.fuelTrimLongB1,
+        o2B1S1Voltage: dp.o2B1S1Voltage,
+        batteryVoltage: dp.batteryVoltage
+      }));
+
+      // Generate comprehensive visualization Python code
+      const visualizationCode = `
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime
+import matplotlib.patches as mpatches
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set professional styling
+plt.style.use('seaborn-v0_8-darkgrid')
+sns.set_palette("husl")
+
+# Load session data
+data = ${JSON.stringify(visualizationData)}
+df = pd.DataFrame(data)
+
+# Convert timestamp to datetime
+df['timestamp'] = pd.to_datetime(df['timestamp'])
+df = df.sort_values('timestamp')
+
+# Create comprehensive dashboard
+fig = plt.figure(figsize=(20, 14))
+fig.suptitle('OBD2 Session Data Overview\\nInitial Visualization', fontsize=18, fontweight='bold', y=0.98)
+
+# Plot 1: Engine RPM and Speed
+ax1 = plt.subplot(3, 2, 1)
+ax1_twin = ax1.twinx()
+line1 = ax1.plot(df['timestamp'], df['rpm'], label='RPM', color='#2E86AB', linewidth=2)
+line2 = ax1_twin.plot(df['timestamp'], df['speed'], label='Speed (km/h)', color='#A23B72', linewidth=2)
+ax1.set_xlabel('Time', fontsize=10)
+ax1.set_ylabel('RPM', fontsize=10, color='#2E86AB')
+ax1_twin.set_ylabel('Speed (km/h)', fontsize=10, color='#A23B72')
+ax1.set_title('Engine RPM and Vehicle Speed', fontsize=12, fontweight='bold')
+ax1.grid(True, alpha=0.3)
+ax1.legend(loc='upper left')
+ax1_twin.legend(loc='upper right')
+
+# Plot 2: Engine Temperature
+ax2 = plt.subplot(3, 2, 2)
+ax2.plot(df['timestamp'], df['engineTemp'], label='Engine Temp', color='#F18F01', linewidth=2)
+ax2.axhline(y=180, color='green', linestyle='--', alpha=0.5, label='Normal Min (180°F)')
+ax2.axhline(y=220, color='green', linestyle='--', alpha=0.5, label='Normal Max (220°F)')
+ax2.axhline(y=240, color='red', linestyle='--', alpha=0.5, label='Critical (240°F)')
+ax2.fill_between(df['timestamp'], 180, 220, alpha=0.1, color='green', label='Normal Range')
+ax2.set_xlabel('Time', fontsize=10)
+ax2.set_ylabel('Temperature (°F)', fontsize=10)
+ax2.set_title('Engine Temperature', fontsize=12, fontweight='bold')
+ax2.legend(loc='best')
+ax2.grid(True, alpha=0.3)
+
+# Plot 3: Throttle Position and Engine Load
+ax3 = plt.subplot(3, 2, 3)
+ax3_twin = ax3.twinx()
+line3 = ax3.plot(df['timestamp'], df['throttlePosition'], label='Throttle %', color='#C73E1D', linewidth=2)
+line4 = ax3_twin.plot(df['timestamp'], df['engineLoad'], label='Engine Load %', color='#6A994E', linewidth=2)
+ax3.set_xlabel('Time', fontsize=10)
+ax3.set_ylabel('Throttle Position (%)', fontsize=10, color='#C73E1D')
+ax3_twin.set_ylabel('Engine Load (%)', fontsize=10, color='#6A994E')
+ax3.set_title('Throttle Position and Engine Load', fontsize=12, fontweight='bold')
+ax3.grid(True, alpha=0.3)
+ax3.legend(loc='upper left')
+ax3_twin.legend(loc='upper right')
+
+# Plot 4: Air Flow (MAF/MAP)
+ax4 = plt.subplot(3, 2, 4)
+if df['maf'].notna().any():
+    ax4.plot(df['timestamp'], df['maf'], label='MAF (g/s)', color='#06A77D', linewidth=2)
+if df['map'].notna().any():
+    ax4_twin = ax4.twinx()
+    ax4_twin.plot(df['timestamp'], df['map'], label='MAP (kPa)', color='#F77F00', linewidth=2)
+    ax4_twin.set_ylabel('MAP (kPa)', fontsize=10, color='#F77F00')
+    ax4_twin.legend(loc='upper right')
+ax4.set_xlabel('Time', fontsize=10)
+ax4.set_ylabel('MAF (g/s)', fontsize=10, color='#06A77D')
+ax4.set_title('Mass Air Flow and Manifold Pressure', fontsize=12, fontweight='bold')
+ax4.legend(loc='upper left')
+ax4.grid(True, alpha=0.3)
+
+# Plot 5: Fuel Trims
+ax5 = plt.subplot(3, 2, 5)
+if df['fuelTrimShortB1'].notna().any():
+    ax5.plot(df['timestamp'], df['fuelTrimShortB1'], label='Short Term FT B1', color='#E63946', linewidth=2, alpha=0.7)
+if df['fuelTrimLongB1'].notna().any():
+    ax5.plot(df['timestamp'], df['fuelTrimLongB1'], label='Long Term FT B1', color='#457B9D', linewidth=2, alpha=0.7)
+ax5.axhline(y=-10, color='orange', linestyle='--', alpha=0.5)
+ax5.axhline(y=10, color='orange', linestyle='--', alpha=0.5)
+ax5.fill_between(df['timestamp'], -10, 10, alpha=0.1, color='green', label='Normal Range (±10%)')
+ax5.set_xlabel('Time', fontsize=10)
+ax5.set_ylabel('Fuel Trim (%)', fontsize=10)
+ax5.set_title('Fuel Trim Analysis', fontsize=12, fontweight='bold')
+ax5.legend(loc='best')
+ax5.grid(True, alpha=0.3)
+
+# Plot 6: Battery Voltage
+ax6 = plt.subplot(3, 2, 6)
+if df['batteryVoltage'].notna().any():
+    ax6.plot(df['timestamp'], df['batteryVoltage'], label='Battery Voltage', color='#7209B7', linewidth=2)
+    ax6.axhline(y=12.6, color='green', linestyle='--', alpha=0.5, label='Normal Min (12.6V)')
+    ax6.axhline(y=14.5, color='green', linestyle='--', alpha=0.5, label='Normal Max (14.5V)')
+    ax6.fill_between(df['timestamp'], 12.6, 14.5, alpha=0.1, color='green', label='Normal Range')
+ax6.set_xlabel('Time', fontsize=10)
+ax6.set_ylabel('Voltage (V)', fontsize=10)
+ax6.set_title('Battery Voltage', fontsize=12, fontweight='bold')
+ax6.legend(loc='best')
+ax6.grid(True, alpha=0.3)
+
+plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+# Save the plot
+plot_filename = f'obd2_initial_visualization_{sessionId}_{int(pd.Timestamp.now().timestamp())}.png'
+plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
+plt.close()
+
+print(f"✅ Initial visualization saved as {plot_filename}")
+print(f"📊 Visualized {len(df)} data points")
+print(f"📈 Generated 6 comprehensive charts")
+`;
+
+      const vizResult = await pythonService.executeCode(visualizationCode, {
+        save_plots: true,
+        plot_filename: `obd2_initial_visualization_${sessionId}`
+      });
+
+      if (vizResult.success && vizResult.plots && vizResult.plots.length > 0) {
+        results.visualizations.push({
+          type: 'initial_overview',
+          plots: vizResult.plots,
+          description: 'Initial comprehensive data visualization showing all key parameters'
+        });
+        console.log(`✅ Generated ${vizResult.plots.length} initial visualization(s)`);
+      }
+    } catch (error) {
+      console.error('⚠️ Failed to generate initial visualizations:', error);
+    }
+  }
+
+  // STEP 2: Check for anomalies and range violations
+  console.log('🔍 STEP 2: Checking for anomalies and range violations...');
+  
+  const pidMetadata = analysisService.pidMetadata || {};
+  const rangeViolations = [];
+  const inRangeParams = [];
+  const criticalIssues = [];
+
+  // Check each parameter against its normal range
+  for (const [pidName, metadata] of Object.entries(pidMetadata)) {
+    const values = dataPoints
+      .map(dp => dp[pidName])
+      .filter(v => v !== null && v !== undefined && !isNaN(v) && isFinite(v));
+
+    if (values.length === 0) continue;
+
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const normalRange = metadata.normalRange || metadata.operatingRange;
+    const criticalThresholds = metadata.criticalThresholds;
+
+    if (normalRange) {
+      const isInRange = avg >= normalRange.min && avg <= normalRange.max;
+      const hasOutliers = min < normalRange.min || max > normalRange.max;
+
+      if (isInRange && !hasOutliers) {
+        inRangeParams.push({
+          parameter: pidName,
+          average: avg,
+          min: min,
+          max: max,
+          status: 'normal'
+        });
+      } else {
+        const severity = criticalThresholds && (min < criticalThresholds.min || max > criticalThresholds.max) 
+          ? 'critical' 
+          : 'warning';
+        
+        rangeViolations.push({
+          parameter: pidName,
+          average: avg,
+          min: min,
+          max: max,
+          normalRange: normalRange,
+          status: severity,
+          category: metadata.category,
+          unit: metadata.unit
+        });
+
+        if (severity === 'critical') {
+          criticalIssues.push({
+            parameter: pidName,
+            value: avg,
+            normalRange: normalRange,
+            category: metadata.category
+          });
+        }
+      }
+    }
+  }
+
+  results.anomalies = {
+    inRange: inRangeParams,
+    outOfRange: rangeViolations,
+    critical: criticalIssues
+  };
+
+  console.log(`✅ Anomaly check complete: ${inRangeParams.length} in range, ${rangeViolations.length} out of range, ${criticalIssues.length} critical`);
+
+  // STEP 3: Analyze DTC-related data and find correlations
+  if (dtcCodes.length > 0) {
+    console.log(`🔧 STEP 3: Analyzing DTC-related data for codes: ${dtcCodes.join(', ')}...`);
+    
+    // DTC to PID mapping (common diagnostic relationships)
+    const dtcToPidMapping = {
+      'P0171': ['fuelTrimLongB1', 'fuelTrimShortB1', 'maf', 'o2B1S1Voltage'], // System too lean
+      'P0172': ['fuelTrimLongB1', 'fuelTrimShortB1', 'maf', 'o2B1S1Voltage'], // System too rich
+      'P0300': ['rpm', 'engineLoad', 'maf', 'map'], // Random misfire
+      'P0420': ['o2B1S1Voltage', 'o2B1S2Voltage', 'catalystTempB1S1'], // Catalyst efficiency
+      'P0128': ['engineTemp', 'intakeTemp', 'coolantTemp'], // Coolant thermostat
+      'P0131': ['o2B1S1Voltage', 'fuelTrimShortB1'], // O2 sensor low voltage
+      'P0132': ['o2B1S1Voltage', 'fuelTrimShortB1'], // O2 sensor high voltage
+      'P0174': ['fuelTrimLongB2', 'fuelTrimShortB2', 'maf', 'o2B2S1Voltage'], // Bank 2 too lean
+      'P0175': ['fuelTrimLongB2', 'fuelTrimShortB2', 'maf', 'o2B2S1Voltage'], // Bank 2 too rich
+    };
+
+    const dtcAnalysis = {};
+    
+    for (const dtcCode of dtcCodes) {
+      const relatedPids = dtcToPidMapping[dtcCode] || [];
+      const dtcData = {};
+
+      for (const pidName of relatedPids) {
+        const values = dataPoints
+          .map(dp => dp[pidName])
+          .filter(v => v !== null && v !== undefined && !isNaN(v) && isFinite(v));
+
+        if (values.length > 0) {
+          const avg = values.reduce((a, b) => a + b, 0) / values.length;
+          const min = Math.min(...values);
+          const max = Math.max(...values);
+          const stdDev = Math.sqrt(values.reduce((sq, n) => sq + Math.pow(n - avg, 2), 0) / values.length);
+
+          dtcData[pidName] = {
+            average: avg,
+            min: min,
+            max: max,
+            stdDev: stdDev,
+            sampleCount: values.length
+          };
+        }
+      }
+
+      // Find correlations between related PIDs for this DTC
+      const correlations = {};
+      if (relatedPids.length > 1) {
+        for (let i = 0; i < relatedPids.length; i++) {
+          for (let j = i + 1; j < relatedPids.length; j++) {
+            const pid1 = relatedPids[i];
+            const pid2 = relatedPids[j];
+            const values1 = dataPoints.map(dp => dp[pid1]).filter(v => v !== null && !isNaN(v));
+            const values2 = dataPoints.map(dp => dp[pid2]).filter(v => v !== null && !isNaN(v));
+
+            if (values1.length > 10 && values2.length > 10) {
+              // Calculate correlation coefficient using analysis service method
+              const correlation = analysisService.calculateCorrelation(values1, values2);
+              correlations[`${pid1}_${pid2}`] = correlation;
+            }
+          }
+        }
+      }
+
+      dtcAnalysis[dtcCode] = {
+        relatedPids: relatedPids,
+        pidData: dtcData,
+        correlations: correlations,
+        analysis: `DTC ${dtcCode} analysis: ${relatedPids.length} related parameters analyzed`
+      };
+    }
+
+    results.dtcAnalysis = dtcAnalysis;
+    console.log(`✅ DTC analysis complete for ${dtcCodes.length} codes`);
+  }
+
+  // STEP 4: Calculate vehicle system health scores
+  console.log('🏥 STEP 4: Calculating vehicle system health scores...');
+  
+  const systemScores = {
+    engine: 100,
+    fuel: 100,
+    emissions: 100,
+    cooling: 100,
+    electrical: 100,
+    overall: 100
+  };
+
+  // Calculate scores based on range violations and critical issues
+  const systemMapping = {
+    engine: ['rpm', 'engineLoad', 'throttlePosition'],
+    fuel: ['fuelTrimShortB1', 'fuelTrimLongB1', 'fuelPressure', 'maf'],
+    emissions: ['o2B1S1Voltage', 'o2B1S2Voltage', 'catalystTempB1S1'],
+    cooling: ['engineTemp', 'intakeTemp'],
+    electrical: ['batteryVoltage']
+  };
+
+  for (const [system, pids] of Object.entries(systemMapping)) {
+    let violations = 0;
+    let criticalCount = 0;
+
+    for (const pid of pids) {
+      const violation = rangeViolations.find(v => v.parameter === pid);
+      if (violation) {
+        violations++;
+        if (violation.status === 'critical') criticalCount++;
+      }
+    }
+
+    // Deduct points: -10 for warning, -25 for critical
+    let score = 100;
+    score -= violations * 10;
+    score -= criticalCount * 15;
+    score = Math.max(0, score);
+
+    systemScores[system] = Math.round(score);
+  }
+
+  // Calculate overall score (weighted average)
+  systemScores.overall = Math.round(
+    (systemScores.engine * 0.3 +
+     systemScores.fuel * 0.25 +
+     systemScores.emissions * 0.2 +
+     systemScores.cooling * 0.15 +
+     systemScores.electrical * 0.1)
+  );
+
+  // If DTCs present, reduce overall score
+  if (dtcCodes.length > 0) {
+    systemScores.overall = Math.max(0, systemScores.overall - (dtcCodes.length * 10));
+  }
+
+  results.healthScores = systemScores;
+  console.log(`✅ Health scores calculated: Overall: ${systemScores.overall}/100`);
+
+  // STEP 5: Generate comprehensive report
+  console.log('📋 STEP 5: Generating comprehensive analysis report...');
+  
+  results.comprehensiveReport = {
+    sessionInfo: {
+      sessionId: sessionId,
+      duration: session.duration,
+      dataPointCount: dataPoints.length,
+      startTime: session.startTime,
+      endTime: session.endTime
+    },
+    summary: {
+      totalParameters: Object.keys(pidMetadata).length,
+      parametersInRange: inRangeParams.length,
+      parametersOutOfRange: rangeViolations.length,
+      criticalIssues: criticalIssues.length,
+      dtcCodes: dtcCodes.length
+    },
+    healthScores: systemScores,
+    anomalies: results.anomalies,
+    dtcAnalysis: results.dtcAnalysis,
+    recommendations: generateRecommendations(systemScores, rangeViolations, criticalIssues, dtcCodes)
+  };
+
+  console.log('✅ Enhanced analysis complete!');
+  return results;
+}
+
+// Helper function to generate recommendations
+function generateRecommendations(healthScores, rangeViolations, criticalIssues, dtcCodes) {
+  const recommendations = [];
+
+  if (healthScores.overall < 70) {
+    recommendations.push({
+      priority: 'high',
+      action: 'Schedule comprehensive diagnostic inspection',
+      reason: 'Multiple systems showing degraded performance'
+    });
+  }
+
+  if (criticalIssues.length > 0) {
+    recommendations.push({
+      priority: 'critical',
+      action: 'Address critical parameter violations immediately',
+      reason: `${criticalIssues.length} critical parameter(s) out of safe range`,
+      affectedParameters: criticalIssues.map(i => i.parameter)
+    });
+  }
+
+  if (dtcCodes.length > 0) {
+    recommendations.push({
+      priority: 'high',
+      action: 'Diagnose and repair DTC codes',
+      reason: `${dtcCodes.length} diagnostic trouble code(s) detected`,
+      dtcCodes: dtcCodes
+    });
+  }
+
+  if (healthScores.fuel < 80) {
+    recommendations.push({
+      priority: 'medium',
+      action: 'Inspect fuel system components',
+      reason: 'Fuel system health score below optimal'
+    });
+  }
+
+  if (healthScores.emissions < 80) {
+    recommendations.push({
+      priority: 'medium',
+      action: 'Check emission control systems',
+      reason: 'Emission system health score below optimal'
+    });
+  }
+
+  return recommendations;
+}
+
 // Analyze a diagnostic session with enhanced visual generation
 router.post('/sessions/:sessionId/analyze', async (req, res) => {
   try {
@@ -1466,6 +1928,30 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
 
     console.log(`✅ Found ${sampleDataPoints.length} sample data points and ${actualDataPointCount} total data points for analysis`);
 
+    // Fetch ALL data points for comprehensive analysis
+    let query = { sessionId: new mongoose.Types.ObjectId(sessionId) };
+    if (timeRange?.start || timeRange?.end) {
+      query.timestamp = {};
+      if (timeRange.start) query.timestamp.$gte = new Date(timeRange.start);
+      if (timeRange.end) query.timestamp.$lte = new Date(timeRange.end);
+    }
+    
+    const allDataPoints = await OBD2DataPoint.find(query).sort({ timestamp: 1 }).lean();
+    console.log(`📊 Fetched ${allDataPoints.length} data points for enhanced analysis`);
+
+    // Get DTC codes from session
+    const dtcCodes = session.dtcCodes || [];
+
+    // Perform enhanced analysis with visualizations, anomaly detection, DTC analysis, and health scoring
+    const enhancedAnalysis = await performEnhancedAnalysis(
+      sessionId,
+      session,
+      allDataPoints,
+      dtcCodes,
+      analysisType,
+      includeVisualization
+    );
+
     // Prepare enhanced vehicle context
     const enhancedVehicleContext = {
       ...vehicleContext,
@@ -1478,42 +1964,89 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
       vehicleInfo: session.vehicleInfo || {}
     };
 
-    // Create analysis question based on analysis type
-    const analysisQuestions = {
-      'summary': `Provide a comprehensive summary analysis of OBD2 session ${sessionId}. Include key metrics, performance indicators, and any notable findings.`,
-      'comprehensive': `Perform a comprehensive analysis of OBD2 session ${sessionId}. Include engine health, fuel system analysis, emission system status, performance metrics, and generate relevant visualizations.`,
-      'performance': `Analyze the performance metrics for OBD2 session ${sessionId}. Focus on engine performance, acceleration patterns, and efficiency metrics with visualizations.`,
-      'diagnostics': `Run diagnostic analysis on OBD2 session ${sessionId}. Check for error codes, system health, and provide diagnostic recommendations with supporting charts.`,
-      'fuel_efficiency': `Analyze fuel efficiency for OBD2 session ${sessionId}. Calculate fuel economy metrics and create visualizations showing consumption patterns.`,
-      'maintenance': `Provide maintenance analysis for OBD2 session ${sessionId}. Identify maintenance needs, component health, and create maintenance schedules with supporting data.`,
-      'driving_behavior': `Analyze driving behavior patterns from OBD2 session ${sessionId}. Include acceleration, braking, speed patterns, and efficiency metrics with visualizations.`
-    };
-
-    const question = analysisQuestions[analysisType] || analysisQuestions['comprehensive'];
-
-    // Use direct OBD2 analysis service for reliable analysis
+    // Also run the standard analysis service for additional insights
     const analysisResult = await analysisService.executeTool('analyze_obd2_session', {
       sessionId,
       analysisType,
       timeRange
     });
 
-    // Generate AI response based on analysis result
+    // Generate comprehensive AI response based on enhanced analysis
     let fullResponse = '';
-    let plotResults = [];
-    let pythonCode = '';
-    let pythonOutput = '';
+    let plotResults = enhancedAnalysis.visualizations.flatMap(v => v.plots || []);
 
-    if (analysisResult.success) {
-      // Create a comprehensive response based on the analysis
-      fullResponse = `Based on the ${analysisType} analysis of your OBD2 session ${sessionId}:\n\n`;
+    // Build comprehensive response with enhanced analysis results
+    fullResponse = `# Comprehensive OBD2 Diagnostic Analysis Report\n\n`;
+    fullResponse += `**Analysis Type**: ${analysisType}\n`;
+    fullResponse += `**Session Duration**: ${Math.floor((session.duration || 0) / 60)} minutes\n`;
+    fullResponse += `**Data Points Analyzed**: ${allDataPoints.length}\n\n`;
 
-      if (analysisResult.analysis) {
-        // Format the analysis results into a readable response
+    // Add health scores
+    if (enhancedAnalysis.healthScores) {
+      fullResponse += `## Vehicle System Health Scores\n\n`;
+      fullResponse += `- **Overall Health**: ${enhancedAnalysis.healthScores.overall}/100\n`;
+      fullResponse += `- **Engine System**: ${enhancedAnalysis.healthScores.engine}/100\n`;
+      fullResponse += `- **Fuel System**: ${enhancedAnalysis.healthScores.fuel}/100\n`;
+      fullResponse += `- **Emissions System**: ${enhancedAnalysis.healthScores.emissions}/100\n`;
+      fullResponse += `- **Cooling System**: ${enhancedAnalysis.healthScores.cooling}/100\n`;
+      fullResponse += `- **Electrical System**: ${enhancedAnalysis.healthScores.electrical}/100\n\n`;
+    }
+
+    // Add anomaly detection results
+    if (enhancedAnalysis.anomalies) {
+      fullResponse += `## Parameter Range Analysis\n\n`;
+      fullResponse += `- **Parameters in Normal Range**: ${enhancedAnalysis.anomalies.inRange.length}\n`;
+      fullResponse += `- **Parameters Out of Range**: ${enhancedAnalysis.anomalies.outOfRange.length}\n`;
+      fullResponse += `- **Critical Issues**: ${enhancedAnalysis.anomalies.critical.length}\n\n`;
+
+      if (enhancedAnalysis.anomalies.outOfRange.length > 0) {
+        fullResponse += `### Out of Range Parameters:\n`;
+        enhancedAnalysis.anomalies.outOfRange.slice(0, 10).forEach(violation => {
+          fullResponse += `- **${violation.parameter}**: Average ${violation.average.toFixed(2)} ${violation.unit || ''} (Normal: ${violation.normalRange.min}-${violation.normalRange.max}) - ${violation.status.toUpperCase()}\n`;
+        });
+        fullResponse += `\n`;
+      }
+
+      if (enhancedAnalysis.anomalies.critical.length > 0) {
+        fullResponse += `### ⚠️ Critical Issues Requiring Immediate Attention:\n`;
+        enhancedAnalysis.anomalies.critical.forEach(issue => {
+          fullResponse += `- **${issue.parameter}** (${issue.category}): Value ${issue.value.toFixed(2)} outside safe range\n`;
+        });
+        fullResponse += `\n`;
+      }
+    }
+
+    // Add DTC analysis
+    if (dtcCodes.length > 0 && enhancedAnalysis.dtcAnalysis) {
+      fullResponse += `## DTC Code Analysis\n\n`;
+      fullResponse += `**Detected DTC Codes**: ${dtcCodes.join(', ')}\n\n`;
+
+      for (const [dtcCode, dtcData] of Object.entries(enhancedAnalysis.dtcAnalysis)) {
+        fullResponse += `### DTC ${dtcCode}\n`;
+        fullResponse += `${dtcData.analysis}\n`;
+        if (Object.keys(dtcData.pidData).length > 0) {
+          fullResponse += `**Related Parameter Values:**\n`;
+          for (const [pid, data] of Object.entries(dtcData.pidData)) {
+            fullResponse += `- ${pid}: Avg ${data.average.toFixed(2)}, Range ${data.min.toFixed(2)}-${data.max.toFixed(2)}\n`;
+          }
+        }
+        if (Object.keys(dtcData.correlations).length > 0) {
+          fullResponse += `**Parameter Correlations:**\n`;
+          for (const [corrKey, corrValue] of Object.entries(dtcData.correlations)) {
+            const strength = Math.abs(corrValue) > 0.7 ? 'strong' : Math.abs(corrValue) > 0.5 ? 'moderate' : 'weak';
+            fullResponse += `- ${corrKey}: ${(corrValue * 100).toFixed(1)}% (${strength})\n`;
+          }
+        }
+        fullResponse += `\n`;
+      }
+    }
+
+    // Add standard analysis results if available
+    if (analysisResult.success && analysisResult.analysis) {
         const analysis = analysisResult.analysis;
 
         if (analysis.sessionInfo) {
-          fullResponse += `**Session Information:**\n`;
+        fullResponse += `## Session Information\n\n`;
           fullResponse += `- Duration: ${Math.floor(analysis.sessionInfo.duration / 60)} minutes\n`;
           fullResponse += `- Data Points: ${analysis.sessionInfo.dataPoints}\n`;
           fullResponse += `- Status: ${analysis.sessionInfo.status}\n\n`;
@@ -1597,45 +2130,56 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
       }
 
       if (analysisResult.recommendations && analysisResult.recommendations.length > 0) {
-        fullResponse += `**Recommendations:**\n`;
+        fullResponse += `## Additional Recommendations\n\n`;
         analysisResult.recommendations.forEach((rec, index) => {
           const recommendationText = typeof rec === 'string' ? rec : rec.message || rec.description || JSON.stringify(rec);
           fullResponse += `${index + 1}. ${recommendationText}\n`;
         });
+        fullResponse += `\n`;
       }
 
-      // If visualization is requested, try to generate simple charts
-      if (includeVisualization) {
-        try {
-          // For now, we'll create a simple placeholder for visualizations
-          // In a full implementation, you'd call the Python service here
-          plotResults = [{
-            imageId: `plot_${sessionId}_${Date.now()}`,
-            url: `/api/images/plots/placeholder_${sessionId}.png`,
-            thumbnailUrl: `/api/images/plots/thumbnails/placeholder_${sessionId}.png`,
-            data: null, // Would contain Base64 data in full implementation
-            path: `/uploads/plots/placeholder_${sessionId}.png`,
-            type: 'chart'
-          }];
-
-          pythonCode = `# OBD2 Analysis Visualization for Session ${sessionId}\n# This would generate charts based on the analysis results`;
-          pythonOutput = 'Visualization placeholder generated';
-        } catch (error) {
-          console.log('Visualization generation skipped:', error.message);
+    // Add recommendations from enhanced analysis
+    if (enhancedAnalysis.comprehensiveReport?.recommendations) {
+      fullResponse += `## Diagnostic Recommendations\n\n`;
+      enhancedAnalysis.comprehensiveReport.recommendations.forEach((rec, index) => {
+        fullResponse += `${index + 1}. **[${rec.priority.toUpperCase()}]** ${rec.action}\n`;
+        fullResponse += `   Reason: ${rec.reason}\n`;
+        if (rec.affectedParameters) {
+          fullResponse += `   Affected Parameters: ${rec.affectedParameters.join(', ')}\n`;
         }
-      }
-    } else {
-      fullResponse = `Analysis failed: ${analysisResult.message || 'Unknown error'}`;
+        if (rec.dtcCodes) {
+          fullResponse += `   DTC Codes: ${rec.dtcCodes.join(', ')}\n`;
+        }
+        fullResponse += `\n`;
+      });
     }
 
-    // Prepare the enhanced response
+    // Add summary
+    if (enhancedAnalysis.comprehensiveReport?.summary) {
+      fullResponse += `## Analysis Summary\n\n`;
+      const summary = enhancedAnalysis.comprehensiveReport.summary;
+      fullResponse += `- Total Parameters Analyzed: ${summary.totalParameters}\n`;
+      fullResponse += `- Parameters in Normal Range: ${summary.parametersInRange}\n`;
+      fullResponse += `- Parameters Out of Range: ${summary.parametersOutOfRange}\n`;
+      fullResponse += `- Critical Issues Found: ${summary.criticalIssues}\n`;
+      if (summary.dtcCodes > 0) {
+        fullResponse += `- DTC Codes Detected: ${summary.dtcCodes}\n`;
+      }
+      fullResponse += `\n`;
+    }
+
+    if (!analysisResult.success) {
+      fullResponse += `\n⚠️ Standard analysis service returned: ${analysisResult.message || 'Unknown error'}\n`;
+      fullResponse += `Enhanced analysis results are still available above.\n`;
+    }
+
+    // Prepare the enhanced response with all analysis results
     const response = {
       success: true,
       sessionId,
       analysisType,
       timestamp: new Date().toISOString(),
       analysis: {
-        question: question,
         response: fullResponse,
         sessionInfo: {
           id: session._id,
@@ -1646,6 +2190,13 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
           dataPointCount: session.dataPointCount,
           status: session.status
         }
+      },
+      // Include enhanced analysis results
+      enhancedAnalysis: {
+        healthScores: enhancedAnalysis.healthScores,
+        anomalies: enhancedAnalysis.anomalies,
+        dtcAnalysis: enhancedAnalysis.dtcAnalysis,
+        comprehensiveReport: enhancedAnalysis.comprehensiveReport
       }
     };
 
@@ -1667,25 +2218,21 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
       console.log(`✅ Including PID analysis data: ${pidCount} PIDs analyzed`);
     }
 
-    // Add visualizations if available and requested
+    // Add visualizations from enhanced analysis
     if (includeVisualization && plotResults.length > 0) {
-      response.visualizations = plotResults.map(plot => ({
-        imageId: plot.imageId,
-        url: plot.url,
-        thumbnailUrl: plot.thumbnailUrl,
-        data: plot.data, // Base64 encoded image data
-        path: plot.path,
+      response.visualizations = plotResults.map((plot, index) => ({
+        imageId: plot.imageId || `plot_${sessionId}_${index}_${Date.now()}`,
+        url: plot.url || plot.path || `/api/images/plots/${plot.imageId || `plot_${sessionId}_${index}`}.png`,
+        thumbnailUrl: plot.thumbnailUrl || plot.url || plot.path,
+        data: plot.data || plot.base64, // Base64 encoded image data
+        path: plot.path || plot.filename,
         type: plot.type || 'chart',
-        // Include raw data that was used to generate this plot
-        rawData: analysisResult.plotData || null
+        description: plot.description || 'OBD2 diagnostic visualization'
       }));
 
-      // Add Python execution details
-      response.codeExecution = {
-        code: pythonCode,
-        output: pythonOutput,
-        success: true
-      };
+      console.log(`✅ Added ${response.visualizations.length} visualization(s) to response`);
+    } else if (includeVisualization) {
+      console.warn('⚠️ No visualizations generated despite includeVisualization=true');
     }
 
     // Add context information
@@ -2509,6 +3056,151 @@ router.get('/health', async (req, res) => {
       error: error.message,
       service: 'obd2'
     });
+  }
+});
+
+// =====================================================
+// Analytics Pack & Code Interpreter Endpoints
+// =====================================================
+
+/**
+ * GET /sessions/:sessionId/analytics-pack/overview
+ * Get session overview with KPIs and pack metadata
+ */
+router.get('/sessions/:sessionId/analytics-pack/overview', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const overview = await obd2AnalyticsPackService.getSessionOverview(sessionId);
+    res.json({ success: true, ...overview });
+  } catch (error) {
+    console.error('Failed to get session overview:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /sessions/:sessionId/analytics-pack/query
+ * Query timeseries data from pack
+ */
+router.post('/sessions/:sessionId/analytics-pack/query', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { signals, fromMs, toMs } = req.body;
+    
+    if (!signals || !Array.isArray(signals)) {
+      return res.status(400).json({ success: false, error: 'signals array required' });
+    }
+    
+    const result = await obd2AnalyticsPackService.queryTimeseries(
+      sessionId,
+      signals,
+      fromMs || 0,
+      toMs || Date.now()
+    );
+    
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Failed to query timeseries:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /sessions/:sessionId/analytics-pack/build
+ * Build analytics pack for a session
+ */
+router.post('/sessions/:sessionId/analytics-pack/build', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const pack = await obd2AnalyticsPackService.buildPack(sessionId);
+    res.json({ success: true, ...pack });
+  } catch (error) {
+    console.error('Failed to build pack:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /sessions/:sessionId/analytics-pack/upload
+ * Upload pack to OpenAI Files for Code Interpreter
+ */
+router.post('/sessions/:sessionId/analytics-pack/upload', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const uploadResult = await obd2AnalyticsPackService.uploadPackToOpenAI(sessionId);
+    res.json({ success: true, ...uploadResult });
+  } catch (error) {
+    console.error('Failed to upload pack:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /sessions/:sessionId/analytics-pack/code-interpreter
+ * Run Code Interpreter analysis on pack
+ */
+router.post('/sessions/:sessionId/analytics-pack/code-interpreter', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { task, model = 'gpt-4o' } = req.body;
+    
+    if (!task) {
+      return res.status(400).json({ success: false, error: 'task required' });
+    }
+    
+    // Upload pack first
+    const { parquetFileId, summaryFileId } = await obd2AnalyticsPackService.uploadPackToOpenAI(sessionId);
+    
+    // Create OpenAI client
+    /* global process */
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    
+    // Run Code Interpreter
+    const instructions = `You are analyzing OBD2 vehicle diagnostic data. 
+Load the attached files:
+- timeseries.parquet: Contains time-series data with columns for various vehicle parameters (RPM, speed, engineTemp, etc.)
+- summary.json: Contains session metadata and KPIs
+
+Task: ${task}
+
+Instructions:
+1. Load timeseries.parquet using pandas or polars
+2. Read summary.json for context
+3. Perform the requested analysis
+4. Generate visualizations if requested
+5. Provide a concise markdown summary with key findings
+6. Include a JSON block with key metrics/flags
+
+Use appropriate libraries: pandas, polars, matplotlib, seaborn, numpy, scipy.`;
+
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: instructions
+        },
+        {
+          role: 'user',
+          content: task,
+          attachments: [
+            { file_id: parquetFileId, tools: [{ type: 'code_interpreter' }] },
+            { file_id: summaryFileId, tools: [{ type: 'code_interpreter' }] }
+          ]
+        }
+      ],
+      tools: [{ type: 'code_interpreter' }]
+    });
+
+    res.json({
+      success: true,
+      sessionId,
+      result: response.choices[0].message,
+      fileIds: { parquetFileId, summaryFileId }
+    });
+  } catch (error) {
+    console.error('Failed to run Code Interpreter:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
