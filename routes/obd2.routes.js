@@ -1874,13 +1874,24 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
     // This handles race conditions where analysis is called immediately after session end
     const sessionJustEnded = session.status === 'completed' && 
                            session.endTime && 
-                           (Date.now() - new Date(session.endTime).getTime()) < 5000; // Within 5 seconds
+                           (Date.now() - new Date(session.endTime).getTime()) < 10000; // Within 10 seconds
+
+    // CRITICAL: Force flush any buffered data points before checking for data
+    // This ensures all data is committed to the database before analysis
+    // Try flushing with both string and ObjectId formats to handle any format variations
+    console.log(`🔄 Flushing buffered data for session ${sessionId} before analysis...`);
+    await dataAggregator.forceFlush(sessionId);
+    // Also try with string format in case buffer uses different format
+    await dataAggregator.forceFlush(sessionId.toString());
+    
+    // Small delay to ensure flush completes
+    await new Promise(resolve => setTimeout(resolve, 200));
 
     // Verify data points actually exist in the database with retry logic for recently ended sessions
     let sampleDataPoints = [];
     let retryCount = 0;
-    const maxRetries = sessionJustEnded ? 5 : 1; // More retries if session just ended
-    const retryDelay = 300; // 300ms between retries
+    const maxRetries = sessionJustEnded ? 10 : 3; // More retries if session just ended
+    const retryDelay = sessionJustEnded ? 500 : 300; // Longer delay if session just ended
 
     while (sampleDataPoints.length === 0 && retryCount < maxRetries) {
       sampleDataPoints = await OBD2DataPoint.find({ 
@@ -1914,16 +1925,93 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
 
     // Verify session has data to analyze
     if (actualDataPointCount === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'No data available for analysis',
-        message: sessionJustEnded 
-          ? 'Session was just ended but data is not yet available. Please wait a moment and try again.'
-          : 'Session has no data points. Please collect OBD2 data first.',
-        sessionId,
-        dataPointCount: actualDataPointCount,
-        sessionJustEnded
-      });
+      // Check if there's data in the buffer that wasn't flushed
+      // Try both string and ObjectId formats for sessionId, and check all buffer keys
+      const sessionIdStr = sessionId.toString();
+      const sessionIdObj = new mongoose.Types.ObjectId(sessionId);
+      const sessionIdObjStr = sessionIdObj.toString();
+      
+      // Check all buffer keys to find matching sessionId (handles format variations)
+      let bufferKey = null;
+      let bufferHasData = false;
+      
+      // Check direct matches first
+      if (dataAggregator.buffer.has(sessionIdStr)) {
+        const bufferData = dataAggregator.buffer.get(sessionIdStr);
+        if (bufferData && bufferData.length > 0) {
+          bufferKey = sessionIdStr;
+          bufferHasData = true;
+        }
+      } else if (dataAggregator.buffer.has(sessionIdObjStr)) {
+        const bufferData = dataAggregator.buffer.get(sessionIdObjStr);
+        if (bufferData && bufferData.length > 0) {
+          bufferKey = sessionIdObjStr;
+          bufferHasData = true;
+        }
+      } else {
+        // Check all buffer keys for a match (handles any format variations)
+        for (const key of dataAggregator.buffer.keys()) {
+          const keyStr = key.toString();
+          const bufferData = dataAggregator.buffer.get(key);
+          if (bufferData && bufferData.length > 0 && 
+              (keyStr === sessionIdStr || keyStr === sessionIdObjStr || 
+               new mongoose.Types.ObjectId(keyStr).toString() === sessionIdObjStr)) {
+            bufferKey = key;
+            bufferHasData = true;
+            break;
+          }
+        }
+      }
+      
+      console.warn(`⚠️ No data found for session ${sessionId}. Buffer has data: ${bufferHasData}, Session status: ${session.status}, Just ended: ${sessionJustEnded}`);
+      
+      // If buffer has data, try one more flush and wait
+      if (bufferHasData && bufferKey) {
+        console.log(`🔄 Buffer contains data (${dataAggregator.buffer.get(bufferKey).length} points), performing additional flush...`);
+        await dataAggregator.forceFlush(bufferKey);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Re-check data count
+        const retryDataPointCount = await OBD2DataPoint.countDocuments({ 
+          sessionId: new mongoose.Types.ObjectId(sessionId) 
+        });
+        
+        if (retryDataPointCount > 0) {
+          console.log(`✅ Data found after additional flush: ${retryDataPointCount} data points`);
+          // Update actualDataPointCount to use the newly found data
+          actualDataPointCount = retryDataPointCount;
+          // Re-fetch sample data points
+          sampleDataPoints = await OBD2DataPoint.find({ 
+            sessionId: new mongoose.Types.ObjectId(sessionId) 
+          })
+            .sort({ timestamp: 1 })
+            .limit(10)
+            .lean();
+        } else {
+          return res.status(400).json({
+            success: false,
+            error: 'No data available for analysis',
+            message: 'Session has no data points. The session may have been created but no OBD2 data was recorded. Please ensure data recording was active during the session.',
+            sessionId,
+            dataPointCount: 0,
+            sessionJustEnded,
+            sessionStatus: session.status,
+            sessionDuration: session.duration
+          });
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'No data available for analysis',
+          message: sessionJustEnded 
+            ? 'Session was just ended but data is not yet available. Please wait a moment and try again.'
+            : 'Session has no data points. Please collect OBD2 data first.',
+          sessionId,
+          dataPointCount: actualDataPointCount,
+          sessionJustEnded,
+          sessionStatus: session.status
+        });
+      }
     }
 
     console.log(`✅ Found ${sampleDataPoints.length} sample data points and ${actualDataPointCount} total data points for analysis`);

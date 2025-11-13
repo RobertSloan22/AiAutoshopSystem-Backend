@@ -78,7 +78,7 @@ import uiGenerationRoutes from './routes/ui-generation.routes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = process.env.PORT || 5000; // Using 5002 to avoid conflicts
+const PORT = process.env.PORT || 5005; // Using 5002 to avoid conflicts
 
 // Create Express app and HTTP server
 const app = express();

@@ -1,9 +1,9 @@
 venv
 /venv
 /.venv
-.venv
-
-
+.venv/
+db/
+fasttagent-server/.venv
 # Dependencies
 node_modules/
 /.pnp
