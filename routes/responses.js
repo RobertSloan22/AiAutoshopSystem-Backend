@@ -675,12 +675,15 @@ router.post('/execute/python', async (req, res) => {
     // If plots were generated, convert them to base64
     if (result.plots && result.plots.length > 0) {
       result.plots_data = [];
-      for (const plotPath of result.plots) {
+      for (const plot of result.plots) {
+        // Handle both string paths and plot objects
+        const plotPath = typeof plot === 'string' ? plot : plot.path;
         const base64Data = await responsesService.pythonService.getPlotAsBase64(plotPath);
         if (base64Data) {
           result.plots_data.push({
             path: plotPath,
-            data: base64Data
+            data: base64Data,
+            imageId: typeof plot === 'object' ? plot.imageId : undefined
           });
         }
       }
