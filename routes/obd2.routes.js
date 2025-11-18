@@ -1432,8 +1432,7 @@ warnings.filterwarnings('ignore')
 plt.style.use('seaborn-v0_8-darkgrid')
 sns.set_palette("husl")
 
-# Load session data
-data = ${JSON.stringify(visualizationData)}
+# data variable will be loaded from JSON file automatically
 df = pd.DataFrame(data)
 
 # Convert timestamp to datetime
@@ -1485,9 +1484,9 @@ ax3_twin.legend(loc='upper right')
 
 # Plot 4: Air Flow (MAF/MAP)
 ax4 = plt.subplot(3, 2, 4)
-if df['maf'].notna().any():
+if 'maf' in df.columns and df['maf'].notna().any():
     ax4.plot(df['timestamp'], df['maf'], label='MAF (g/s)', color='#06A77D', linewidth=2)
-if df['map'].notna().any():
+if 'map' in df.columns and df['map'].notna().any():
     ax4_twin = ax4.twinx()
     ax4_twin.plot(df['timestamp'], df['map'], label='MAP (kPa)', color='#F77F00', linewidth=2)
     ax4_twin.set_ylabel('MAP (kPa)', fontsize=10, color='#F77F00')
@@ -1500,9 +1499,9 @@ ax4.grid(True, alpha=0.3)
 
 # Plot 5: Fuel Trims
 ax5 = plt.subplot(3, 2, 5)
-if df['fuelTrimShortB1'].notna().any():
+if 'fuelTrimShortB1' in df.columns and df['fuelTrimShortB1'].notna().any():
     ax5.plot(df['timestamp'], df['fuelTrimShortB1'], label='Short Term FT B1', color='#E63946', linewidth=2, alpha=0.7)
-if df['fuelTrimLongB1'].notna().any():
+if 'fuelTrimLongB1' in df.columns and df['fuelTrimLongB1'].notna().any():
     ax5.plot(df['timestamp'], df['fuelTrimLongB1'], label='Long Term FT B1', color='#457B9D', linewidth=2, alpha=0.7)
 ax5.axhline(y=-10, color='orange', linestyle='--', alpha=0.5)
 ax5.axhline(y=10, color='orange', linestyle='--', alpha=0.5)
@@ -1515,7 +1514,7 @@ ax5.grid(True, alpha=0.3)
 
 # Plot 6: Battery Voltage
 ax6 = plt.subplot(3, 2, 6)
-if df['batteryVoltage'].notna().any():
+if 'batteryVoltage' in df.columns and df['batteryVoltage'].notna().any():
     ax6.plot(df['timestamp'], df['batteryVoltage'], label='Battery Voltage', color='#7209B7', linewidth=2)
     ax6.axhline(y=12.6, color='green', linestyle='--', alpha=0.5, label='Normal Min (12.6V)')
     ax6.axhline(y=14.5, color='green', linestyle='--', alpha=0.5, label='Normal Max (14.5V)')
@@ -1540,7 +1539,8 @@ print(f"📈 Generated 6 comprehensive charts")
 
       const vizResult = await pythonService.executeCode(visualizationCode, {
         save_plots: true,
-        plot_filename: `obd2_initial_visualization_${sessionId}`
+        plot_filename: `obd2_initial_visualization_${sessionId}`,
+        data: { data: visualizationData }
       });
 
       if (vizResult.success && vizResult.plots && vizResult.plots.length > 0) {
