@@ -3,6 +3,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import OpenAI from 'openai';
+import DiagnosticSession from '../models/diagnosticSession.model.js';
 import obd2RealtimeService from '../services/OBD2RealtimeService.js';
 import OBD2AnalysisService from '../services/obd2AnalysisService.js';
 import PythonExecutionService from '../services/pythonExecutionService.js';
@@ -21,62 +22,6 @@ const pythonService = new PythonExecutionService();
 // const responsesService = new ResponsesAPIService(); // Reserved for future use
 
 // MongoDB Schemas for OBD2 data (alternative to PostgreSQL)
-const DiagnosticSessionSchema = new mongoose.Schema({
-  userId: { type: String, index: true },
-  vehicleId: { type: String, index: true },
-  sessionName: String,
-  startTime: { type: Date, required: true, index: true },
-  endTime: Date,
-  duration: Number, // Duration in seconds
-  status: {
-    type: String,
-    enum: ['active', 'completed', 'paused', 'error', 'cancelled'],
-    default: 'active',
-    index: true
-  },
-  dataPointCount: { type: Number, default: 0 },
-
-  // Session metadata
-  sessionType: { type: String, default: 'diagnostic' },
-  locationStart: mongoose.Schema.Types.Mixed, // GPS coordinates
-  locationEnd: mongoose.Schema.Types.Mixed,
-  weatherConditions: mongoose.Schema.Types.Mixed,
-  drivingConditions: String,
-  sessionNotes: String,
-  tags: [String],
-
-  // PID configuration metadata
-  selectedPids: { type: [String], default: [] },
-  pidConfiguration: mongoose.Schema.Types.Mixed,
-  dtcCodes: { type: [String], default: [] },
-  affectedSystems: String,
-  focusAreas: { type: [String], default: [] },
-  metadata: mongoose.Schema.Types.Mixed,
-
-  // Vehicle information snapshot
-  vehicleInfo: mongoose.Schema.Types.Mixed,
-
-  // Session statistics
-  sessionStats: mongoose.Schema.Types.Mixed,
-
-  // Data quality metrics
-  dataQualityScore: Number,
-  missingDataPercentage: Number,
-  errorCount: { type: Number, default: 0 },
-
-  // Analysis storage fields
-  analysisResults: mongoose.Schema.Types.Mixed,
-  analysisVisualizations: [mongoose.Schema.Types.Mixed],  // Store actual visualization data
-  analysisTimestamp: Date,
-  analysisType: String,
-  analysisMetadata: {
-    dataPointsAnalyzed: Number,
-    visualizationsGenerated: Number,
-    analysisVersion: String
-  }
-}, {
-  timestamps: true
-});
 
 const OBD2DataPointSchema = new mongoose.Schema({
   sessionId: {
@@ -230,9 +175,6 @@ const DTCEventSchema = new mongoose.Schema({
 });
 
 // Create compound indexes for better query performance
-DiagnosticSessionSchema.index({ userId: 1, startTime: -1 });
-DiagnosticSessionSchema.index({ vehicleId: 1, startTime: -1 });
-DiagnosticSessionSchema.index({ status: 1, startTime: -1 });
 OBD2DataPointSchema.index({ sessionId: 1, timestamp: -1 });
 DTCEventSchema.index({ sessionId: 1, timestamp: -1 });
 DTCEventSchema.index({ dtcCode: 1, dtcStatus: 1 });
@@ -255,7 +197,6 @@ const SharedSessionSchema = new mongoose.Schema({
 });
 
 // Create models
-const DiagnosticSession = mongoose.model('DiagnosticSession', DiagnosticSessionSchema);
 const OBD2DataPoint = mongoose.model('OBD2DataPoint', OBD2DataPointSchema);
 const DTCEvent = mongoose.model('DTCEvent', DTCEventSchema);
 const SharedSession = mongoose.model('SharedSession', SharedSessionSchema);

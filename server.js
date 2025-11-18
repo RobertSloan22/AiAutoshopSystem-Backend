@@ -71,6 +71,7 @@ import plotsRoutes from './routes/plots.routes.js';
 import plotsFallbackRoutes from './routes/plots-fallback.routes.js';
 import elizaProxyRoutes from './routes/elizaProxy.routes.js';
 import obd2Routes from './routes/obd2.routes.js';
+import comprehensiveReportRoutes from './routes/comprehensiveReport.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
 import diagnosticAgentsRoutes from './routes/diagnostic-agents.js';
 import uiGenerationRoutes from './routes/ui-generation.routes.js';
@@ -654,6 +655,9 @@ app.use('/api/eliza-direct', elizaProxyRoutes);
 
 // Register OBD2 data routes
 app.use('/api/obd2', obd2Routes);
+
+// Register comprehensive reports routes
+app.use('/api/obd2', comprehensiveReportRoutes);
 
 // Register diagnostic agents routes
 app.use('/api/diagnostic-agents', diagnosticAgentsRoutes);
