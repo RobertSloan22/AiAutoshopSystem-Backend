@@ -73,23 +73,46 @@ class PythonExecutionService {
 
   async executeCode(code, options = {}) {
     const executionId = crypto.randomUUID();
-    const { save_plots = true, plot_filename } = options;
+    const { save_plots = true, plot_filename, data } = options;
 
     console.log(`📐 PYTHON EXEC: Starting execution with ID: ${executionId}`);
-    console.log(`📐 PYTHON EXEC: Options:`, JSON.stringify(options));
+    console.log(`📐 PYTHON EXEC: Options:`, JSON.stringify({ ...options, data: data ? `<${Object.keys(data).length} data objects>` : undefined }));
     console.log(`📐 PYTHON EXEC: SessionId for plots: ${options.sessionId}`);
     console.log(`📐 PYTHON EXEC: Code length: ${code.length} chars`);
     console.log(`📐 PYTHON EXEC: Code includes plt.savefig: ${code.includes('plt.savefig')}`);
 
     try {
+      // Handle data parameter: write data to JSON files if provided
+      let dataFiles = {};
+      if (data && typeof data === 'object') {
+        console.log(`📐 PYTHON EXEC: Writing ${Object.keys(data).length} data objects to JSON files`);
+        for (const [key, value] of Object.entries(data)) {
+          const dataFilePath = path.join(this.outputDir, `data_${executionId}_${key}.json`);
+          await fs.writeFile(dataFilePath, JSON.stringify(value));
+          dataFiles[key] = dataFilePath;
+          console.log(`📐 PYTHON EXEC: Wrote ${key} data to ${dataFilePath}`);
+        }
+
+        // Prepend code to load data files
+        const dataLoadCode = Object.entries(dataFiles)
+          .map(([key, filepath]) => `
+import json
+with open('${filepath}', 'r') as f:
+    ${key} = json.load(f)`)
+          .join('\n');
+
+        code = dataLoadCode + '\n\n' + code;
+        console.log(`📐 PYTHON EXEC: Enhanced code length with data loading: ${code.length} chars`);
+      }
+
       // If Python server is available, use it for better performance
       if (this.isConnected) {
         console.log(`📐 PYTHON EXEC: Using server execution`);
-        return await this.executeViaServer(code, executionId, { ...options, save_plots, plot_filename });
+        return await this.executeViaServer(code, executionId, { ...options, save_plots, plot_filename, dataFiles });
       } else {
         // Fallback to local execution
         console.log(`📐 PYTHON EXEC: Using local execution`);
-        return await this.executeLocally(code, executionId, { ...options, save_plots, plot_filename });
+        return await this.executeLocally(code, executionId, { ...options, save_plots, plot_filename, dataFiles });
       }
     } catch (error) {
       console.error('Python execution error:', error);
@@ -232,6 +255,18 @@ class PythonExecutionService {
             // Ignore cleanup errors
           }
 
+          // Clean up data files if any
+          if (options.dataFiles && typeof options.dataFiles === 'object') {
+            for (const filepath of Object.values(options.dataFiles)) {
+              try {
+                await fs.unlink(filepath);
+                console.log(`📐 PYTHON EXEC: Cleaned up data file: ${filepath}`);
+              } catch (e) {
+                // Ignore cleanup errors
+              }
+            }
+          }
+
           // Parse output to find plot paths
           const outputText = output.join('');
           const errorText = errorOutput.join('');
@@ -333,6 +368,18 @@ class PythonExecutionService {
       } catch (e) {
         // Ignore cleanup errors
       }
+
+      // Clean up data files on error
+      if (options.dataFiles && typeof options.dataFiles === 'object') {
+        for (const filepath of Object.values(options.dataFiles)) {
+          try {
+            await fs.unlink(filepath);
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+        }
+      }
+
       throw error;
     }
   }

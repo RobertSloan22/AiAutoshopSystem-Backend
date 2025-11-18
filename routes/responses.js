@@ -655,7 +655,7 @@ router.get('/services/status', async (req, res) => {
 // PYTHON CODE EXECUTION ENDPOINT
 router.post('/execute/python', async (req, res) => {
   try {
-    const { code, save_plots = true, plot_filename, sessionId, vehicleContext, customerContext } = req.body;
+    const { code, save_plots = true, plot_filename, sessionId, vehicleContext, customerContext, data } = req.body;
 
     if (!code) {
       return res.status(400).json({ error: 'Code is required' });
@@ -663,13 +663,15 @@ router.post('/execute/python', async (req, res) => {
 
     console.log('Executing Python code via API endpoint');
     console.log(`📐 DIRECT EXEC: SessionId: ${sessionId}`);
-    
+    console.log(`📐 DIRECT EXEC: Has data parameter: ${!!data}`);
+
     const result = await responsesService.pythonService.executeCode(code, {
       save_plots,
       plot_filename,
       sessionId,
       vehicleContext,
-      customerContext
+      customerContext,
+      data
     });
 
     // If plots were generated, convert them to base64
