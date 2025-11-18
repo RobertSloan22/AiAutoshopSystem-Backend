@@ -10,6 +10,13 @@ import PythonExecutionService from '../services/pythonExecutionService.js';
 import obd2AnalyticsPackService from '../services/obd2AnalyticsPackService.js';
 // import ResponsesAPIService from '../services/responsesService.js'; // Reserved for future use
 
+// Secure Code Interpreter imports
+import OpenAIInterface from '../obd2-code-interpreter/core/OpenAIInterface.js';
+import OBD2DataAccessAgent from '../obd2-code-interpreter/agents/OBD2DataAccessAgent.js';
+import OBD2AnalysisAgent from '../obd2-code-interpreter/agents/OBD2AnalysisAgent.js';
+import OBD2DataAccessTool from '../obd2-code-interpreter/tools/OBD2DataAccessTool.js';
+// Note: OBD2DataPoint model is defined below in this file (line 207)
+
 const router = express.Router();
 
 // Initialize analysis service
@@ -3232,5 +3239,277 @@ Use appropriate libraries: pandas, polars, matplotlib, seaborn, numpy, scipy.`;
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ============================================================================
+// SECURE CODE INTERPRETER ROUTES (NEW - PARALLEL TO EXISTING SYSTEM)
+// ============================================================================
+
+// Initialize OpenAI interface for secure analysis
+const secureOpenAIInterface = new OpenAIInterface(process.env.OPENAI_API_KEY);
+
+/**
+ * Helper function to extract plots from agent's message history
+ */
+function extractPlotsFromAgent(agent) {
+  const plots = [];
+
+  // Look through agent's message history for tool responses
+  for (const message of agent.messages) {
+    if (message.role === 'tool' && message.content) {
+      try {
+        const toolResponse = JSON.parse(message.content);
+        if (toolResponse.plots && Array.isArray(toolResponse.plots)) {
+          plots.push(...toolResponse.plots);
+        }
+      } catch (e) {
+        // Not a JSON response or no plots, continue
+      }
+    }
+  }
+
+  return plots;
+}
+
+/**
+ * NEW ROUTE: Secure analysis using Docker-based code interpreter
+ * Runs alongside existing /analyze endpoint
+ */
+router.post('/sessions/:sessionId/analyze/secure', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { question, reasoningEffort = 'medium' } = req.body;
+
+    if (!question) {
+      return res.status(400).json({
+        success: false,
+        error: 'question is required'
+      });
+    }
+
+    console.log(`🔒 [SECURE] OBD2 Analysis for session ${sessionId}`);
+    console.log(`🔒 [SECURE] Question: ${question}`);
+    console.log(`🔒 [SECURE] Reasoning effort: ${reasoningEffort}`);
+
+    const startTime = Date.now();
+
+    // Step 1: Directly load data into Docker container
+    console.log('🔒 [SECURE] Step 1/2: Retrieving OBD2 data from MongoDB...');
+    const dataAccessTool = new OBD2DataAccessTool(OBD2DataPoint, DiagnosticSession);
+    const dataContextRaw = await dataAccessTool.run({ sessionId });
+
+    // Parse the result to check for errors
+    let dataContext;
+    try {
+      const dataResult = JSON.parse(dataContextRaw);
+      if (!dataResult.success) {
+        throw new Error(dataResult.error || 'Failed to load OBD2 data');
+      }
+      dataContext = dataContextRaw;
+      console.log('🔒 [SECURE] ✅ Data retrieved and prepared');
+    } catch (parseError) {
+      // If it's not JSON, treat it as a string message (backward compatibility)
+      if (dataContextRaw.startsWith('Error:')) {
+        throw new Error(dataContextRaw);
+      }
+      dataContext = dataContextRaw;
+      console.log('🔒 [SECURE] ✅ Data retrieved and prepared');
+    }
+
+    // Step 2: Analysis Agent generates code and performs analysis
+    console.log('🔒 [SECURE] Step 2/2: Analyzing data with o3-mini...');
+    const analysisAgent = new OBD2AnalysisAgent(secureOpenAIInterface, reasoningEffort);
+
+    // Add data context to analysis agent
+    analysisAgent.addContext(dataContext);
+
+    // Perform analysis
+    const analysisResult = await analysisAgent.task(question);
+
+    // Extract plots from agent's message history
+    const plots = extractPlotsFromAgent(analysisAgent);
+    console.log(`📊 Extracted ${plots.length} plot(s) from analysis`);
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`🔒 [SECURE] ✅ Analysis complete in ${duration}s`);
+
+    res.json({
+      success: true,
+      sessionId,
+      question,
+      analysis: analysisResult,
+      plots: plots,
+      method: 'secure_docker_execution',
+      model: 'o3-mini',
+      reasoningEffort,
+      duration: `${duration}s`,
+      system: 'new_secure_interpreter'
+    });
+
+  } catch (error) {
+    console.error('🔒 [SECURE] ❌ Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      system: 'new_secure_interpreter'
+    });
+  }
+});
+
+/**
+ * NEW ROUTE: Streaming version for real-time analysis updates
+ * Runs alongside existing analysis endpoints
+ */
+router.post('/sessions/:sessionId/analyze/secure/stream', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { question, reasoningEffort = 'medium' } = req.body;
+
+    if (!question) {
+      return res.status(400).json({
+        success: false,
+        error: 'question is required'
+      });
+    }
+
+    // Set up SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+    const sendEvent = (event, data) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    console.log(`🔒 [SECURE STREAM] Starting analysis for session ${sessionId}`);
+
+    sendEvent('status', {
+      message: 'Starting secure analysis...',
+      step: '1/3',
+      system: 'secure_interpreter'
+    });
+
+    // Step 1: Get data
+    sendEvent('status', {
+      message: 'Retrieving OBD2 data from MongoDB...',
+      step: '1/3'
+    });
+
+    const dataAccessTool = new OBD2DataAccessTool(OBD2DataPoint, DiagnosticSession);
+    const dataContextRaw = await dataAccessTool.run({ sessionId });
+
+    // Parse the result to check for errors
+    let dataContext;
+    try {
+      const dataResult = JSON.parse(dataContextRaw);
+      if (!dataResult.success) {
+        throw new Error(dataResult.error || 'Failed to load OBD2 data');
+      }
+      dataContext = dataContextRaw;
+    } catch (parseError) {
+      // If it's not JSON, treat it as a string message (backward compatibility)
+      if (dataContextRaw.startsWith('Error:')) {
+        throw new Error(dataContextRaw);
+      }
+      dataContext = dataContextRaw;
+    }
+
+    sendEvent('data_ready', {
+      message: 'Data prepared and loaded into Docker container',
+      step: '2/3'
+    });
+
+    // Step 2: Analyze
+    sendEvent('status', {
+      message: `Analyzing with o3-mini (${reasoningEffort} reasoning)...`,
+      step: '3/3'
+    });
+
+    const analysisAgent = new OBD2AnalysisAgent(secureOpenAIInterface, reasoningEffort);
+    analysisAgent.addContext(dataContext);
+
+    const analysisResult = await analysisAgent.task(question);
+
+    // Extract plots from agent's message history
+    const plots = extractPlotsFromAgent(analysisAgent);
+    console.log(`📊 Extracted ${plots.length} plot(s) from streaming analysis`);
+
+    sendEvent('complete', {
+      sessionId,
+      question,
+      analysis: analysisResult,
+      plots: plots,
+      model: 'o3-mini',
+      reasoningEffort,
+      system: 'secure_interpreter'
+    });
+
+    res.end();
+
+  } catch (error) {
+    console.error('🔒 [SECURE STREAM] ❌ Error:', error);
+    res.write(`event: error\ndata: ${JSON.stringify({
+      error: error.message,
+      system: 'secure_interpreter'
+    })}\n\n`);
+    res.end();
+  }
+});
+
+/**
+ * NEW ROUTE: Health check for secure interpreter system
+ */
+router.get('/secure-interpreter/health', async (req, res) => {
+  try {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    // Check Docker container
+    const { stdout } = await execAsync('docker ps --filter name=obd2_sandbox --format "{{.Status}}"');
+    const containerRunning = stdout.includes('Up');
+
+    // Check Python in container
+    let pythonVersion = null;
+    if (containerRunning) {
+      try {
+        const { stdout: pyVersion } = await execAsync('docker exec obd2_sandbox python --version');
+        pythonVersion = pyVersion.trim();
+      } catch (e) {
+        pythonVersion = 'Error checking version';
+      }
+    }
+
+    res.json({
+      success: true,
+      system: 'secure_code_interpreter',
+      status: {
+        dockerContainer: containerRunning ? 'running' : 'stopped',
+        containerName: 'obd2_sandbox',
+        pythonVersion,
+        models: {
+          dataAccess: 'gpt-4o',
+          analysis: 'o3-mini'
+        }
+      },
+      routes: {
+        analysis: '/api/obd2/sessions/:sessionId/analyze/secure',
+        streaming: '/api/obd2/sessions/:sessionId/analyze/secure/stream',
+        health: '/api/obd2/secure-interpreter/health'
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      system: 'secure_code_interpreter'
+    });
+  }
+});
+
+// ============================================================================
+// END SECURE CODE INTERPRETER ROUTES
+// ============================================================================
 
 export default router;
