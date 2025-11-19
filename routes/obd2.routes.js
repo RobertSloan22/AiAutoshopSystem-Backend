@@ -403,6 +403,24 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
       { isActive: false }
     );
 
+    // Trigger automatic analysis in background (non-blocking)
+    // Only trigger if there's actual data to analyze
+    if (actualDataPointCount > 0) {
+      console.log(`🤖 Triggering automatic analysis for session ${sessionId}...`);
+
+      // Initialize auto-analysis status
+      await DiagnosticSession.findByIdAndUpdate(sessionId, {
+        'autoAnalysis.status': 'pending'
+      });
+
+      // Run analysis in background (don't await)
+      runAutoAnalysis(sessionId).catch(err => {
+        console.error(`🤖 Background auto-analysis failed for session ${sessionId}:`, err);
+      });
+    } else {
+      console.log(`⚠️  Skipping auto-analysis for session ${sessionId} - no data points`);
+    }
+
     res.json({
       success: true,
       session: {
@@ -410,7 +428,8 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
         endTime: updatedSession.endTime,
         duration: updatedSession.duration,
         dataPointCount: updatedSession.dataPointCount,
-        status: updatedSession.status
+        status: updatedSession.status,
+        autoAnalysisTriggered: actualDataPointCount > 0
       }
     });
 
@@ -3271,6 +3290,87 @@ function extractPlotsFromAgent(agent) {
 }
 
 /**
+ * Background function to automatically analyze a session after it ends
+ * This runs asynchronously and stores results in the session document
+ */
+async function runAutoAnalysis(sessionId) {
+  const startTime = Date.now();
+
+  try {
+    console.log(`🤖 [AUTO-ANALYSIS] Starting automatic analysis for session ${sessionId}`);
+
+    // Update status to processing
+    await DiagnosticSession.findByIdAndUpdate(sessionId, {
+      'autoAnalysis.status': 'processing',
+      'autoAnalysis.startedAt': new Date()
+    });
+
+    // Step 1: Load data into Docker container
+    console.log(`🤖 [AUTO-ANALYSIS] Loading OBD2 data...`);
+    const dataAccessTool = new OBD2DataAccessTool(OBD2DataPoint, DiagnosticSession);
+    const dataContextRaw = await dataAccessTool.run({ sessionId });
+
+    // Check for errors
+    const dataResult = JSON.parse(dataContextRaw);
+    if (!dataResult.success) {
+      throw new Error(dataResult.error || 'Failed to load OBD2 data');
+    }
+
+    // Step 2: Run comprehensive analysis with o3-mini
+    console.log(`🤖 [AUTO-ANALYSIS] Running AI analysis...`);
+    const analysisAgent = new OBD2AnalysisAgent(secureOpenAIInterface, 'medium');
+    analysisAgent.addContext(dataContextRaw);
+
+    const question = `Analyze this OBD2 session data and look for any potential signs of trouble or anomalies.
+
+Create comprehensive visualizations showing:
+1. Engine performance metrics (RPM, temperature, throttle position)
+2. Fuel system health (fuel trims, if available)
+3. Oxygen sensor readings (if available)
+4. Any other critical parameters
+
+Then provide a diagnostic summary including:
+- Overall vehicle health status
+- Any concerning patterns or anomalies detected
+- Specific issues that need attention
+- Recommendations for the driver
+
+Focus on actionable insights and be specific about any problems found.`;
+
+    const analysisResult = await analysisAgent.task(question);
+
+    // Extract plots
+    const plots = extractPlotsFromAgent(analysisAgent);
+    console.log(`🤖 [AUTO-ANALYSIS] Generated ${plots.length} visualization(s)`);
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    // Store results in session
+    await DiagnosticSession.findByIdAndUpdate(sessionId, {
+      'autoAnalysis.status': 'completed',
+      'autoAnalysis.completedAt': new Date(),
+      'autoAnalysis.result': analysisResult,
+      'autoAnalysis.plots': plots,
+      'autoAnalysis.duration': parseFloat(duration),
+      'aiSummary': analysisResult // Also store in main aiSummary field for backwards compatibility
+    });
+
+    console.log(`🤖 [AUTO-ANALYSIS] ✅ Analysis completed in ${duration}s`);
+
+  } catch (error) {
+    console.error(`🤖 [AUTO-ANALYSIS] ❌ Error:`, error);
+
+    // Store error in session
+    await DiagnosticSession.findByIdAndUpdate(sessionId, {
+      'autoAnalysis.status': 'failed',
+      'autoAnalysis.completedAt': new Date(),
+      'autoAnalysis.error': error.message,
+      'autoAnalysis.duration': ((Date.now() - startTime) / 1000).toFixed(2)
+    });
+  }
+}
+
+/**
  * NEW ROUTE: Secure analysis using Docker-based code interpreter
  * Runs alongside existing /analyze endpoint
  */
@@ -3453,6 +3553,152 @@ router.post('/sessions/:sessionId/analyze/secure/stream', async (req, res) => {
       system: 'secure_interpreter'
     })}\n\n`);
     res.end();
+  }
+});
+
+/**
+ * NEW ROUTE: Get automatic analysis results
+ * Returns the auto-analysis that was triggered when the session ended
+ */
+router.get('/sessions/:sessionId/auto-analysis', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await DiagnosticSession.findById(sessionId).lean();
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    // Return auto-analysis data if available
+    if (!session.autoAnalysis || !session.autoAnalysis.status) {
+      return res.json({
+        success: true,
+        status: 'not_started',
+        message: 'Auto-analysis was not triggered for this session'
+      });
+    }
+
+    const response = {
+      success: true,
+      status: session.autoAnalysis.status,
+      sessionId: sessionId,
+      sessionName: session.sessionName,
+      dataPointCount: session.dataPointCount
+    };
+
+    // Add timing information if available
+    if (session.autoAnalysis.startedAt) {
+      response.startedAt = session.autoAnalysis.startedAt;
+    }
+    if (session.autoAnalysis.completedAt) {
+      response.completedAt = session.autoAnalysis.completedAt;
+    }
+    if (session.autoAnalysis.duration) {
+      response.duration = `${session.autoAnalysis.duration}s`;
+    }
+
+    // Add results if completed
+    if (session.autoAnalysis.status === 'completed') {
+      response.analysis = session.autoAnalysis.result;
+      response.plots = session.autoAnalysis.plots || [];
+      response.plotCount = (session.autoAnalysis.plots || []).length;
+    }
+
+    // Add error if failed
+    if (session.autoAnalysis.status === 'failed') {
+      response.error = session.autoAnalysis.error;
+    }
+
+    // Add progress message for pending/processing
+    if (session.autoAnalysis.status === 'pending') {
+      response.message = 'Auto-analysis is queued and will start shortly';
+    } else if (session.autoAnalysis.status === 'processing') {
+      response.message = 'Auto-analysis is currently running';
+      // Calculate elapsed time if started
+      if (session.autoAnalysis.startedAt) {
+        const elapsed = Math.floor((Date.now() - new Date(session.autoAnalysis.startedAt).getTime()) / 1000);
+        response.elapsedSeconds = elapsed;
+        response.message = `Auto-analysis is running (${elapsed}s elapsed)`;
+      }
+    }
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Error fetching auto-analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * NEW ROUTE: Manually trigger auto-analysis for a session
+ * Useful if auto-analysis failed or wasn't triggered automatically
+ */
+router.post('/sessions/:sessionId/auto-analysis/trigger', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await DiagnosticSession.findById(sessionId);
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    // Check if session has data
+    const dataPointCount = await OBD2DataPoint.countDocuments({
+      sessionId: new mongoose.Types.ObjectId(sessionId)
+    });
+
+    if (dataPointCount === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Session has no data points to analyze'
+      });
+    }
+
+    // Check if analysis is already running
+    if (session.autoAnalysis && session.autoAnalysis.status === 'processing') {
+      return res.status(409).json({
+        success: false,
+        error: 'Auto-analysis is already running for this session',
+        status: 'processing'
+      });
+    }
+
+    // Initialize auto-analysis status
+    await DiagnosticSession.findByIdAndUpdate(sessionId, {
+      'autoAnalysis.status': 'pending'
+    });
+
+    // Trigger analysis in background
+    console.log(`🤖 Manually triggering auto-analysis for session ${sessionId}...`);
+    runAutoAnalysis(sessionId).catch(err => {
+      console.error(`🤖 Manual auto-analysis failed for session ${sessionId}:`, err);
+    });
+
+    res.json({
+      success: true,
+      message: 'Auto-analysis triggered successfully',
+      sessionId: sessionId,
+      status: 'pending'
+    });
+
+  } catch (error) {
+    console.error('❌ Error triggering auto-analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 

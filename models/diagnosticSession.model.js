@@ -29,6 +29,19 @@ const DiagnosticSessionSchema = new mongoose.Schema({
   patterns: [mongoose.Schema.Types.Mixed],
   anomalies: [mongoose.Schema.Types.Mixed],
   recommendations: [String],
+  autoAnalysis: {
+    status: {
+      type: String,
+      enum: ['pending', 'processing', 'completed', 'failed'],
+      default: null
+    },
+    startedAt: Date,
+    completedAt: Date,
+    result: mongoose.Schema.Types.Mixed,
+    plots: [mongoose.Schema.Types.Mixed],
+    error: String,
+    duration: Number
+  },
   exportedFormats: [String],
   lastExportTime: Date,
   isArchived: { type: Boolean, default: false },
