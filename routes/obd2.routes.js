@@ -340,11 +340,11 @@ router.post('/sessions', async (req, res) => {
 
     const savedSession = await session.save();
 
-    // Start interval analysis for real-time monitoring
-    const intervalService = initializeIntervalAnalysisService();
-    intervalService.startIntervalAnalysis(savedSession._id.toString()).catch(err => {
-      console.error(`⚠️  Failed to start interval analysis for session ${savedSession._id}:`, err);
-    });
+    // DISABLED: Interval analysis for real-time monitoring (only using end-of-session auto-analysis)
+    // const intervalService = initializeIntervalAnalysisService();
+    // intervalService.startIntervalAnalysis(savedSession._id.toString()).catch(err => {
+    //   console.error(`⚠️  Failed to start interval analysis for session ${savedSession._id}:`, err);
+    // });
 
     res.status(201).json({
       success: true,
@@ -367,10 +367,10 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
   try {
     const { sessionId } = req.params;
 
-    // Stop interval analysis for this session
-    const intervalService = initializeIntervalAnalysisService();
-    intervalService.stopIntervalAnalysis(sessionId);
-    console.log(`🛑 Stopped interval analysis for session ${sessionId}`);
+    // DISABLED: Stop interval analysis for this session (only using end-of-session auto-analysis)
+    // const intervalService = initializeIntervalAnalysisService();
+    // intervalService.stopIntervalAnalysis(sessionId);
+    // console.log(`🛑 Stopped interval analysis for session ${sessionId}`);
 
     // Force flush any buffered data
     await dataAggregator.forceFlush(sessionId);
