@@ -37,6 +37,8 @@ class PythonExecTool extends ToolInterface {
   }
 
   async run({ python_code }) {
+    const tempFile = `/tmp/python_exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.py`;
+
     try {
       console.log('🐍 Executing Python code in Docker container...');
       console.log(`Code length: ${python_code.length} characters`);
@@ -49,16 +51,35 @@ class PythonExecTool extends ToolInterface {
         .replace(/^```\n?/, '')
         .replace(/\n?```$/, '');
 
-      // Escape for shell execution
-      const escapedCode = cleanCode.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
+      // Write code to a temporary file on the host
+      await fs.writeFile(tempFile, cleanCode);
 
-      // Execute code in Docker container
-      const command = `docker exec -i obd2_sandbox python -c "${escapedCode}"`;
+      // Copy the file into the container
+      const containerPath = `/home/obd2analyzer/temp_exec_${Date.now()}.py`;
+      await execAsync(`docker cp ${tempFile} obd2_sandbox:${containerPath}`, { timeout: 5000 });
 
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: 60000, // 60 second timeout for complex analysis
-        maxBuffer: 10 * 1024 * 1024 // 10MB buffer
-      });
+      // Execute the file in the container
+      const { stdout, stderr } = await execAsync(
+        `docker exec -i obd2_sandbox python ${containerPath}`,
+        {
+          timeout: 60000, // 60 second timeout for complex analysis
+          maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+        }
+      );
+
+      // Clean up the file from the container
+      try {
+        await execAsync(`docker exec obd2_sandbox rm ${containerPath}`, { timeout: 5000 });
+      } catch (cleanupError) {
+        console.warn('⚠️  Warning: Could not clean up container file:', cleanupError.message);
+      }
+
+      // Clean up the temp file from host
+      try {
+        await fs.unlink(tempFile);
+      } catch (cleanupError) {
+        console.warn('⚠️  Warning: Could not clean up host file:', cleanupError.message);
+      }
 
       // Filter out warnings from stderr
       const errors = stderr.split('\n')
@@ -93,6 +114,13 @@ class PythonExecTool extends ToolInterface {
 
     } catch (error) {
       console.error('❌ Python execution error:', error);
+
+      // Clean up temp file on error
+      try {
+        await fs.unlink(tempFile);
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
 
       // Parse execution errors
       const errorMessage = error.stderr || error.message;

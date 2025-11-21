@@ -42,6 +42,12 @@ const DiagnosticSessionSchema = new mongoose.Schema({
     error: String,
     duration: Number
   },
+  intervalAnalysis: {
+    quick_check: mongoose.Schema.Types.Mixed,
+    mid_session_1: mongoose.Schema.Types.Mixed,
+    mid_session_2: mongoose.Schema.Types.Mixed,
+    mid_session_3: mongoose.Schema.Types.Mixed
+  },
   exportedFormats: [String],
   lastExportTime: Date,
   isArchived: { type: Boolean, default: false },

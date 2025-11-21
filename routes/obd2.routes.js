@@ -3,7 +3,9 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import OpenAI from 'openai';
+import crypto from 'crypto';
 import DiagnosticSession from '../models/diagnosticSession.model.js';
+import Analysis from '../models/analysis.model.js';
 import obd2RealtimeService from '../services/OBD2RealtimeService.js';
 import OBD2AnalysisService from '../services/obd2AnalysisService.js';
 import PythonExecutionService from '../services/pythonExecutionService.js';
@@ -15,6 +17,7 @@ import OpenAIInterface from '../obd2-code-interpreter/core/OpenAIInterface.js';
 import OBD2DataAccessAgent from '../obd2-code-interpreter/agents/OBD2DataAccessAgent.js';
 import OBD2AnalysisAgent from '../obd2-code-interpreter/agents/OBD2AnalysisAgent.js';
 import OBD2DataAccessTool from '../obd2-code-interpreter/tools/OBD2DataAccessTool.js';
+import IntervalAnalysisService from '../services/intervalAnalysisService.js';
 // Note: OBD2DataPoint model is defined below in this file (line 207)
 
 const router = express.Router();
@@ -208,6 +211,25 @@ const OBD2DataPoint = mongoose.model('OBD2DataPoint', OBD2DataPointSchema);
 const DTCEvent = mongoose.model('DTCEvent', DTCEventSchema);
 const SharedSession = mongoose.model('SharedSession', SharedSessionSchema);
 
+// Initialize OpenAI interface for secure analysis (moved here for early initialization)
+const secureOpenAIInterface = new OpenAIInterface(process.env.OPENAI_API_KEY);
+
+// Declare interval analysis service variable
+let intervalAnalysisService = null;
+
+// Initialize interval analysis service
+const initializeIntervalAnalysisService = () => {
+  if (!intervalAnalysisService) {
+    intervalAnalysisService = new IntervalAnalysisService(
+      OBD2DataPoint,
+      DiagnosticSession,
+      secureOpenAIInterface
+    );
+    console.log('✅ Interval Analysis Service initialized');
+  }
+  return intervalAnalysisService;
+};
+
 // Data aggregation class for efficient storage
 class DataAggregator {
   constructor() {
@@ -318,6 +340,12 @@ router.post('/sessions', async (req, res) => {
 
     const savedSession = await session.save();
 
+    // Start interval analysis for real-time monitoring
+    const intervalService = initializeIntervalAnalysisService();
+    intervalService.startIntervalAnalysis(savedSession._id.toString()).catch(err => {
+      console.error(`⚠️  Failed to start interval analysis for session ${savedSession._id}:`, err);
+    });
+
     res.status(201).json({
       success: true,
       session: {
@@ -338,6 +366,11 @@ router.post('/sessions', async (req, res) => {
 router.put('/sessions/:sessionId/end', async (req, res) => {
   try {
     const { sessionId } = req.params;
+
+    // Stop interval analysis for this session
+    const intervalService = initializeIntervalAnalysisService();
+    intervalService.stopIntervalAnalysis(sessionId);
+    console.log(`🛑 Stopped interval analysis for session ${sessionId}`);
 
     // Force flush any buffered data
     await dataAggregator.forceFlush(sessionId);
@@ -724,6 +757,38 @@ router.get('/sessions/:sessionId/status', async (req, res) => {
   } catch (error) {
     console.error('❌ Failed to fetch session status:', error);
     res.status(500).json({ error: 'Failed to fetch session status' });
+  }
+});
+
+// Get interval analysis results for a session
+router.get('/sessions/:sessionId/interval-analysis', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID format' });
+    }
+
+    const intervalService = initializeIntervalAnalysisService();
+    const results = await intervalService.getIntervalAnalysisResults(sessionId);
+
+    if (results.error) {
+      return res.status(404).json({ error: results.error });
+    }
+
+    res.json({
+      success: true,
+      sessionId: results.sessionId,
+      intervalAnalysis: results.intervalAnalysis,
+      autoAnalysis: results.autoAnalysis,
+      availableIntervals: Object.keys(results.intervalAnalysis || {}),
+      message: Object.keys(results.intervalAnalysis || {}).length === 0
+        ? 'No interval analysis results yet. Analysis runs at 15s, 60s, 2min, and 3min during active sessions.'
+        : undefined
+    });
+  } catch (error) {
+    console.error('❌ Failed to fetch interval analysis:', error);
+    res.status(500).json({ error: 'Failed to fetch interval analysis results' });
   }
 });
 
@@ -2298,28 +2363,82 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
       };
     }
 
-    // Persist analysis results to database
+    // Persist analysis results to database (both session and Analysis collection)
+    let analysisId = null;
+    const analysisStartTime = Date.now();
+
     try {
+      // Generate unique analysis ID
+      analysisId = Analysis.generateAnalysisId();
+
+      // Create Analysis document with comprehensive data
+      const analysisDoc = new Analysis({
+        analysisId: analysisId,
+        sessionId: sessionId,
+        analysisType: analysisType,
+        timestamp: new Date(),
+        status: 'completed',
+        duration: (Date.now() - analysisStartTime) / 1000,
+        result: fullResponse,
+        structuredData: {
+          summary: enhancedAnalysis.comprehensiveReport?.summary || null,
+          anomalies: enhancedAnalysis.anomalies || null,
+          healthScores: enhancedAnalysis.healthScores || null,
+          recommendations: enhancedAnalysis.comprehensiveReport?.recommendations || [],
+          statistics: analysisResult.analysis?.summary || null
+        },
+        plots: plotResults.map(plot => ({
+          filename: plot.filename || plot.path || `plot_${Date.now()}.png`,
+          base64: plot.data || plot.base64,
+          mimeType: plot.mimeType || 'image/png',
+          description: plot.description || 'OBD2 diagnostic visualization'
+        })),
+        context: {
+          dataPointCount: actualDataPointCount,
+          timeRange: {
+            start: session.startTime,
+            end: session.endTime
+          },
+          dtcCodes: dtcCodes,
+          vehicleInfo: enhancedVehicleContext,
+          customerContext: customerContext
+        },
+        modelInfo: {
+          model: 'o3-mini',
+          reasoningEffort: 'medium'
+        },
+        tags: [analysisType, ...(dtcCodes.length > 0 ? ['has_dtc'] : []), ...(enhancedAnalysis.anomalies?.critical?.length > 0 ? ['critical_issues'] : [])]
+      });
+
+      await analysisDoc.save();
+      console.log(`✅ Analysis saved with ID: ${analysisId}`);
+
+      // Also update DiagnosticSession for backwards compatibility
       await DiagnosticSession.findByIdAndUpdate(sessionId, {
         $set: {
           analysisResults: response.analysis,
-          analysisVisualizations: response.visualizations || [],  // Store actual visualizations
-          analysisPlotData: response.plotData || null,  // Store raw plot data for frontend use
+          analysisVisualizations: response.visualizations || [],
+          analysisPlotData: response.plotData || null,
           analysisTimestamp: new Date(),
           analysisType: analysisType,
           analysisMetadata: {
             dataPointsAnalyzed: session.dataPointCount,
             visualizationsGenerated: (response.visualizations || []).length,
             hasPlotData: !!response.plotData,
-            analysisVersion: '1.0'
+            analysisVersion: '1.0',
+            analysisId: analysisId  // Link to Analysis document
           }
         }
       });
-      console.log(`✅ Analysis results persisted for session ${sessionId} (${(response.visualizations || []).length} visualizations, plotData: ${!!response.plotData})`);
+      console.log(`✅ Analysis results persisted for session ${sessionId} (${(response.visualizations || []).length} visualizations, analysisId: ${analysisId})`);
     } catch (persistError) {
       console.error('⚠️ Failed to persist analysis results:', persistError);
       // Don't fail the request, just log the error
     }
+
+    // Add analysisId to response
+    response.analysisId = analysisId;
+    response.analysisUrl = analysisId ? `/api/obd2/analysis/${analysisId}` : null;
 
     res.json(response);
 
@@ -2334,7 +2453,7 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
   }
 });
 
-// Get previously generated analysis results
+// Get previously generated analysis results (from session - backwards compatibility)
 router.get('/sessions/:sessionId/analysis', async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -2373,6 +2492,7 @@ router.get('/sessions/:sessionId/analysis', async (req, res) => {
     res.json({
       success: true,
       sessionId,
+      analysisId: session.analysisMetadata?.analysisId || null,
       analysisType: session.analysisType,
       analysisTimestamp: session.analysisTimestamp,
       analysis: session.analysisResults,
@@ -2386,6 +2506,227 @@ router.get('/sessions/:sessionId/analysis', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get analysis results',
+      message: error.message
+    });
+  }
+});
+
+// =====================================================
+// NEW: Analysis-centric routes (retrieve by analysis ID)
+// =====================================================
+
+// Get analysis by analysis ID (recommended way)
+router.get('/analysis/:analysisId', async (req, res) => {
+  try {
+    const { analysisId } = req.params;
+
+    // Find analysis by analysisId
+    const analysis = await Analysis.findOne({ analysisId, isDeleted: false }).lean();
+
+    if (!analysis) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analysis not found',
+        message: 'No analysis found with the provided ID',
+        analysisId
+      });
+    }
+
+    // Format response for frontend
+    const response = {
+      success: true,
+      analysisId: analysis.analysisId,
+      sessionId: analysis.sessionId.toString(),
+      analysisType: analysis.analysisType,
+      status: analysis.status,
+      timestamp: analysis.timestamp,
+      duration: analysis.duration,
+
+      // Analysis results
+      result: analysis.result,
+      structuredData: analysis.structuredData,
+
+      // Visualizations with base64 data
+      plots: analysis.plots.map(plot => ({
+        filename: plot.filename,
+        data: plot.base64,
+        base64: plot.base64,
+        mimeType: plot.mimeType,
+        description: plot.description,
+        generatedAt: plot.generatedAt
+      })),
+
+      // Context information
+      context: analysis.context,
+
+      // Model info
+      modelInfo: analysis.modelInfo,
+
+      // Tags and metadata
+      tags: analysis.tags,
+      notes: analysis.notes,
+
+      // URLs for convenience
+      analysisUrl: `/api/obd2/analysis/${analysis.analysisId}`,
+      sessionUrl: `/api/obd2/sessions/${analysis.sessionId}`,
+
+      // Timestamps
+      createdAt: analysis.createdAt,
+      updatedAt: analysis.updatedAt
+    };
+
+    console.log(`✅ Retrieved analysis ${analysisId} with ${analysis.plots.length} plot(s)`);
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Failed to retrieve analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve analysis',
+      message: error.message,
+      analysisId: req.params.analysisId
+    });
+  }
+});
+
+// Get all analyses for a session
+router.get('/sessions/:sessionId/analyses', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { limit = 10, offset = 0, includeDeleted = false } = req.query;
+
+    // Validate sessionId format
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid session ID format',
+        sessionId
+      });
+    }
+
+    // Build query
+    const query = {
+      sessionId: new mongoose.Types.ObjectId(sessionId)
+    };
+
+    if (!includeDeleted) {
+      query.isDeleted = false;
+    }
+
+    // Get analyses
+    const analyses = await Analysis.find(query)
+      .sort({ timestamp: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(offset))
+      .select('-plots.base64')  // Exclude base64 data for list view (too large)
+      .lean();
+
+    const total = await Analysis.countDocuments(query);
+
+    // Format response
+    const formattedAnalyses = analyses.map(analysis => ({
+      analysisId: analysis.analysisId,
+      analysisType: analysis.analysisType,
+      status: analysis.status,
+      timestamp: analysis.timestamp,
+      duration: analysis.duration,
+      plotCount: analysis.plots?.length || 0,
+      hasRecommendations: (analysis.structuredData?.recommendations?.length || 0) > 0,
+      healthScore: analysis.structuredData?.healthScores?.overall || null,
+      tags: analysis.tags,
+      analysisUrl: `/api/obd2/analysis/${analysis.analysisId}`,
+      createdAt: analysis.createdAt
+    }));
+
+    res.json({
+      success: true,
+      sessionId,
+      analyses: formattedAnalyses,
+      total,
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to retrieve analyses:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve analyses',
+      message: error.message
+    });
+  }
+});
+
+// Get only plots from an analysis (useful for gallery/preview)
+router.get('/analysis/:analysisId/plots', async (req, res) => {
+  try {
+    const { analysisId } = req.params;
+
+    const analysis = await Analysis.findOne({ analysisId, isDeleted: false })
+      .select('analysisId plots')
+      .lean();
+
+    if (!analysis) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analysis not found',
+        analysisId
+      });
+    }
+
+    res.json({
+      success: true,
+      analysisId: analysis.analysisId,
+      plots: analysis.plots.map(plot => ({
+        filename: plot.filename,
+        data: plot.base64,
+        mimeType: plot.mimeType,
+        description: plot.description,
+        generatedAt: plot.generatedAt
+      })),
+      plotCount: analysis.plots.length
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to retrieve plots:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve plots',
+      message: error.message
+    });
+  }
+});
+
+// Delete analysis (soft delete)
+router.delete('/analysis/:analysisId', async (req, res) => {
+  try {
+    const { analysisId } = req.params;
+
+    const analysis = await Analysis.findOneAndUpdate(
+      { analysisId, isDeleted: false },
+      { $set: { isDeleted: true, updatedAt: new Date() } },
+      { new: true }
+    );
+
+    if (!analysis) {
+      return res.status(404).json({
+        success: false,
+        error: 'Analysis not found',
+        analysisId
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Analysis deleted successfully',
+      analysisId
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to delete analysis:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete analysis',
       message: error.message
     });
   }
@@ -3263,27 +3604,43 @@ Use appropriate libraries: pandas, polars, matplotlib, seaborn, numpy, scipy.`;
 // SECURE CODE INTERPRETER ROUTES (NEW - PARALLEL TO EXISTING SYSTEM)
 // ============================================================================
 
-// Initialize OpenAI interface for secure analysis
-const secureOpenAIInterface = new OpenAIInterface(process.env.OPENAI_API_KEY);
+// OpenAI interface for secure analysis (initialized earlier in file with models)
+// const secureOpenAIInterface is already defined above
+
+// Interval analysis service (initialized earlier in file with models)
+// intervalAnalysisService is initialized via initializeIntervalAnalysisService()
 
 /**
- * Helper function to extract plots from agent's message history
+ * Helper function to extract plots from agent's preserved plot storage
+ * NOTE: Plots are now stored in agent.generatedPlots to prevent context overflow
  */
 function extractPlotsFromAgent(agent) {
   const plots = [];
 
-  // Look through agent's message history for tool responses
-  for (const message of agent.messages) {
-    if (message.role === 'tool' && message.content) {
-      try {
-        const toolResponse = JSON.parse(message.content);
-        if (toolResponse.plots && Array.isArray(toolResponse.plots)) {
-          plots.push(...toolResponse.plots);
-        }
-      } catch (e) {
-        // Not a JSON response or no plots, continue
-      }
-    }
+  // Use the new generatedPlots array that preserves plots after truncation
+  const sourcePlots = agent.generatedPlots || [];
+
+  if (sourcePlots.length > 0) {
+    // Add unique IDs and ensure required fields for each plot
+    const enhancedPlots = sourcePlots.map(plot => {
+      // Generate unique ID if not present
+      const plotId = plot.id || crypto.randomUUID();
+
+      // Ensure both 'base64' and 'data' fields are present for compatibility
+      const imageData = plot.base64 || plot.data;
+
+      return {
+        id: plotId,
+        filename: plot.filename,
+        base64: imageData,  // Original field name
+        data: imageData,     // Alternative field name for frontend compatibility
+        mimeType: plot.mimeType || 'image/png',
+        path: plot.path,     // Optional: container path for debugging
+        timestamp: new Date().toISOString()
+      };
+    });
+
+    plots.push(...enhancedPlots);
   }
 
   return plots;
@@ -3323,19 +3680,53 @@ async function runAutoAnalysis(sessionId) {
 
     const question = `Analyze this OBD2 session data and look for any potential signs of trouble or anomalies.
 
-Create comprehensive visualizations showing:
-1. Engine performance metrics (RPM, temperature, throttle position)
-2. Fuel system health (fuel trims, if available)
-3. Oxygen sensor readings (if available)
-4. Any other critical parameters
+Create MULTIPLE comprehensive visualizations (generate 3-5 separate plot files):
 
-Then provide a diagnostic summary including:
-- Overall vehicle health status
-- Any concerning patterns or anomalies detected
-- Specific issues that need attention
-- Recommendations for the driver
+VISUALIZATION 1: "Engine Performance Dashboard" (6-panel layout)
+- RPM over time with normal range indicators
+- Engine temperature with safe/warning/critical zones
+- Throttle position vs engine load correlation
+- Speed profile over time
+- Engine efficiency metrics
+- Power output estimation
 
-Focus on actionable insights and be specific about any problems found.`;
+VISUALIZATION 2: "Fuel System Analysis" (4-panel layout)
+- Short-term fuel trim (Bank 1 & 2) with ±10% normal range
+- Long-term fuel trim trends
+- Fuel pressure and rate over time
+- Air-fuel ratio analysis (using O2 sensors and MAF)
+
+VISUALIZATION 3: "Emissions & O2 Sensors" (4-panel layout)
+- O2 sensor voltage patterns (should oscillate 0.1-0.9V)
+- Catalyst efficiency indicators
+- Exhaust gas temperature trends (if available)
+- Emissions system health score
+
+VISUALIZATION 4: "System Health Heatmap" (multi-panel)
+- Parameter correlation heatmap
+- Health score gauges for each system (engine, fuel, emissions, cooling, electrical)
+- Timeline of parameter deviations from normal
+- Anomaly detection visualization
+
+VISUALIZATION 5: "Diagnostic Summary & Alerts" (dashboard style)
+- Key metrics summary with gauges
+- Alert timeline (any out-of-range parameters)
+- Predictive maintenance indicators
+- Overall vehicle health score (0-100)
+
+IMPORTANT: Generate each visualization as a SEPARATE PNG file with descriptive filenames.
+Use matplotlib/seaborn with professional styling.
+Each plot should be comprehensive and information-dense.
+
+Then provide a detailed diagnostic summary including:
+- Overall vehicle health status (0-100 score)
+- System-by-system health assessment (engine, fuel, emissions, cooling, electrical)
+- Any concerning patterns or anomalies detected (be specific with values and timestamps)
+- Critical issues that need immediate attention
+- Maintenance recommendations
+- Performance optimization suggestions
+
+Focus on actionable insights with specific data points and timestamps.`;
 
     const analysisResult = await analysisAgent.task(question);
 
