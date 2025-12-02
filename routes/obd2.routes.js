@@ -340,11 +340,11 @@ router.post('/sessions', async (req, res) => {
 
     const savedSession = await session.save();
 
-    // DISABLED: Interval analysis for real-time monitoring (only using end-of-session auto-analysis)
-    // const intervalService = initializeIntervalAnalysisService();
-    // intervalService.startIntervalAnalysis(savedSession._id.toString()).catch(err => {
-    //   console.error(`⚠️  Failed to start interval analysis for session ${savedSession._id}:`, err);
-    // });
+    // ENABLED: Interval analysis for real-time monitoring (30s and 3min intervals)
+    const intervalService = initializeIntervalAnalysisService();
+    intervalService.startIntervalAnalysis(savedSession._id.toString()).catch(err => {
+      console.error(`⚠️  Failed to start interval analysis for session ${savedSession._id}:`, err);
+    });
 
     res.status(201).json({
       success: true,
@@ -367,10 +367,10 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
   try {
     const { sessionId } = req.params;
 
-    // DISABLED: Stop interval analysis for this session (only using end-of-session auto-analysis)
-    // const intervalService = initializeIntervalAnalysisService();
-    // intervalService.stopIntervalAnalysis(sessionId);
-    // console.log(`🛑 Stopped interval analysis for session ${sessionId}`);
+    // ENABLED: Stop interval analysis for this session
+    const intervalService = initializeIntervalAnalysisService();
+    intervalService.stopIntervalAnalysis(sessionId);
+    console.log(`🛑 Stopped interval analysis for session ${sessionId}`);
 
     // Force flush any buffered data
     await dataAggregator.forceFlush(sessionId);
@@ -3680,21 +3680,40 @@ async function runAutoAnalysis(sessionId) {
 
     const question = `Analyze this OBD2 session data and look for any potential signs of trouble or anomalies.
 
-Create MULTIPLE comprehensive visualizations (generate 3-5 separate plot files):
+CRITICAL FIRST STEP - DATA ANALYSIS:
+Before creating visualizations, you MUST analyze the actual data values and check for violations:
+
+1. Load the CSV and calculate statistics for ALL critical parameters:
+   - Fuel trims (Short/Long Term B1 & B2): Check if ANY values exceed ±10% (normal range)
+   - O2 sensor voltages: Check oscillation patterns and if values stay within 0.1-0.9V
+   - Engine temperature: Check if exceeds 220°F or stays below 180°F
+   - Battery voltage: Check if outside 12.0-14.5V range
+   - MAF, MAP, RPM: Check for anomalies or extreme values
+
+2. For EACH parameter that violates normal ranges, you MUST report:
+   - Parameter name and what range it violated
+   - Specific values that exceeded limits (min, max, average)
+   - Percentage of time spent out of range
+   - Timestamps or time periods when violations occurred
+
+3. Explicitly state if fuel trims exceed ±10% - this is CRITICAL for diagnosing lean/rich conditions
+
+After analyzing the data, create MULTIPLE comprehensive visualizations (3-5 separate plot files):
 
 VISUALIZATION 1: "Engine Performance Dashboard" (6-panel layout)
 - RPM over time with normal range indicators
-- Engine temperature with safe/warning/critical zones
+- Engine temperature with safe/warning/critical zones (180-220°F normal)
 - Throttle position vs engine load correlation
 - Speed profile over time
 - Engine efficiency metrics
 - Power output estimation
 
 VISUALIZATION 2: "Fuel System Analysis" (4-panel layout)
-- Short-term fuel trim (Bank 1 & 2) with ±10% normal range
-- Long-term fuel trim trends
+- Short-term fuel trim (Bank 1 & 2) with ±10% normal range CLEARLY MARKED
+- Long-term fuel trim trends with ±10% normal range CLEARLY MARKED
 - Fuel pressure and rate over time
 - Air-fuel ratio analysis (using O2 sensors and MAF)
+** If fuel trims exceed ±10%, highlight these areas on the plot **
 
 VISUALIZATION 3: "Emissions & O2 Sensors" (4-panel layout)
 - O2 sensor voltage patterns (should oscillate 0.1-0.9V)
@@ -3721,12 +3740,18 @@ Each plot should be comprehensive and information-dense.
 Then provide a detailed diagnostic summary including:
 - Overall vehicle health status (0-100 score)
 - System-by-system health assessment (engine, fuel, emissions, cooling, electrical)
+- **CRITICAL FINDINGS SECTION**: List ALL parameters that exceeded normal ranges with specific values
+  * MUST include fuel trim violations if present (e.g., "Fuel Trim Short Term B1 exceeded +10% limit, reaching +15.3% at timestamp X")
+  * Be explicit about what the visualization shows vs. what is healthy
 - Any concerning patterns or anomalies detected (be specific with values and timestamps)
 - Critical issues that need immediate attention
-- Maintenance recommendations
+- Maintenance recommendations based on the actual violations found
 - Performance optimization suggestions
 
-Focus on actionable insights with specific data points and timestamps.`;
+ALIGNMENT REQUIREMENT: Your text analysis MUST mention every issue that is visible in the visualizations.
+If the visualization shows fuel trims exceeding ±10%, your text MUST explicitly state this with specific values.
+
+Focus on actionable insights with specific data points, values, and timestamps.`;
 
     const analysisResult = await analysisAgent.task(question);
 

@@ -127,11 +127,19 @@ Common OBD2 parameters:
 
 Analysis guidelines:
 - For fuel trim: Normal range is -10% to +10%. Values outside indicate lean/rich conditions
+  ** CRITICAL: Always calculate min/max/avg fuel trim values and explicitly report if ANY exceed ±10% **
 - For O2 sensors: Should oscillate 0.1V - 0.9V when functioning properly
 - For engine temp: Normal operating range is 85-105°C (185-220°F)
 - For RPM: Idle should be stable around 600-1000 RPM depending on vehicle
 - Always use print() statements to output your findings
-- Create visualizations when helpful (matplotlib with Agg backend)`;
+- Create visualizations when helpful (matplotlib with Agg backend)
+
+CRITICAL REQUIREMENT FOR ALL ANALYSES:
+1. FIRST analyze the actual data numerically (calculate statistics, check ranges)
+2. THEN create visualizations that show what you found
+3. Your text analysis MUST align with your visualizations
+4. If a visualization shows a parameter exceeding normal ranges, you MUST explicitly state this in your text response with specific values
+5. Never create visualizations that show issues without discussing those issues in your text analysis`;
 
     super({
       prompt,
