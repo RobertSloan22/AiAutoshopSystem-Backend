@@ -657,19 +657,69 @@ router.get('/sessions/active', async (req, res) => {
 
 // REST API Routes
 
-// Get all sessions for a user
+// Get all sessions with flexible filtering
 router.get('/sessions', async (req, res) => {
   try {
-    const { userId, limit = 50, offset = 0 } = req.query;
+    const {
+      userId,
+      vehicleId,
+      status,
+      sessionType,
+      startDate,
+      endDate,
+      tags,
+      limit = 50,
+      offset = 0,
+      sortBy = 'startTime',
+      sortOrder = 'desc'
+    } = req.query;
 
     let query = {};
+
+    // Filter by user
     if (userId) {
       query.userId = userId;
     }
 
+    // Filter by vehicle (MOST IMPORTANT for your use case)
+    if (vehicleId) {
+      query.vehicleId = vehicleId;
+    }
+
+    // Filter by status
+    if (status) {
+      query.status = status;
+    }
+
+    // Filter by session type
+    if (sessionType) {
+      query.sessionType = sessionType;
+    }
+
+    // Filter by date range
+    if (startDate || endDate) {
+      query.startTime = {};
+      if (startDate) {
+        query.startTime.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        query.startTime.$lte = new Date(endDate);
+      }
+    }
+
+    // Filter by tags
+    if (tags) {
+      const tagArray = Array.isArray(tags) ? tags : tags.split(',');
+      query.tags = { $in: tagArray };
+    }
+
+    // Build sort object
+    const sortObj = {};
+    sortObj[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
     const sessions = await DiagnosticSession
       .find(query)
-      .sort({ startTime: -1 })
+      .sort(sortObj)
       .limit(parseInt(limit))
       .skip(parseInt(offset))
       .lean();
@@ -684,7 +734,21 @@ router.get('/sessions', async (req, res) => {
 
     res.json({
       sessions: mappedSessions,
-      total
+      total,
+      filters: {
+        userId,
+        vehicleId,
+        status,
+        sessionType,
+        startDate,
+        endDate,
+        tags
+      },
+      pagination: {
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        total
+      }
     });
   } catch (error) {
     console.error('❌ Failed to fetch sessions:', error);
@@ -1088,6 +1152,107 @@ router.delete('/sessions/:sessionId', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete session' });
   }
 });
+
+// Get all sessions for a specific vehicle
+router.get('/vehicles/:vehicleId/sessions', async (req, res) => {
+  try {
+    const { vehicleId } = req.params;
+    const {
+      status,
+      startDate,
+      endDate,
+      limit = 50,
+      offset = 0,
+      sortBy = 'startTime',
+      sortOrder = 'desc',
+      includeSummary = 'false'
+    } = req.query;
+
+    let query = { vehicleId };
+
+    // Filter by status
+    if (status) {
+      query.status = status;
+    }
+
+    // Filter by date range
+    if (startDate || endDate) {
+      query.startTime = {};
+      if (startDate) {
+        query.startTime.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        query.startTime.$lte = new Date(endDate);
+      }
+    }
+
+    // Build sort object
+    const sortObj = {};
+    sortObj[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    const sessions = await DiagnosticSession
+      .find(query)
+      .sort(sortObj)
+      .limit(parseInt(limit))
+      .skip(parseInt(offset))
+      .lean();
+
+    // Map MongoDB _id to id for frontend compatibility
+    const mappedSessions = sessions.map(session => ({
+      ...session,
+      id: session._id.toString()
+    }));
+
+    const total = await DiagnosticSession.countDocuments(query);
+
+    const response = {
+      vehicleId,
+      sessions: mappedSessions,
+      total,
+      pagination: {
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        total
+      }
+    };
+
+    // Add summary statistics if requested
+    if (includeSummary === 'true') {
+      const allSessions = await DiagnosticSession.find({ vehicleId }).lean();
+
+      response.summary = {
+        totalSessions: allSessions.length,
+        completedSessions: allSessions.filter(s => s.status === 'completed').length,
+        activeSessions: allSessions.filter(s => s.status === 'active').length,
+        totalDataPoints: allSessions.reduce((sum, s) => sum + (s.dataPointCount || 0), 0),
+        totalDuration: allSessions.reduce((sum, s) => sum + (s.duration || 0), 0),
+        latestSession: allSessions.length > 0 ? allSessions[0].startTime : null,
+        commonDTCs: this.getCommonDTCs(allSessions),
+        vehicleInfo: allSessions.length > 0 ? allSessions[0].vehicleInfo : null
+      };
+    }
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Failed to fetch vehicle sessions:', error);
+    res.status(500).json({ error: 'Failed to fetch vehicle sessions' });
+  }
+});
+
+// Helper function for common DTCs
+function getCommonDTCs(sessions) {
+  const dtcCounts = {};
+  sessions.forEach(session => {
+    (session.dtcCodes || []).forEach(code => {
+      dtcCounts[code] = (dtcCounts[code] || 0) + 1;
+    });
+  });
+  return Object.entries(dtcCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([code, count]) => ({ code, count }));
+}
 
 // NEW REST API Routes for sharing
 

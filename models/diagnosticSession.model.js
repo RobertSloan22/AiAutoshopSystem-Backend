@@ -24,11 +24,36 @@ const DiagnosticSessionSchema = new mongoose.Schema({
   selectedPids: { type: [String], default: [] },
   pidConfiguration: mongoose.Schema.Types.Mixed,
   sessionConfiguration: mongoose.Schema.Types.Mixed,
+
+  // Vehicle information
+  vehicleInfo: {
+    make: String,
+    model: String,
+    year: Number,
+    vin: String,
+    engine: String,
+    transmission: String,
+    mileage: Number,
+    fuelType: String
+  },
+
+  // Diagnostic trouble codes
+  dtcCodes: { type: [String], default: [] },
+  affectedSystems: String,
+  focusAreas: { type: [String], default: [] },
   analysis: mongoose.Schema.Types.Mixed,
   aiSummary: String,
   patterns: [mongoose.Schema.Types.Mixed],
   anomalies: [mongoose.Schema.Types.Mixed],
   recommendations: [String],
+
+  // Analysis results (for backwards compatibility)
+  analysisResults: mongoose.Schema.Types.Mixed,
+  analysisVisualizations: [mongoose.Schema.Types.Mixed],
+  analysisPlotData: mongoose.Schema.Types.Mixed,
+  analysisTimestamp: Date,
+  analysisType: String,
+  analysisMetadata: mongoose.Schema.Types.Mixed,
   autoAnalysis: {
     status: {
       type: String,
