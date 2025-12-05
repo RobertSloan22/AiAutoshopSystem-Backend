@@ -22,6 +22,37 @@ import IntervalAnalysisService from '../services/intervalAnalysisService.js';
 
 const router = express.Router();
 
+// Logging helper function
+const logRouteRequest = (method, endpoint, params = {}, body = null, query = {}) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[OBD2 ROUTE] ${timestamp} - ${method.toUpperCase()} ${endpoint}`);
+  if (Object.keys(params).length > 0) {
+    console.log(`[OBD2 ROUTE] Parameters:`, params);
+  }
+  if (body && Object.keys(body).length > 0) {
+    console.log(`[OBD2 ROUTE] Request body:`, JSON.stringify(body, null, 2));
+  }
+  if (Object.keys(query).length > 0) {
+    console.log(`[OBD2 ROUTE] Query params:`, query);
+  }
+};
+
+const logRouteResponse = (method, endpoint, statusCode, responseData = null) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[OBD2 ROUTE] ${timestamp} - ${method.toUpperCase()} ${endpoint} - Response: ${statusCode}`);
+  if (responseData) {
+    console.log(`[OBD2 ROUTE] Response data:`, JSON.stringify(responseData, null, 2));
+  }
+};
+
+const logRouteProcess = (endpoint, step, data = null) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[OBD2 ROUTE] ${timestamp} - ${endpoint} - Processing: ${step}`);
+  if (data) {
+    console.log(`[OBD2 ROUTE] Step data:`, data);
+  }
+};
+
 // Initialize analysis service
 const analysisService = new OBD2AnalysisService();
 
@@ -307,6 +338,8 @@ function generateShareCode() {
 // Start a new diagnostic session
 router.post('/sessions', async (req, res) => {
   try {
+    logRouteRequest('POST', '/sessions', {}, req.body, req.query);
+    
     const {
       userId,
       vehicleId,
@@ -321,6 +354,8 @@ router.post('/sessions', async (req, res) => {
       metadata,
       pidConfiguration
     } = req.body;
+
+    logRouteProcess('/sessions', 'Creating new diagnostic session', { userId, vehicleId, sessionName });
 
     const session = new DiagnosticSession({
       userId: userId || null,
@@ -339,25 +374,31 @@ router.post('/sessions', async (req, res) => {
     });
 
     const savedSession = await session.save();
+    logRouteProcess('/sessions', 'Session saved to database', { sessionId: savedSession._id });
 
     // ENABLED: Interval analysis for real-time monitoring (30s and 3min intervals)
     const intervalService = initializeIntervalAnalysisService();
+    logRouteProcess('/sessions', 'Starting interval analysis service');
     intervalService.startIntervalAnalysis(savedSession._id.toString()).catch(err => {
       console.error(`⚠️  Failed to start interval analysis for session ${savedSession._id}:`, err);
     });
 
-    res.status(201).json({
+    const responseData = {
       success: true,
       session: {
         sessionId: savedSession._id,
         startTime: savedSession.startTime,
         status: savedSession.status
       }
-    });
+    };
+
+    logRouteResponse('POST', '/sessions', 201, responseData);
+    res.status(201).json(responseData);
 
     console.log(`📊 New OBD2 diagnostic session started: ${savedSession._id}`);
   } catch (error) {
     console.error('❌ Failed to start session:', error);
+    logRouteResponse('POST', '/sessions', 500, { error: 'Failed to start diagnostic session' });
     res.status(500).json({ error: 'Failed to start diagnostic session' });
   }
 });
@@ -366,17 +407,21 @@ router.post('/sessions', async (req, res) => {
 router.put('/sessions/:sessionId/end', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('PUT', `/sessions/${sessionId}/end`, { sessionId }, req.body, req.query);
 
     // ENABLED: Stop interval analysis for this session
     const intervalService = initializeIntervalAnalysisService();
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Stopping interval analysis');
     intervalService.stopIntervalAnalysis(sessionId);
     console.log(`🛑 Stopped interval analysis for session ${sessionId}`);
 
     // Force flush any buffered data
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Forcing data flush');
     await dataAggregator.forceFlush(sessionId);
 
     // CRITICAL: Wait for data to be committed to database before proceeding
     // This ensures analysis can access the data immediately after session end
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Waiting for data commit verification');
     let dataCommitted = false;
     let retryCount = 0;
     const maxRetries = 5;
@@ -391,6 +436,7 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
       if (dataPointCount > 0) {
         dataCommitted = true;
         console.log(`✅ Data committed: ${dataPointCount} data points found for session ${sessionId}`);
+        logRouteProcess(`/sessions/${sessionId}/end`, `Data verification successful`, { dataPointCount });
       } else {
         retryCount++;
         if (retryCount < maxRetries) {
@@ -400,24 +446,31 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
       }
     }
 
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Retrieving session for update');
     const endTime = new Date();
     const session = await DiagnosticSession.findById(sessionId);
 
     if (!session) {
+      logRouteResponse('PUT', `/sessions/${sessionId}/end`, 404, { error: 'Session not found' });
       return res.status(404).json({ error: 'Session not found' });
     }
 
     if (session.status !== 'active') {
+      logRouteResponse('PUT', `/sessions/${sessionId}/end`, 400, { error: 'Session is not active' });
       return res.status(400).json({ error: 'Session is not active' });
     }
 
     const duration = Math.floor((endTime - session.startTime) / 1000);
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Calculated session duration', { duration });
 
     // Get actual data point count from database
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Getting actual data point count');
     const actualDataPointCount = await OBD2DataPoint.countDocuments({ 
       sessionId: new mongoose.Types.ObjectId(sessionId) 
     });
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Data point count retrieved', { actualDataPointCount });
 
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Updating session to completed status');
     const updatedSession = await DiagnosticSession.findByIdAndUpdate(
       sessionId,
       {
@@ -431,6 +484,7 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
     );
 
     // End any associated sharing sessions
+    logRouteProcess(`/sessions/${sessionId}/end`, 'Ending associated sharing sessions');
     await SharedSession.updateMany(
       { diagnosticSessionId: sessionId },
       { isActive: false }
@@ -439,6 +493,7 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
     // Trigger automatic analysis in background (non-blocking)
     // Only trigger if there's actual data to analyze
     if (actualDataPointCount > 0) {
+      logRouteProcess(`/sessions/${sessionId}/end`, 'Triggering automatic analysis');
       console.log(`🤖 Triggering automatic analysis for session ${sessionId}...`);
 
       // Initialize auto-analysis status
@@ -451,10 +506,11 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
         console.error(`🤖 Background auto-analysis failed for session ${sessionId}:`, err);
       });
     } else {
+      logRouteProcess(`/sessions/${sessionId}/end`, 'Skipping auto-analysis - no data points');
       console.log(`⚠️  Skipping auto-analysis for session ${sessionId} - no data points`);
     }
 
-    res.json({
+    const responseData = {
       success: true,
       session: {
         sessionId: updatedSession._id,
@@ -464,11 +520,15 @@ router.put('/sessions/:sessionId/end', async (req, res) => {
         status: updatedSession.status,
         autoAnalysisTriggered: actualDataPointCount > 0
       }
-    });
+    };
+
+    logRouteResponse('PUT', `/sessions/${sessionId}/end`, 200, responseData);
+    res.json(responseData);
 
     console.log(`📊 OBD2 diagnostic session ended: ${sessionId} (${actualDataPointCount} data points)`);
   } catch (error) {
     console.error('❌ Failed to end session:', error);
+    logRouteResponse('PUT', `/sessions/${sessionId}/end`, 500, { error: 'Failed to end diagnostic session' });
     res.status(500).json({ error: 'Failed to end diagnostic session' });
   }
 });
@@ -478,11 +538,15 @@ router.put('/sessions/:sessionId/status', async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { status } = req.body;
+    logRouteRequest('PUT', `/sessions/${sessionId}/status`, { sessionId }, req.body, req.query);
 
     if (!['active', 'paused', 'error', 'cancelled'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
+      const errorResponse = { error: 'Invalid status' };
+      logRouteResponse('PUT', `/sessions/${sessionId}/status`, 400, errorResponse);
+      return res.status(400).json(errorResponse);
     }
 
+    logRouteProcess(`/sessions/${sessionId}/status`, 'Updating session status', { newStatus: status });
     const updatedSession = await DiagnosticSession.findByIdAndUpdate(
       sessionId,
       { status, updatedAt: new Date() },
@@ -490,19 +554,26 @@ router.put('/sessions/:sessionId/status', async (req, res) => {
     );
 
     if (!updatedSession) {
-      return res.status(404).json({ error: 'Session not found' });
+      const errorResponse = { error: 'Session not found' };
+      logRouteResponse('PUT', `/sessions/${sessionId}/status`, 404, errorResponse);
+      return res.status(404).json(errorResponse);
     }
 
-    res.json({
+    const responseData = {
       success: true,
       session: {
         sessionId: updatedSession._id,
         status: updatedSession.status
       }
-    });
+    };
+
+    logRouteResponse('PUT', `/sessions/${sessionId}/status`, 200, responseData);
+    res.json(responseData);
   } catch (error) {
     console.error('❌ Failed to update session status:', error);
-    res.status(500).json({ error: 'Failed to update session status' });
+    const errorResponse = { error: 'Failed to update session status' };
+    logRouteResponse('PUT', `/sessions/${sessionId}/status`, 500, errorResponse);
+    res.status(500).json(errorResponse);
   }
 });
 
@@ -510,6 +581,7 @@ router.put('/sessions/:sessionId/status', async (req, res) => {
 router.post('/sessions/:sessionId/share', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/share`, { sessionId }, req.body, req.query);
     const { hostUserId } = req.body;
 
     // Validate session exists and is active
@@ -551,6 +623,7 @@ router.post('/sessions/:sessionId/share', async (req, res) => {
 router.post('/share/:shareCode/join', async (req, res) => {
   try {
     const { shareCode } = req.params;
+    logRouteRequest('POST', `/share/${shareCode}/join`, { shareCode }, req.body, req.query);
     const { clientId } = req.body;
 
     const sharedSession = await SharedSession.findOne({
@@ -598,6 +671,7 @@ router.post('/share/:shareCode/join', async (req, res) => {
 router.put('/share/:shareCode/ping', async (req, res) => {
   try {
     const { shareCode } = req.params;
+    logRouteRequest('PUT', `/share/${shareCode}/ping`, { shareCode }, req.body, req.query);
     const { clientId } = req.body;
 
     const result = await SharedSession.findOneAndUpdate(
@@ -625,6 +699,7 @@ router.put('/share/:shareCode/ping', async (req, res) => {
 // Get active session for a user (helper endpoint)
 router.get('/sessions/active', async (req, res) => {
   try {
+    logRouteRequest('GET', '/sessions/active', {}, req.body, req.query);
     const { userId } = req.query;
 
     let query = { status: 'active' };
@@ -660,9 +735,11 @@ router.get('/sessions/active', async (req, res) => {
 // Get all sessions with flexible filtering
 router.get('/sessions', async (req, res) => {
   try {
+    logRouteRequest('GET', '/sessions', {}, req.body, req.query);
     const {
       userId,
       vehicleId,
+      vin, // ADD VIN SUPPORT
       status,
       sessionType,
       startDate,
@@ -671,29 +748,42 @@ router.get('/sessions', async (req, res) => {
       limit = 50,
       offset = 0,
       sortBy = 'startTime',
-      sortOrder = 'desc'
+      sortOrder = 'desc',
+      includeSummary
     } = req.query;
 
     let query = {};
 
+    logRouteProcess('/sessions', 'Building query filters');
+
     // Filter by user
     if (userId) {
       query.userId = userId;
+      logRouteProcess('/sessions', `Added userId filter: ${userId}`);
     }
 
-    // Filter by vehicle (MOST IMPORTANT for your use case)
+    // Filter by vehicle ID (existing functionality)
     if (vehicleId) {
       query.vehicleId = vehicleId;
+      logRouteProcess('/sessions', `Added vehicleId filter: ${vehicleId}`);
+    }
+
+    // Filter by VIN (NEW - this is the missing piece!)
+    if (vin) {
+      query['vehicleInfo.vin'] = vin;
+      logRouteProcess('/sessions', `Added VIN filter: ${vin}`);
     }
 
     // Filter by status
     if (status) {
       query.status = status;
+      logRouteProcess('/sessions', `Added status filter: ${status}`);
     }
 
     // Filter by session type
     if (sessionType) {
       query.sessionType = sessionType;
+      logRouteProcess('/sessions', `Added sessionType filter: ${sessionType}`);
     }
 
     // Filter by date range
@@ -701,9 +791,11 @@ router.get('/sessions', async (req, res) => {
       query.startTime = {};
       if (startDate) {
         query.startTime.$gte = new Date(startDate);
+        logRouteProcess('/sessions', `Added startDate filter: ${startDate}`);
       }
       if (endDate) {
         query.startTime.$lte = new Date(endDate);
+        logRouteProcess('/sessions', `Added endDate filter: ${endDate}`);
       }
     }
 
@@ -711,11 +803,15 @@ router.get('/sessions', async (req, res) => {
     if (tags) {
       const tagArray = Array.isArray(tags) ? tags : tags.split(',');
       query.tags = { $in: tagArray };
+      logRouteProcess('/sessions', `Added tags filter: ${tagArray}`);
     }
+
+    logRouteProcess('/sessions', 'Final MongoDB query:', query);
 
     // Build sort object
     const sortObj = {};
     sortObj[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    logRouteProcess('/sessions', 'Sort configuration:', sortObj);
 
     const sessions = await DiagnosticSession
       .find(query)
@@ -724,6 +820,16 @@ router.get('/sessions', async (req, res) => {
       .skip(parseInt(offset))
       .lean();
 
+    logRouteProcess('/sessions', `Found ${sessions.length} sessions from database`);
+
+    // Log VIN info for debugging
+    if (vin && sessions.length > 0) {
+      sessions.forEach((session, index) => {
+        const sessionVin = session.vehicleInfo?.vin || 'NO_VIN';
+        logRouteProcess('/sessions', `Session ${index}: VIN=${sessionVin}, ID=${session._id}`);
+      });
+    }
+
     // Map MongoDB _id to id for frontend compatibility
     const mappedSessions = sessions.map(session => ({
       ...session,
@@ -731,27 +837,39 @@ router.get('/sessions', async (req, res) => {
     }));
 
     const total = await DiagnosticSession.countDocuments(query);
+    logRouteProcess('/sessions', `Total matching sessions: ${total}`);
 
-    res.json({
+    const responseData = {
       sessions: mappedSessions,
       total,
       filters: {
         userId,
         vehicleId,
+        vin, // Include VIN in response filters
         status,
         sessionType,
         startDate,
         endDate,
-        tags
+        tags,
+        includeSummary
       },
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
         total
       }
+    };
+
+    logRouteResponse('GET', '/sessions', 200, {
+      sessionCount: mappedSessions.length,
+      total,
+      appliedFilters: responseData.filters
     });
+
+    res.json(responseData);
   } catch (error) {
     console.error('❌ Failed to fetch sessions:', error);
+    logRouteResponse('GET', '/sessions', 500, { error: error.message });
     res.status(500).json({ error: 'Failed to fetch sessions' });
   }
 });
@@ -760,6 +878,7 @@ router.get('/sessions', async (req, res) => {
 router.get('/sessions/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}`, { sessionId }, req.body, req.query);
 
     const session = await DiagnosticSession.findById(sessionId).lean();
 
@@ -784,6 +903,7 @@ router.get('/sessions/:sessionId', async (req, res) => {
 router.get('/sessions/:sessionId/status', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/status`, { sessionId }, req.body, req.query);
 
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
       return res.status(400).json({ error: 'Invalid session ID format' });
@@ -828,6 +948,7 @@ router.get('/sessions/:sessionId/status', async (req, res) => {
 router.get('/sessions/:sessionId/interval-analysis', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/interval-analysis`, { sessionId }, req.body, req.query);
 
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
       return res.status(400).json({ error: 'Invalid session ID format' });
@@ -860,6 +981,7 @@ router.get('/sessions/:sessionId/interval-analysis', async (req, res) => {
 router.get('/sessions/:sessionId/data', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/data`, { sessionId }, req.body, req.query);
 
     // Validate sessionId parameter
     if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
@@ -1008,6 +1130,7 @@ router.get('/sessions/:sessionId/data', async (req, res) => {
 router.patch('/sessions/:sessionId/config', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('PATCH', `/sessions/${sessionId}/config`, { sessionId }, req.body, req.query);
 
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
       return res.status(400).json({ error: 'Invalid session ID format' });
@@ -1134,6 +1257,7 @@ router.patch('/sessions/:sessionId/config', async (req, res) => {
 router.delete('/sessions/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('DELETE', `/sessions/${sessionId}`, { sessionId }, req.body, req.query);
 
     // Delete all associated data points first
     await OBD2DataPoint.deleteMany({ sessionId });
@@ -1157,6 +1281,7 @@ router.delete('/sessions/:sessionId', async (req, res) => {
 router.get('/vehicles/:vehicleId/sessions', async (req, res) => {
   try {
     const { vehicleId } = req.params;
+    logRouteRequest('GET', `/vehicles/${vehicleId}/sessions`, { vehicleId }, req.body, req.query);
     const {
       status,
       startDate,
@@ -1260,6 +1385,7 @@ function getCommonDTCs(sessions) {
 router.get('/share/:shareCode', async (req, res) => {
   try {
     const { shareCode } = req.params;
+    logRouteRequest('GET', `/share/${shareCode}`, { shareCode }, req.body, req.query);
 
     const sharedSession = await SharedSession.findOne({
       shareCode,
@@ -1290,6 +1416,7 @@ router.get('/share/:shareCode', async (req, res) => {
 router.get('/sessions/:sessionId/sharing', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/sharing`, { sessionId }, req.body, req.query);
 
     const sharingSessions = await SharedSession.find({
       diagnosticSessionId: sessionId,
@@ -1307,6 +1434,7 @@ router.get('/sessions/:sessionId/sharing', async (req, res) => {
 router.delete('/share/:shareCode', async (req, res) => {
   try {
     const { shareCode } = req.params;
+    logRouteRequest('DELETE', `/share/${shareCode}`, { shareCode }, req.body, req.query);
 
     const result = await SharedSession.findOneAndUpdate(
       { shareCode },
@@ -1331,6 +1459,7 @@ router.delete('/share/:shareCode', async (req, res) => {
 // Server-Sent Events endpoint for real-time updates
 router.get('/sessions/:sessionId/stream', async (req, res) => {
   const { sessionId } = req.params;
+  logRouteRequest('GET', `/sessions/${sessionId}/stream`, { sessionId }, req.body, req.query);
 
   // Set SSE headers
   res.writeHead(200, {
@@ -1407,6 +1536,7 @@ router.get('/sessions/:sessionId/updates', async (req, res) => {
 // Long polling endpoint
 router.get('/sessions/:sessionId/long-poll', async (req, res) => {
   const { sessionId } = req.params;
+  logRouteRequest('GET', `/sessions/${sessionId}/long-poll`, { sessionId }, req.body, req.query);
   const { lastTimestamp = '0' } = req.query;
   const timeout = 30000; // 30 second timeout
   const startTime = Date.now();
@@ -1502,6 +1632,7 @@ router.get('/sessions/:sessionId/range', async (req, res) => {
 router.get('/sessions/:sessionId/stats', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/stats`, { sessionId }, req.body, req.query);
 
     const stats = await obd2RealtimeService.getSessionStats(sessionId);
 
@@ -1520,28 +1651,36 @@ router.get('/sessions/:sessionId/stats', async (req, res) => {
 router.post('/sessions/:sessionId/data', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/data`, { sessionId }, req.body, req.query);
     const dataPoint = req.body;
 
     // Validate sessionId parameter
+    logRouteProcess(`/sessions/${sessionId}/data`, 'Validating session ID', { sessionId });
     if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
-      return res.status(400).json({
+      const errorResponse = {
         error: 'Invalid session ID',
         message: 'You must create a session first using POST /api/obd2/sessions',
         received: sessionId
-      });
+      };
+      logRouteResponse('POST', `/sessions/${sessionId}/data`, 400, errorResponse);
+      return res.status(400).json(errorResponse);
     }
 
     // Validate session exists
+    logRouteProcess(`/sessions/${sessionId}/data`, 'Checking if session exists');
     const session = await DiagnosticSession.findById(sessionId);
     if (!session) {
-      return res.status(404).json({
+      const errorResponse = {
         error: 'Session not found',
         message: 'The specified session does not exist. Create a new session first.',
         sessionId
-      });
+      };
+      logRouteResponse('POST', `/sessions/${sessionId}/data`, 404, errorResponse);
+      return res.status(404).json(errorResponse);
     }
 
     // Store in MongoDB (existing functionality)
+    logRouteProcess(`/sessions/${sessionId}/data`, 'Storing data point in MongoDB');
     const obd2DataPoint = new OBD2DataPoint({
       sessionId,
       timestamp: new Date(dataPoint.timestamp || Date.now()),
@@ -1549,28 +1688,36 @@ router.post('/sessions/:sessionId/data', async (req, res) => {
     });
 
     await obd2DataPoint.save();
+    logRouteProcess(`/sessions/${sessionId}/data`, 'Data point saved to MongoDB', { dataPointId: obd2DataPoint._id });
 
     // Store in Redis for real-time access
+    logRouteProcess(`/sessions/${sessionId}/data`, 'Storing data point in Redis for real-time access');
     await obd2RealtimeService.storeDataPoint(sessionId, {
       ...dataPoint,
       timestamp: obd2DataPoint.timestamp.getTime()
     });
 
     // Update session data point count
+    logRouteProcess(`/sessions/${sessionId}/data`, 'Updating session data point count');
     await DiagnosticSession.findByIdAndUpdate(sessionId, {
       $inc: { dataPointCount: 1 },
       $set: { updatedAt: new Date() }
     });
 
-    res.json({
+    const responseData = {
       success: true,
       timestamp: obd2DataPoint.timestamp,
       dataPointId: obd2DataPoint._id
-    });
+    };
+
+    logRouteResponse('POST', `/sessions/${sessionId}/data`, 200, responseData);
+    res.json(responseData);
 
   } catch (error) {
     console.error('❌ Failed to store data point:', error);
-    res.status(500).json({ error: 'Failed to store data point' });
+    const errorResponse = { error: 'Failed to store data point' };
+    logRouteResponse('POST', `/sessions/${sessionId}/data`, 500, errorResponse);
+    res.status(500).json(errorResponse);
   }
 });
 
@@ -2038,6 +2185,7 @@ function generateRecommendations(healthScores, rangeViolations, criticalIssues, 
 router.post('/sessions/:sessionId/analyze', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analyze`, { sessionId }, req.body, req.query);
     const {
       analysisType = 'comprehensive',
       timeRange,
@@ -2047,25 +2195,34 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
     } = req.body;
 
     console.log(`🔍 Analyzing OBD2 session: ${sessionId}, type: ${analysisType}, visuals: ${includeVisualization}`);
+    logRouteProcess(`/sessions/${sessionId}/analyze`, 'Starting analysis', { analysisType, includeVisualization });
 
     // Validate sessionId format
+    logRouteProcess(`/sessions/${sessionId}/analyze`, 'Validating session ID format');
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
-      return res.status(400).json({
+      const errorResponse = {
         success: false,
         error: 'Invalid session ID format',
         sessionId
-      });
+      };
+      logRouteResponse('POST', `/sessions/${sessionId}/analyze`, 400, errorResponse);
+      return res.status(400).json(errorResponse);
     }
 
     // First, get basic session info for context
+    logRouteProcess(`/sessions/${sessionId}/analyze`, 'Retrieving session information');
     const session = await DiagnosticSession.findById(sessionId).lean();
     if (!session) {
-      return res.status(404).json({
+      const errorResponse = {
         success: false,
         error: 'Session not found',
         sessionId
-      });
+      };
+      logRouteResponse('POST', `/sessions/${sessionId}/analyze`, 404, errorResponse);
+      return res.status(404).json(errorResponse);
     }
+
+    logRouteProcess(`/sessions/${sessionId}/analyze`, 'Session found', { sessionStatus: session.status, dataPointCount: session.dataPointCount });
 
     // CRITICAL: If session was just completed, wait for data to be fully committed
     // This handles race conditions where analysis is called immediately after session end
@@ -2073,10 +2230,15 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
                            session.endTime && 
                            (Date.now() - new Date(session.endTime).getTime()) < 10000; // Within 10 seconds
 
+    if (sessionJustEnded) {
+      logRouteProcess(`/sessions/${sessionId}/analyze`, 'Session recently ended - handling potential race condition');
+    }
+
     // CRITICAL: Force flush any buffered data points before checking for data
     // This ensures all data is committed to the database before analysis
     // Try flushing with both string and ObjectId formats to handle any format variations
     console.log(`🔄 Flushing buffered data for session ${sessionId} before analysis...`);
+    logRouteProcess(`/sessions/${sessionId}/analyze`, 'Flushing buffered data points');
     await dataAggregator.forceFlush(sessionId);
     // Also try with string format in case buffer uses different format
     await dataAggregator.forceFlush(sessionId.toString());
@@ -2622,6 +2784,7 @@ router.post('/sessions/:sessionId/analyze', async (req, res) => {
 router.get('/sessions/:sessionId/analysis', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/analysis`, { sessionId }, req.body, req.query);
 
     // Validate sessionId format
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
@@ -2684,6 +2847,7 @@ router.get('/sessions/:sessionId/analysis', async (req, res) => {
 router.get('/analysis/:analysisId', async (req, res) => {
   try {
     const { analysisId } = req.params;
+    logRouteRequest('GET', `/analysis/${analysisId}`, { analysisId }, req.body, req.query);
 
     // Find analysis by analysisId
     const analysis = await Analysis.findOne({ analysisId, isDeleted: false }).lean();
@@ -2758,6 +2922,7 @@ router.get('/analysis/:analysisId', async (req, res) => {
 router.get('/sessions/:sessionId/analyses', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/analyses`, { sessionId }, req.body, req.query);
     const { limit = 10, offset = 0, includeDeleted = false } = req.query;
 
     // Validate sessionId format
@@ -2826,6 +2991,7 @@ router.get('/sessions/:sessionId/analyses', async (req, res) => {
 router.get('/analysis/:analysisId/plots', async (req, res) => {
   try {
     const { analysisId } = req.params;
+    logRouteRequest('GET', `/analysis/${analysisId}/plots`, { analysisId }, req.body, req.query);
 
     const analysis = await Analysis.findOne({ analysisId, isDeleted: false })
       .select('analysisId plots')
@@ -2866,6 +3032,7 @@ router.get('/analysis/:analysisId/plots', async (req, res) => {
 router.delete('/analysis/:analysisId', async (req, res) => {
   try {
     const { analysisId } = req.params;
+    logRouteRequest('DELETE', `/analysis/${analysisId}`, { analysisId }, req.body, req.query);
 
     const analysis = await Analysis.findOneAndUpdate(
       { analysisId, isDeleted: false },
@@ -2901,6 +3068,7 @@ router.delete('/analysis/:analysisId', async (req, res) => {
 router.post('/sessions/:sessionId/analyze/stream', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analyze/stream`, { sessionId }, req.body, req.query);
     const {
       analysisType = 'comprehensive',
       includeVisualization = true,
@@ -3111,6 +3279,7 @@ router.post('/sessions/:sessionId/analyze/stream', async (req, res) => {
 // Compare multiple sessions
 router.post('/sessions/compare', async (req, res) => {
   try {
+    logRouteRequest('POST', '/sessions/compare', {}, req.body, req.query);
     const { sessionIds, metrics = ['all'] } = req.body;
 
     if (!sessionIds || sessionIds.length < 2) {
@@ -3149,6 +3318,7 @@ router.post('/sessions/compare', async (req, res) => {
 router.post('/sessions/:sessionId/recommendations', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/recommendations`, { sessionId }, req.body, req.query);
     const { dtcCodes = [], symptoms = [] } = req.body;
 
     console.log(`🔍 Getting diagnostic recommendations for session: ${sessionId}`);
@@ -3180,6 +3350,7 @@ router.post('/sessions/:sessionId/recommendations', async (req, res) => {
 router.post('/sessions/:sessionId/fuel-economy', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/fuel-economy`, { sessionId }, req.body, req.query);
     const { unit = 'mpg' } = req.body;
 
     console.log(`🔍 Calculating fuel economy for session: ${sessionId}`);
@@ -3211,6 +3382,7 @@ router.post('/sessions/:sessionId/fuel-economy', async (req, res) => {
 router.post('/sessions/:sessionId/anomalies', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/anomalies`, { sessionId }, req.body, req.query);
     const { sensitivity = 'medium', parameters } = req.body;
 
     console.log(`🔍 Detecting anomalies in session: ${sessionId}`);
@@ -3243,6 +3415,7 @@ router.post('/sessions/:sessionId/anomalies', async (req, res) => {
 router.post('/sessions/:sessionId/health-report', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/health-report`, { sessionId }, req.body, req.query);
     const { includeHistory = true, reportFormat = 'summary' } = req.body;
 
     console.log(`🔍 Generating health report for session: ${sessionId}`);
@@ -3273,6 +3446,7 @@ router.post('/sessions/:sessionId/health-report', async (req, res) => {
 
 // Get available analysis tools
 router.get('/analysis/tools', (req, res) => {
+  logRouteRequest('GET', '/analysis/tools', {}, req.body, req.query);
   try {
     const tools = analysisService.getToolDefinitions();
 
@@ -3300,6 +3474,7 @@ router.get('/analysis/tools', (req, res) => {
 router.get('/sessions/:sessionId/pids', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/pids`, { sessionId }, req.body, req.query);
 
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
       return res.status(400).json({
@@ -3353,6 +3528,7 @@ router.get('/sessions/:sessionId/pids', async (req, res) => {
 router.get('/sessions/:sessionId/pids/:pidName/analysis', async (req, res) => {
   try {
     const { sessionId, pidName } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/pids/${pidName}/analysis`, { sessionId, pidName }, req.body, req.query);
 
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
       return res.status(400).json({
@@ -3468,6 +3644,7 @@ router.get('/sessions/:sessionId/pids/:pidName/analysis', async (req, res) => {
 router.get('/sessions/:sessionId/correlations', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/correlations`, { sessionId }, req.body, req.query);
     const { pid1, pid2 } = req.query;
 
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
@@ -3593,6 +3770,7 @@ router.get('/sessions/:sessionId/correlations', async (req, res) => {
 // Health check endpoint
 router.get('/health', async (req, res) => {
   try {
+    logRouteRequest('GET', '/health', {}, req.body, req.query);
     // Check MongoDB connection
     const isConnected = mongoose.connection.readyState === 1;
 
@@ -3631,6 +3809,7 @@ router.get('/health', async (req, res) => {
 router.get('/sessions/:sessionId/analytics-pack/overview', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/analytics-pack/overview`, { sessionId }, req.body, req.query);
     const overview = await obd2AnalyticsPackService.getSessionOverview(sessionId);
     res.json({ success: true, ...overview });
   } catch (error) {
@@ -3646,6 +3825,7 @@ router.get('/sessions/:sessionId/analytics-pack/overview', async (req, res) => {
 router.post('/sessions/:sessionId/analytics-pack/query', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analytics-pack/query`, { sessionId }, req.body, req.query);
     const { signals, fromMs, toMs } = req.body;
     
     if (!signals || !Array.isArray(signals)) {
@@ -3673,6 +3853,7 @@ router.post('/sessions/:sessionId/analytics-pack/query', async (req, res) => {
 router.post('/sessions/:sessionId/analytics-pack/build', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analytics-pack/build`, { sessionId }, req.body, req.query);
     const pack = await obd2AnalyticsPackService.buildPack(sessionId);
     res.json({ success: true, ...pack });
   } catch (error) {
@@ -3688,6 +3869,7 @@ router.post('/sessions/:sessionId/analytics-pack/build', async (req, res) => {
 router.post('/sessions/:sessionId/analytics-pack/upload', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analytics-pack/upload`, { sessionId }, req.body, req.query);
     const uploadResult = await obd2AnalyticsPackService.uploadPackToOpenAI(sessionId);
     res.json({ success: true, ...uploadResult });
   } catch (error) {
@@ -3703,6 +3885,7 @@ router.post('/sessions/:sessionId/analytics-pack/upload', async (req, res) => {
 router.post('/sessions/:sessionId/analytics-pack/code-interpreter', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analytics-pack/code-interpreter`, { sessionId }, req.body, req.query);
     const { task, model = 'gpt-4o' } = req.body;
     
     if (!task) {
@@ -3958,6 +4141,7 @@ Focus on actionable insights with specific data points, values, and timestamps.`
 router.post('/sessions/:sessionId/analyze/secure', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analyze/secure`, { sessionId }, req.body, req.query);
     const { question, reasoningEffort = 'medium' } = req.body;
 
     if (!question) {
@@ -4043,6 +4227,7 @@ router.post('/sessions/:sessionId/analyze/secure', async (req, res) => {
 router.post('/sessions/:sessionId/analyze/secure/stream', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analyze/secure/stream`, { sessionId }, req.body, req.query);
     const { question, reasoningEffort = 'medium' } = req.body;
 
     if (!question) {
@@ -4144,6 +4329,7 @@ router.post('/sessions/:sessionId/analyze/secure/stream', async (req, res) => {
 router.get('/sessions/:sessionId/auto-analysis', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/auto-analysis`, { sessionId }, req.body, req.query);
 
     const session = await DiagnosticSession.findById(sessionId).lean();
 
@@ -4225,6 +4411,7 @@ router.get('/sessions/:sessionId/auto-analysis', async (req, res) => {
 router.post('/sessions/:sessionId/auto-analysis/trigger', async (req, res) => {
   try {
     const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/auto-analysis/trigger`, { sessionId }, req.body, req.query);
 
     const session = await DiagnosticSession.findById(sessionId);
 
@@ -4288,6 +4475,7 @@ router.post('/sessions/:sessionId/auto-analysis/trigger', async (req, res) => {
  */
 router.get('/secure-interpreter/health', async (req, res) => {
   try {
+    logRouteRequest('GET', '/secure-interpreter/health', {}, req.body, req.query);
     const { exec } = await import('child_process');
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
