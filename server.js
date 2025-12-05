@@ -130,6 +130,7 @@ const allowedOrigins = [
   'https://dist-pc85lqajg-robmit2023s-projects.vercel.app',
   'https://dist-4ibg6nara-robmit2023s-projects.vercel.app',
   'https://dist-u5xg1a2y5-robmit2023s-projects.vercel.app',
+  'https://dist-fhglgvcx2-robmit2023s-projects.vercel.app',
   'https://noobtoolai.com',
 
   // ngrok domains - support all variations
@@ -161,22 +162,28 @@ const allowedOrigins = [
 // Single CORS middleware configuration
 app.use(cors({
   origin: function(origin, callback) {
+    // Log all origins for debugging
+    console.log('🌐 CORS request from origin:', origin);
+
     // Allow requests with no origin (like mobile apps or same-origin)
     if (!origin) return callback(null, true);
 
     // Always allow localhost development
     if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+      console.log('✅ CORS allowed: localhost');
       return callback(null, origin);
     }
 
     // Always allow noobtoolai.com (your main domain)
-    if (origin === 'https://noobtoolai.com' || origin.endsWith('noobtoolai.com')) {
+    if (origin === 'https://noobtoolai.com' || origin === 'http://noobtoolai.com' || origin.endsWith('.noobtoolai.com')) {
+      console.log('✅ CORS allowed: noobtoolai.com domain');
       return callback(null, origin);
     }
 
     // Always allow your specific Vercel URLs
     if (origin.includes('vercel.app') ||
         origin.includes('vercel.com/robmit2023s-projects')) {
+      console.log('✅ CORS allowed: Vercel deployment');
       return callback(null, origin);
     }
 
@@ -184,22 +191,25 @@ app.use(cors({
     if (origin.includes('ngrok.app') ||
         origin.includes('ngrok-free.app') ||
         origin.includes('ngrok.io')) {
+      console.log('✅ CORS allowed: ngrok domain');
       return callback(null, origin);
     }
 
     // Check against allowedOrigins list
     if (allowedOrigins.includes(origin)) {
+      console.log('✅ CORS allowed: in allowed origins list');
       return callback(null, origin);
     }
 
     // For development only - remove this in production
     if (process.env.NODE_ENV === 'development') {
-      console.log(`Dev mode: Allowing CORS from ${origin}`);
+      console.log(`✅ Dev mode: Allowing CORS from ${origin}`);
       return callback(null, origin);
     }
 
     // Block all other origins in production
-    console.log(`CORS blocked: ${origin}`);
+    console.error(`❌ CORS BLOCKED: ${origin}`);
+    console.error(`❌ This origin is not in the allowed list. Add it to allowedOrigins or adjust the origin checks.`);
     callback(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
