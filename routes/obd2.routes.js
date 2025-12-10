@@ -1628,6 +1628,91 @@ router.get('/sessions/:sessionId/range', async (req, res) => {
   }
 });
 
+// Optimized timeseries endpoint for live plotting
+router.get('/sessions/:sessionId/timeseries', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { since = '0', interval = 'second', limit = '200' } = req.query;
+
+    logRouteRequest('GET', `/sessions/${sessionId}/timeseries`, { sessionId }, null, req.query);
+
+    // Validate sessionId
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null') {
+      return res.status(400).json({
+        error: 'Invalid session ID',
+        message: 'You must create a session first using POST /api/obd2/sessions',
+        received: sessionId
+      });
+    }
+
+    const sinceTimestamp = parseInt(since);
+    const limitNum = parseInt(limit);
+
+    // Get recent raw data for live updates
+    if (sinceTimestamp > 0) {
+      const recentData = await obd2RealtimeService.getRecentUpdates(sessionId, sinceTimestamp, limitNum);
+      
+      // Format for timeseries plotting
+      const timeseriesData = recentData.map(point => ({
+        timestamp: point.timestamp || Date.now(),
+        rpm: point.rpm || 0,
+        speed: point.speed || 0,
+        engineTemp: point.engineTemp || 0,
+        throttlePosition: point.throttlePosition || 0,
+        engineLoad: point.engineLoad || 0,
+        dtcCount: point.dtcCodes ? point.dtcCodes.length : 0
+      })).sort((a, b) => a.timestamp - b.timestamp);
+
+      return res.json({
+        success: true,
+        data: timeseriesData,
+        type: 'realtime',
+        count: timeseriesData.length,
+        timestamp: Date.now(),
+        sessionId
+      });
+    }
+
+    // Get aggregated data for initial load or historical view
+    const aggregatedData = await obd2RealtimeService.getAggregatedData(sessionId, interval, limitNum);
+    
+    const timeseriesData = aggregatedData.map(point => ({
+      timestamp: point.timestamp,
+      rpm: point.rpm || 0,
+      speed: point.speed || 0,
+      engineTemp: point.engineTemp || 0,
+      throttlePosition: point.throttlePosition || 0,
+      engineLoad: point.engineLoad || 0,
+      dtcCount: 0 // Aggregated data doesn't preserve DTC codes
+    }));
+
+    res.json({
+      success: true,
+      data: timeseriesData,
+      type: 'aggregated',
+      interval,
+      count: timeseriesData.length,
+      timestamp: Date.now(),
+      sessionId
+    });
+
+    logRouteResponse('GET', `/sessions/${sessionId}/timeseries`, 200, {
+      type: sinceTimestamp > 0 ? 'realtime' : 'aggregated',
+      count: timeseriesData.length
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to get timeseries data:', error);
+    const errorResponse = { 
+      success: false, 
+      error: 'Failed to get timeseries data', 
+      message: error.message 
+    };
+    res.status(500).json(errorResponse);
+    logRouteResponse('GET', `/sessions/${req.params.sessionId}/timeseries`, 500, errorResponse);
+  }
+});
+
 // Get session statistics
 router.get('/sessions/:sessionId/stats', async (req, res) => {
   try {
@@ -4319,6 +4404,261 @@ router.post('/sessions/:sessionId/analyze/secure/stream', async (req, res) => {
       system: 'secure_interpreter'
     })}\n\n`);
     res.end();
+  }
+});
+
+/**
+ * EXPERIMENTAL ROUTE: MCP-Enhanced Secure Analysis
+ * Integrates real-time ELM327 data with historical session analysis
+ */
+router.post('/sessions/:sessionId/analyze/secure/experimental', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analyze/secure/experimental`, { sessionId }, req.body, req.query);
+    const { 
+      question, 
+      reasoningEffort = 'medium',
+      mcpConfig = {},
+      includeRealtimeData = true,
+      realtimeDuration = 30,
+      enableLiveComparison = true 
+    } = req.body;
+
+    if (!question) {
+      return res.status(400).json({
+        success: false,
+        error: 'question is required'
+      });
+    }
+
+    console.log(`🚗 [MCP EXPERIMENTAL] OBD2 Analysis for session ${sessionId}`);
+    console.log(`🚗 [MCP EXPERIMENTAL] Question: ${question}`);
+    console.log(`🚗 [MCP EXPERIMENTAL] Include real-time data: ${includeRealtimeData}`);
+
+    const startTime = Date.now();
+
+    // Import MCP Agent (dynamic import to avoid startup issues if MCP not available)
+    let OBD2MCPAgent;
+    try {
+      const mcpModule = await import('../obd2-code-interpreter/agents/OBD2MCPAgent.js');
+      OBD2MCPAgent = mcpModule.default;
+    } catch (importError) {
+      console.error('❌ Failed to import OBD2MCPAgent:', importError);
+      return res.status(500).json({
+        success: false,
+        error: 'MCP functionality not available. Check MCP server configuration.',
+        details: importError.message
+      });
+    }
+
+    // Step 1: Load historical data (same as regular secure analysis)
+    console.log('🚗 [MCP EXPERIMENTAL] Step 1/4: Loading historical data...');
+    const dataAccessTool = new OBD2DataAccessTool(OBD2DataPoint, DiagnosticSession);
+    const dataContextRaw = await dataAccessTool.run({ sessionId });
+    
+    let dataContext;
+    try {
+      const dataResult = JSON.parse(dataContextRaw);
+      if (!dataResult.success) {
+        throw new Error(dataResult.error || 'Failed to load OBD2 data');
+      }
+      dataContext = dataContextRaw;
+      console.log('🚗 [MCP EXPERIMENTAL] ✅ Historical data loaded');
+    } catch (parseError) {
+      if (dataContextRaw.startsWith('Error:')) {
+        throw new Error(dataContextRaw);
+      }
+      dataContext = dataContextRaw;
+      console.log('🚗 [MCP EXPERIMENTAL] ✅ Historical data loaded');
+    }
+
+    // Step 2: Initialize MCP Agent
+    console.log('🚗 [MCP EXPERIMENTAL] Step 2/4: Initializing MCP agent...');
+    const openAIInterface = new OpenAIInterface();
+    const mcpAgent = new OBD2MCPAgent({ 
+      languageModelInterface: openAIInterface, 
+      mcpConfig,
+      reasoningEffort 
+    });
+
+    let analysisResult;
+    let liveDataComparison = null;
+
+    try {
+      // Step 3: Collect real-time data if requested
+      if (includeRealtimeData) {
+        console.log('🚗 [MCP EXPERIMENTAL] Step 3/4: Collecting real-time data...');
+        const liveStatus = await mcpAgent.getCurrentVehicleStatus();
+        
+        if (liveStatus.success) {
+          console.log('🚗 [MCP EXPERIMENTAL] ✅ Real-time data collected');
+          
+          // Add live data context to agent
+          mcpAgent.addContext(`[LIVE VEHICLE DATA COLLECTED]
+${JSON.stringify(liveStatus, null, 2)}
+
+This is current real-time data from the vehicle. Use this to validate, enhance, or compare with the historical session data.`);
+
+          // Perform live vs historical comparison if enabled
+          if (enableLiveComparison) {
+            console.log('🚗 [MCP EXPERIMENTAL] Performing live vs historical comparison...');
+            try {
+              const sessionData = JSON.parse(dataContext);
+              liveDataComparison = await mcpAgent.compareLiveWithHistorical(sessionData.data || sessionData, realtimeDuration);
+              console.log('🚗 [MCP EXPERIMENTAL] ✅ Live comparison completed');
+            } catch (compError) {
+              console.warn('⚠️ Live comparison failed:', compError.message);
+              liveDataComparison = { error: compError.message };
+            }
+          }
+        } else {
+          console.warn('⚠️ Real-time data collection failed:', liveStatus.error);
+          mcpAgent.addContext(`[LIVE DATA UNAVAILABLE] ${liveStatus.error}
+Operating in historical-data-only mode for this analysis.`);
+        }
+      }
+
+      // Step 4: Perform enhanced analysis with MCP capabilities
+      console.log('🚗 [MCP EXPERIMENTAL] Step 4/4: Performing MCP-enhanced analysis...');
+      mcpAgent.addContext(dataContext);
+      
+      const enhancedQuestion = `${question}
+
+[ANALYSIS INSTRUCTIONS]
+You have access to both historical session data and potentially live vehicle data. 
+Please provide a comprehensive analysis that:
+1. Analyzes the historical diagnostic session data
+2. Incorporates any available live data for validation
+3. Highlights discrepancies between live and historical data
+4. Provides confidence levels for your conclusions
+5. Flags any safety concerns based on current vehicle state
+
+Be explicit about which findings are based on historical vs. live data.`;
+
+      analysisResult = await mcpAgent.task(enhancedQuestion, {
+        includeConnectionTest: true,
+        autoCollectBasicData: false, // We already collected it above
+        maxRetries: 2
+      });
+
+      console.log('🚗 [MCP EXPERIMENTAL] ✅ Analysis completed');
+      
+    } catch (analysisError) {
+      console.error('❌ MCP analysis failed:', analysisError);
+      // Fallback to regular analysis if MCP fails
+      console.log('🚗 [MCP EXPERIMENTAL] Falling back to regular analysis...');
+      
+      const analysisAgent = new OBD2AnalysisAgent({ 
+        languageModelInterface: openAIInterface, 
+        reasoningEffort 
+      });
+      analysisAgent.addContext(dataContext);
+      analysisResult = await analysisAgent.task(question);
+      
+      // Add warning about MCP failure
+      analysisResult = `[MCP EXPERIMENTAL WARNING] Real-time data integration failed: ${analysisError.message}
+
+[FALLBACK ANALYSIS - Historical Data Only]
+${analysisResult}`;
+    }
+
+    // Extract plots from MCP agent if any were generated
+    const plots = mcpAgent.generatedPlots || [];
+
+    const duration = Date.now() - startTime;
+    const responseData = {
+      success: true,
+      sessionId,
+      question,
+      analysis: analysisResult,
+      plots: plots,
+      liveDataComparison,
+      metadata: {
+        model: 'gpt-4o-mcp-enhanced',
+        reasoningEffort,
+        system: 'mcp_experimental',
+        duration_ms: duration,
+        includeRealtimeData,
+        liveDataCollected: includeRealtimeData && liveDataComparison !== null,
+        plotCount: plots.length
+      }
+    };
+
+    // Cleanup MCP connections
+    try {
+      await mcpAgent.cleanup();
+    } catch (cleanupError) {
+      console.warn('⚠️ MCP cleanup warning:', cleanupError);
+    }
+
+    console.log(`🚗 [MCP EXPERIMENTAL] Analysis complete in ${duration}ms`);
+    res.json(responseData);
+
+  } catch (error) {
+    console.error('🚗 [MCP EXPERIMENTAL] ❌ Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      system: 'mcp_experimental',
+      troubleshooting: [
+        'Ensure ELM327 adapter is connected',
+        'Check MCP server configuration',
+        'Verify OBD2 port accessibility',
+        'Try without real-time data (set includeRealtimeData: false)'
+      ]
+    });
+  }
+});
+
+/**
+ * EXPERIMENTAL ROUTE: Live Vehicle Status Check
+ * Quick endpoint to test MCP connection and get current vehicle status
+ */
+router.get('/live/status', async (req, res) => {
+  try {
+    logRouteRequest('GET', '/live/status', {}, req.body, req.query);
+    const { mcpConfig = {} } = req.query;
+
+    console.log('🚗 [MCP STATUS] Checking live vehicle status...');
+
+    // Dynamic import of MCP Agent
+    let OBD2MCPAgent;
+    try {
+      const mcpModule = await import('../obd2-code-interpreter/agents/OBD2MCPAgent.js');
+      OBD2MCPAgent = mcpModule.default;
+    } catch (importError) {
+      return res.status(500).json({
+        success: false,
+        error: 'MCP functionality not available',
+        available: false
+      });
+    }
+
+    const openAIInterface = new OpenAIInterface();
+    const mcpAgent = new OBD2MCPAgent({ 
+      languageModelInterface: openAIInterface, 
+      mcpConfig: JSON.parse(mcpConfig || '{}')
+    });
+
+    const status = await mcpAgent.getCurrentVehicleStatus();
+    
+    await mcpAgent.cleanup();
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      vehicleStatus: status,
+      mcpAvailable: true
+    });
+
+  } catch (error) {
+    console.error('🚗 [MCP STATUS] ❌ Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      mcpAvailable: false,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
