@@ -272,3 +272,63 @@ export const deleteReport = async (req, res) => {
     });
   }
 };
+
+// GET /api/obd2/reports/all - Get all comprehensive reports from database
+export const getAllComprehensiveReports = async (req, res) => {
+  try {
+    const { limit = 50, offset = 0, sortBy = 'createdAt', order = 'desc' } = req.query;
+
+    const limitNum = parseInt(limit);
+    const offsetNum = parseInt(offset);
+
+    // Validate query parameters
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 200) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid limit',
+        message: 'Limit must be a number between 1 and 200'
+      });
+    }
+
+    if (isNaN(offsetNum) || offsetNum < 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid offset',
+        message: 'Offset must be a non-negative number'
+      });
+    }
+
+    // Build sort object
+    const sortOrder = order === 'desc' ? -1 : 1;
+    const sortObj = { [sortBy]: sortOrder };
+
+    // Get all reports with pagination and sorting
+    const reports = await ComprehensiveReport.find({})
+      .sort(sortObj)
+      .skip(offsetNum)
+      .limit(limitNum)
+      .lean(); // Use lean() for better performance when not modifying documents
+
+    // Get total count for pagination info
+    const total = await ComprehensiveReport.countDocuments({});
+
+    res.status(200).json({
+      success: true,
+      data: reports,
+      pagination: {
+        total,
+        limit: limitNum,
+        offset: offsetNum,
+        pages: Math.ceil(total / limitNum),
+        currentPage: Math.floor(offsetNum / limitNum) + 1
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching all comprehensive reports:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+};

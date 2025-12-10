@@ -5,7 +5,8 @@ import {
   getAllReports,
   getReportById,
   updateReport,
-  deleteReport
+  deleteReport,
+  getAllComprehensiveReports
 } from '../controllers/comprehensiveReport.controller.js';
 
 const router = express.Router();
@@ -16,6 +17,7 @@ router.get('/sessions/:sessionId/reports/latest', getLatestReport);
 router.get('/sessions/:sessionId/reports', getAllReports);
 
 // Individual report routes
+router.get('/reports/all', getAllComprehensiveReports); // Must be before /:reportId to avoid conflicts
 router.get('/reports/:reportId', getReportById);
 router.put('/reports/:reportId', updateReport);
 router.delete('/reports/:reportId', deleteReport);
