@@ -780,22 +780,49 @@ router.post('/chat/analyze', async (req, res) => {
         const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
         
         // Check if any tool calls were Python executions with plots
+        console.log(`📊 ANALYZE: Processing ${toolCalls.length} tool calls`);
         for (let i = 0; i < toolCalls.length; i++) {
-          if (toolCalls[i].function.name === 'execute_python_code') {
+          const toolCall = toolCalls[i];
+          console.log(`📊 ANALYZE: Tool ${i}: ${toolCall.function.name}`);
+          
+          if (toolCall.function.name === 'execute_python_code') {
             try {
-              const args = JSON.parse(toolCalls[i].function.arguments);
+              const args = JSON.parse(toolCall.function.arguments);
               pythonCode = args.code || '';
+              console.log(`📊 ANALYZE: Python code length: ${pythonCode.length}`);
               
               // Parse the tool result to extract plot information
               const resultContent = JSON.parse(toolResults[i].content);
+              console.log(`📊 ANALYZE: Tool result success: ${resultContent.success}`);
+              
               if (resultContent.success) {
                 pythonOutput = resultContent.output || '';
+                console.log(`📊 ANALYZE: Python output length: ${pythonOutput.length}`);
+                
                 if (resultContent.plots && resultContent.plots.length > 0) {
                   plotResults = resultContent.plots;
+                  console.log(`📊 ANALYZE: Found ${plotResults.length} plots`);
+                  plotResults.forEach((plot, idx) => {
+                    console.log(`📊 ANALYZE: Plot ${idx}: imageId=${plot.imageId}, hasData=${!!plot.data}, path=${plot.path}`);
+                  });
+                } else {
+                  console.log(`📊 ANALYZE: No plots found in tool result`);
                 }
+              } else {
+                console.error(`📊 ANALYZE: Python execution failed:`, resultContent.error);
               }
             } catch (e) {
               console.error('Error parsing Python tool results:', e);
+            }
+          } else if (toolCall.function.name === 'search_technical_images') {
+            try {
+              const resultContent = JSON.parse(toolResults[i].content);
+              console.log(`📊 ANALYZE: Image search result success: ${resultContent.success}`);
+              if (resultContent.images && resultContent.images.length > 0) {
+                console.log(`📊 ANALYZE: Found ${resultContent.images.length} search result images`);
+              }
+            } catch (e) {
+              console.error('Error parsing image search tool results:', e);
             }
           }
         }
@@ -833,13 +860,18 @@ router.post('/chat/analyze', async (req, res) => {
 
     // Add plot data if available
     if (plotResults.length > 0) {
-      response.visualizations = plotResults.map(plot => ({
-        imageId: plot.imageId,
-        url: plot.url,
-        thumbnailUrl: plot.thumbnailUrl,
-        data: plot.data, // Base64 encoded image data
-        path: plot.path
-      }));
+      console.log(`📊 ANALYZE RESPONSE: Preparing ${plotResults.length} visualizations for frontend`);
+      response.visualizations = plotResults.map((plot, idx) => {
+        const vis = {
+          imageId: plot.imageId,
+          url: plot.url,
+          thumbnailUrl: plot.thumbnailUrl,
+          data: plot.data, // Base64 encoded image data
+          path: plot.path
+        };
+        console.log(`📊 ANALYZE RESPONSE: Visualization ${idx}: imageId=${vis.imageId}, hasData=${!!vis.data}, hasUrl=${!!vis.url}`);
+        return vis;
+      });
       
       // Add Python execution details
       response.codeExecution = {
@@ -847,6 +879,9 @@ router.post('/chat/analyze', async (req, res) => {
         output: pythonOutput,
         success: true
       };
+      console.log(`📊 ANALYZE RESPONSE: Added code execution details`);
+    } else {
+      console.log(`📊 ANALYZE RESPONSE: No plots to include in response`);
     }
 
     // Add context information if provided
@@ -1010,16 +1045,24 @@ router.post('/chat/analyze/stream', async (req, res) => {
         const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
         
         // Check if any tool calls were Python executions with plots
+        console.log(`📊 STREAM: Processing ${toolCalls.length} tool calls for streaming response`);
         for (let i = 0; i < toolCalls.length; i++) {
-          if (toolCalls[i].function.name === 'execute_python_code') {
+          const toolCall = toolCalls[i];
+          console.log(`📊 STREAM: Tool ${i}: ${toolCall.function.name}`);
+          
+          if (toolCall.function.name === 'execute_python_code') {
             try {
-              const args = JSON.parse(toolCalls[i].function.arguments);
+              const args = JSON.parse(toolCall.function.arguments);
               pythonCode = args.code || '';
+              console.log(`📊 STREAM: Python code length: ${pythonCode.length}`);
               
               // Parse the tool result to extract plot information
               const resultContent = JSON.parse(toolResults[i].content);
+              console.log(`📊 STREAM: Tool result success: ${resultContent.success}`);
+              
               if (resultContent.success) {
                 pythonOutput = resultContent.output || '';
+                console.log(`📊 STREAM: Python output length: ${pythonOutput.length}`);
                 
                 // Send Python execution info
                 res.write(`data: ${JSON.stringify({
@@ -1028,12 +1071,19 @@ router.post('/chat/analyze/stream', async (req, res) => {
                   output: pythonOutput,
                   sessionId
                 })}\n\n`);
+                console.log(`📊 STREAM: Sent code execution event to frontend`);
                 
                 if (resultContent.plots && resultContent.plots.length > 0) {
                   plotResults = resultContent.plots;
+                  console.log(`📊 STREAM: Found ${plotResults.length} plots to stream`);
+                  
+                  // Log each plot before sending
+                  plotResults.forEach((plot, idx) => {
+                    console.log(`📊 STREAM: Plot ${idx}: imageId=${plot.imageId}, hasData=${!!plot.data}, hasUrl=${!!plot.url}, path=${plot.path}`);
+                  });
                   
                   // Send plot data immediately
-                  res.write(`data: ${JSON.stringify({
+                  const visualizationData = {
                     type: 'visualization_ready',
                     visualizations: plotResults.map(plot => ({
                       imageId: plot.imageId,
@@ -1043,11 +1093,40 @@ router.post('/chat/analyze/stream', async (req, res) => {
                       path: plot.path
                     })),
                     sessionId
-                  })}\n\n`);
+                  };
+                  
+                  res.write(`data: ${JSON.stringify(visualizationData)}\n\n`);
+                  console.log(`📊 STREAM: Sent visualization_ready event with ${plotResults.length} plots to frontend`);
+                } else {
+                  console.log(`📊 STREAM: No plots found in Python execution result`);
                 }
+              } else {
+                console.error(`📊 STREAM: Python execution failed:`, resultContent.error);
               }
             } catch (e) {
-              console.error('Error parsing Python tool results:', e);
+              console.error('Error parsing Python tool results in stream:', e);
+            }
+          } else if (toolCall.function.name === 'search_technical_images') {
+            try {
+              const resultContent = JSON.parse(toolResults[i].content);
+              console.log(`📊 STREAM: Image search result success: ${resultContent.success}`);
+              
+              if (resultContent.success && resultContent.images && resultContent.images.length > 0) {
+                console.log(`📊 STREAM: Found ${resultContent.images.length} search result images`);
+                
+                // Send image search results to frontend
+                const imageSearchData = {
+                  type: 'image_search_ready',
+                  images: resultContent.images,
+                  query: resultContent.query || 'Technical images',
+                  sessionId
+                };
+                
+                res.write(`data: ${JSON.stringify(imageSearchData)}\n\n`);
+                console.log(`📊 STREAM: Sent image_search_ready event with ${resultContent.images.length} images to frontend`);
+              }
+            } catch (e) {
+              console.error('Error parsing image search tool results in stream:', e);
             }
           }
         }

@@ -289,6 +289,7 @@ with open('${filepath}', 'r') as f:
           // Combine both methods
           const allPlotPaths = [...new Set([...plotPaths, ...extractedPaths])];
           console.log(`📐 PYTHON EXEC: Total unique plots found: ${allPlotPaths.length}`);
+          console.log(`📐 PYTHON EXEC: Plot paths:`, allPlotPaths);
           
           const plots = [];
           
@@ -338,7 +339,18 @@ with open('${filepath}', 'r') as f:
               mimeType: 'image/png'
             });
             
-            plots.push({ path: plotPath, imageId });
+            // Create plot result with base64 data for frontend
+            const base64Data = await this.getPlotAsBase64(plotPath);
+            const plotResult = {
+              path: plotPath,
+              imageId,
+              data: base64Data,
+              url: `/api/plots/${imageId}`,
+              thumbnailUrl: `/api/plots/${imageId}/thumbnail`
+            };
+            
+            console.log(`📊 PLOT RESULT: Created plot result with imageId=${imageId}, hasBase64=${!!base64Data}`);
+            plots.push(plotResult);
           }
 
           resolve({
@@ -518,7 +530,16 @@ if 'plt' in locals():
       });
     }
     
-    return { path: plotPath, imageId };
+    // Create base64 data for immediate frontend use
+    const base64Data = `data:image/png;base64,${base64Clean}`;
+    
+    return { 
+      path: plotPath, 
+      imageId,
+      data: base64Data,
+      url: `/api/plots/${imageId}`,
+      thumbnailUrl: `/api/plots/${imageId}/thumbnail`
+    };
   }
 
   async findGeneratedPlots(executionId) {

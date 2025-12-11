@@ -332,12 +332,14 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
 
             // If plots were generated, include their paths
             if (result.plots && result.plots.length > 0) {
+              console.log(`🔍 TOOL RESULT: Python execution generated ${result.plots.length} plots`);
               formattedResult.plots_generated = result.plots.length;
               formattedResult.plot_paths = result.plots;
               
               // Process plot results with both API URLs and base64 data
               formattedResult.plots = [];
               for (const plotResult of result.plots) {
+                console.log(`🔍 TOOL RESULT: Processing plot result:`, plotResult);
                 const plotData = {
                   path: plotResult.path || plotResult, // Handle both new and old format
                   imageId: plotResult.imageId,
@@ -345,26 +347,38 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
                   thumbnailUrl: plotResult.imageId ? `/api/plots/${plotResult.imageId}/thumbnail` : null
                 };
                 
+                console.log(`🔍 TOOL RESULT: Plot data structure: imageId=${plotData.imageId}, path=${plotData.path}, hasUrl=${!!plotData.url}`);
+                
                 // Try to get base64 data from MongoDB first, then fallback to file system
                 let base64Data = null;
                 if (plotResult.imageId) {
                   const plotFromDB = await this.pythonService.getPlotFromDB(plotResult.imageId);
                   if (plotFromDB) {
                     base64Data = plotFromDB.base64Data;
+                    console.log(`🔍 TOOL RESULT: Retrieved base64 data from MongoDB for imageId=${plotResult.imageId}`);
+                  } else {
+                    console.log(`🔍 TOOL RESULT: No plot found in MongoDB for imageId=${plotResult.imageId}`);
                   }
                 }
                 
                 // Fallback to file system if MongoDB doesn't have it
                 if (!base64Data && plotData.path) {
                   base64Data = await this.pythonService.getPlotAsBase64(plotData.path);
+                  console.log(`🔍 TOOL RESULT: Retrieved base64 data from file system: ${!!base64Data}`);
                 }
                 
                 if (base64Data) {
                   plotData.data = base64Data;
+                  console.log(`🔍 TOOL RESULT: Added base64 data to plot result (length: ${base64Data.length})`);
+                } else {
+                  console.warn(`🔍 TOOL RESULT: No base64 data available for plot: ${plotData.path}`);
                 }
                 
                 formattedResult.plots.push(plotData);
               }
+              console.log(`🔍 TOOL RESULT: Final formatted plots count: ${formattedResult.plots.length}`);
+            } else {
+              console.log(`🔍 TOOL RESULT: Python execution completed but no plots were generated`);
             }
 
             result = formattedResult;
@@ -382,13 +396,31 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
           result = await this.mcpService.callTool(toolCall.function.name, parameters);
         }
         
-        toolResults.push({
+        const toolResult = {
           tool_call_id: toolCall.id,
           role: 'tool',
           content: JSON.stringify(result, null, 2)
-        });
+        };
+        
+        toolResults.push(toolResult);
 
-        console.log(`Tool ${toolCall.function.name} executed successfully`);
+        // Log detailed results for Python execution and other important tools
+        if (toolCall.function.name === 'execute_python_code' && result.success) {
+          console.log(`🔍 TOOL COMPLETE: ${toolCall.function.name} executed successfully`);
+          if (result.plots && result.plots.length > 0) {
+            console.log(`🔍 TOOL COMPLETE: Returning ${result.plots.length} plots to frontend`);
+            result.plots.forEach((plot, idx) => {
+              console.log(`🔍 TOOL COMPLETE: Plot ${idx}: imageId=${plot.imageId}, hasData=${!!plot.data}, url=${plot.url}`);
+            });
+          }
+        } else if (toolCall.function.name === 'search_technical_images' && result.success) {
+          console.log(`🔍 TOOL COMPLETE: ${toolCall.function.name} executed successfully`);
+          if (result.images && result.images.length > 0) {
+            console.log(`🔍 TOOL COMPLETE: Returning ${result.images.length} search images to frontend`);
+          }
+        } else {
+          console.log(`Tool ${toolCall.function.name} executed successfully`);
+        }
       } catch (error) {
         console.error(`Tool execution failed: ${toolCall.function.name}`, error);
         
