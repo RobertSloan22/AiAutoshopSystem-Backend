@@ -1,0 +1,49 @@
+default_model: sonnet
+
+# OBD2 Analysis Configuration for FastAgent
+# This configuration is specifically designed for automotive diagnostic data analysis
+
+mcp:
+  servers:
+    interpreter:
+      command: "docker"
+      args:
+        [
+          "run",
+          "-i",
+          "--rm",
+          "--pull=always",
+          "-v",
+          "./temp/obd2-analysis:/mnt/data/",
+          "ghcr.io/evalstate/mcp-py-repl:latest",
+        ]
+      roots:
+        - uri: "file://./temp/obd2-analysis/"
+          name: "obd2_data"
+          server_uri_alias: "file:///mnt/data/"
+    filesystem:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "./temp/obd2-analysis/"]
+
+# OBD2-specific analysis prompts and configurations
+analysis:
+  focus_areas:
+    - "Engine Performance Metrics"
+    - "Fuel System Efficiency" 
+    - "Emissions Control Systems"
+    - "Sensor Data Validation"
+    - "Diagnostic Trouble Patterns"
+    - "Performance Optimization Opportunities"
+  
+  required_plots:
+    - "engine_performance.png"
+    - "fuel_system.png"
+    - "emissions_analysis.png"
+    - "sensor_readings.png"
+    - "diagnostic_overview.png"
+  
+  data_quality_checks:
+    - "Missing data point analysis"
+    - "Sensor reading validation"
+    - "Timestamp consistency"
+    - "Parameter range validation"

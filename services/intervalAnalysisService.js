@@ -145,7 +145,7 @@ class IntervalAnalysisService {
       // Generate unique analysis ID
       const analysisId = Analysis.generateAnalysisId();
 
-      // Store interval analysis in Analysis collection
+      // Store interval analysis in Analysis collection with raw data
       const analysisDoc = new Analysis({
         analysisId: analysisId,
         sessionId: new mongoose.Types.ObjectId(sessionId),
@@ -154,12 +154,24 @@ class IntervalAnalysisService {
         status: 'completed',
         duration: parseFloat(duration),
         result: analysisResult,
-        plots: plots.map(plot => ({
-          filename: plot.filename || `${intervalKey}_plot_${Date.now()}.png`,
-          base64: plot.base64,
-          mimeType: plot.mimeType || 'image/png',
-          description: plot.description || `${intervalKey} analysis visualization`
-        })),
+        plots: plots.map(plot => {
+          // Extract parameters from plot description or filename
+          const parameters = this.extractParametersFromPlot(plot, intervalData);
+          
+          return {
+            filename: plot.filename || `${intervalKey}_plot_${Date.now()}.png`,
+            base64: plot.base64,
+            mimeType: plot.mimeType || 'image/png',
+            description: plot.description || `${intervalKey} analysis visualization`,
+            rawData: this.processIntervalDataForFrontend(intervalData, parameters, intervalKey),
+            plotMetadata: {
+              plotType: this.inferPlotType(plot, intervalKey),
+              axes: this.generateAxesInfo(parameters, intervalKey),
+              colors: this.generatePlotColors(parameters),
+              interactive: true
+            }
+          };
+        }),
         context: {
           dataPointCount: dataPointCount,
           timeRange: {
@@ -275,6 +287,240 @@ Provide actionable insights and recommendations with system health scores.`
     };
 
     return questions[intervalKey] || questions.quick_check;
+  }
+
+  /**
+   * Extract OBD2 parameters from plot data
+   */
+  extractParametersFromPlot(plot, intervalData) {
+    // Common OBD2 parameters to look for
+    const obd2Parameters = ['rpm', 'speed', 'engineTemp', 'intakeTemp', 'throttlePosition', 
+                           'engineLoad', 'fuelLevel', 'batteryVoltage', 'maf', 'map', 
+                           'fuelTrimShortB1', 'fuelTrimLongB1', 'o2B1S1Voltage'];
+    
+    // If interval data is available, find parameters with actual data
+    if (intervalData && Array.isArray(intervalData)) {
+      const availableParams = [];
+      intervalData.forEach(dataPoint => {
+        Object.keys(dataPoint).forEach(key => {
+          if (obd2Parameters.includes(key) && dataPoint[key] !== null && dataPoint[key] !== undefined) {
+            if (!availableParams.includes(key)) {
+              availableParams.push(key);
+            }
+          }
+        });
+      });
+      return availableParams.slice(0, 8); // Limit to 8 parameters for performance
+    }
+    
+    // Fallback: detect parameters from plot filename/description
+    const description = (plot.description || plot.filename || '').toLowerCase();
+    const detectedParams = obd2Parameters.filter(param => 
+      description.includes(param.toLowerCase()) || 
+      description.includes(param.replace(/([A-Z])/g, '_$1').toLowerCase())
+    );
+    
+    return detectedParams.length > 0 ? detectedParams : ['rpm', 'speed', 'engineTemp', 'throttlePosition'];
+  }
+
+  /**
+   * Process interval data for frontend Chart.js compatibility
+   */
+  processIntervalDataForFrontend(intervalData, parameters, intervalKey) {
+    if (!intervalData || !Array.isArray(intervalData) || intervalData.length === 0) {
+      return { datasets: [], labels: [], parameters: [], dataRange: {}, chartConfig: {} };
+    }
+
+    const datasets = [];
+    const labels = intervalData.map(point => point.timestamp || point.createdAt || new Date());
+    const startTime = new Date(Math.min(...labels));
+    const endTime = new Date(Math.max(...labels));
+
+    parameters.forEach((param, index) => {
+      const dataValues = intervalData.map(point => {
+        const value = point[param];
+        return (value !== null && value !== undefined) ? parseFloat(value) : null;
+      }).filter(val => val !== null);
+
+      if (dataValues.length > 0) {
+        datasets.push({
+          label: this.formatParameterLabel(param),
+          data: intervalData.map(point => ({
+            x: point.timestamp || point.createdAt,
+            y: point[param]
+          })),
+          parameter: param,
+          unit: this.getParameterUnit(param),
+          color: this.getParameterColor(param, index),
+          borderColor: this.getParameterColor(param, index),
+          backgroundColor: this.getParameterColor(param, index) + '20',
+          fill: false
+        });
+      }
+    });
+
+    return {
+      datasets,
+      labels,
+      parameters,
+      dataRange: {
+        startTime,
+        endTime,
+        totalPoints: intervalData.length
+      },
+      chartConfig: {
+        type: 'line',
+        responsive: true,
+        interaction: {
+          mode: 'index',
+          intersect: false,
+        },
+        scales: {
+          x: {
+            type: 'time',
+            time: {
+              unit: 'second',
+              displayFormats: {
+                second: 'HH:mm:ss'
+              }
+            },
+            title: {
+              display: true,
+              text: 'Time'
+            }
+          },
+          y: {
+            beginAtZero: false,
+            title: {
+              display: true,
+              text: 'Value'
+            }
+          }
+        },
+        plugins: {
+          title: {
+            display: true,
+            text: `${intervalKey.toUpperCase()} Analysis - OBD2 Parameters`
+          },
+          legend: {
+            display: true,
+            position: 'top'
+          }
+        }
+      }
+    };
+  }
+
+  /**
+   * Infer plot type from content and interval
+   */
+  inferPlotType(plot, intervalKey) {
+    const description = (plot.description || plot.filename || '').toLowerCase();
+    
+    if (description.includes('correlation') || description.includes('scatter')) {
+      return 'scatter';
+    } else if (description.includes('histogram') || description.includes('distribution')) {
+      return 'histogram';
+    } else if (description.includes('anomaly') || description.includes('alert')) {
+      return 'anomaly';
+    } else if (description.includes('dashboard') || intervalKey === 'mid_session') {
+      return 'dashboard';
+    }
+    
+    return 'time_series';
+  }
+
+  /**
+   * Generate axes information for plots
+   */
+  generateAxesInfo(parameters, intervalKey) {
+    const primaryParam = parameters[0] || 'value';
+    return {
+      x: { 
+        label: 'Time', 
+        unit: '', 
+        type: 'datetime' 
+      },
+      y: { 
+        label: parameters.length > 1 ? 'Multiple Parameters' : this.formatParameterLabel(primaryParam),
+        unit: parameters.length === 1 ? this.getParameterUnit(primaryParam) : 'Mixed Units',
+        type: 'linear' 
+      }
+    };
+  }
+
+  /**
+   * Generate plot colors for parameters
+   */
+  generatePlotColors(parameters) {
+    return parameters.map((param, index) => this.getParameterColor(param, index));
+  }
+
+  /**
+   * Format parameter names for display
+   */
+  formatParameterLabel(parameter) {
+    const labelMap = {
+      rpm: 'Engine RPM',
+      speed: 'Vehicle Speed',
+      engineTemp: 'Engine Temperature',
+      intakeTemp: 'Intake Air Temperature',
+      throttlePosition: 'Throttle Position',
+      engineLoad: 'Engine Load',
+      fuelLevel: 'Fuel Level',
+      batteryVoltage: 'Battery Voltage',
+      maf: 'Mass Air Flow',
+      map: 'Manifold Pressure',
+      fuelTrimShortB1: 'Short Term Fuel Trim B1',
+      fuelTrimLongB1: 'Long Term Fuel Trim B1',
+      o2B1S1Voltage: 'O2 Sensor B1S1'
+    };
+    return labelMap[parameter] || parameter.charAt(0).toUpperCase() + parameter.slice(1);
+  }
+
+  /**
+   * Get parameter units
+   */
+  getParameterUnit(parameter) {
+    const units = {
+      rpm: 'RPM',
+      speed: 'km/h',
+      engineTemp: '°C',
+      intakeTemp: '°C',
+      throttlePosition: '%',
+      engineLoad: '%',
+      fuelLevel: '%',
+      batteryVoltage: 'V',
+      maf: 'g/s',
+      map: 'kPa',
+      fuelTrimShortB1: '%',
+      fuelTrimLongB1: '%',
+      o2B1S1Voltage: 'V'
+    };
+    return units[parameter] || '';
+  }
+
+  /**
+   * Get parameter colors
+   */
+  getParameterColor(parameter, index) {
+    const colorMap = {
+      rpm: '#3b82f6',           // Blue
+      speed: '#10b981',         // Green
+      engineTemp: '#ef4444',    // Red
+      intakeTemp: '#f59e0b',    // Yellow
+      throttlePosition: '#8b5cf6', // Purple
+      engineLoad: '#06b6d4',    // Cyan
+      fuelLevel: '#84cc16',     // Lime
+      batteryVoltage: '#f97316', // Orange
+      maf: '#ec4899',           // Pink
+      map: '#6366f1',           // Indigo
+      fuelTrimShortB1: '#14b8a6', // Teal
+      fuelTrimLongB1: '#f43f5e', // Rose
+      o2B1S1Voltage: '#a855f7'  // Violet
+    };
+    const defaultColors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316'];
+    return colorMap[parameter] || defaultColors[index % defaultColors.length];
   }
 
   /**

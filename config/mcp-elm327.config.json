@@ -1,0 +1,232 @@
+{
+  "name": "ELM327 OBD2 MCP Server Configuration",
+  "description": "Configuration for MCP server integration with ELM327 OBD2 adapter",
+  "version": "1.0.0",
+  
+  "mcp_server": {
+    "command": "python",
+    "args": ["-m", "mcp_servers.elm327"],
+    "working_directory": "./mcp-servers",
+    "timeout_ms": 30000,
+    "max_retries": 3,
+    "retry_delay_ms": 1000
+  },
+
+  "elm327_config": {
+    "connection_type": "bluetooth",
+    "device_path": "/dev/ttyUSB0",
+    "bluetooth_address": null,
+    "baud_rate": 38400,
+    "timeout_seconds": 10,
+    "auto_detect_protocol": true,
+    "preferred_protocol": "AUTO",
+    "supported_protocols": [
+      "AUTO",
+      "ISO9141", 
+      "ISO14230",
+      "ISO15765",
+      "SAE_J1850"
+    ]
+  },
+
+  "data_collection": {
+    "default_sampling_rate_hz": 1.0,
+    "max_sampling_rate_hz": 10.0,
+    "min_sampling_rate_hz": 0.1,
+    "default_duration_seconds": 30,
+    "max_duration_seconds": 300,
+    "min_duration_seconds": 1,
+    "buffer_size": 1000,
+    "enable_data_validation": true,
+    "outlier_detection": true
+  },
+
+  "pid_presets": {
+    "basic": [
+      "01 0C",
+      "01 0D", 
+      "01 05",
+      "01 0F"
+    ],
+    "extended": [
+      "01 0C",
+      "01 0D",
+      "01 05", 
+      "01 0F",
+      "01 11",
+      "01 04",
+      "01 06",
+      "01 07",
+      "01 0B",
+      "01 42"
+    ],
+    "fuel_system": [
+      "01 06",
+      "01 07",
+      "01 08",
+      "01 09",
+      "01 0A",
+      "01 22",
+      "01 23"
+    ],
+    "emissions": [
+      "01 13",
+      "01 14",
+      "01 15",
+      "01 16",
+      "01 17",
+      "01 18",
+      "01 19",
+      "01 1A"
+    ]
+  },
+
+  "pid_descriptions": {
+    "01 0C": {
+      "name": "Engine RPM",
+      "unit": "RPM",
+      "min_value": 0,
+      "max_value": 8000,
+      "safety_threshold": 6500,
+      "description": "Engine revolutions per minute"
+    },
+    "01 0D": {
+      "name": "Vehicle Speed",
+      "unit": "km/h", 
+      "min_value": 0,
+      "max_value": 300,
+      "safety_threshold": 200,
+      "description": "Vehicle speed in kilometers per hour"
+    },
+    "01 05": {
+      "name": "Engine Coolant Temperature",
+      "unit": "°C",
+      "min_value": -40,
+      "max_value": 150,
+      "safety_threshold": 110,
+      "description": "Engine coolant temperature in Celsius"
+    },
+    "01 0F": {
+      "name": "Intake Air Temperature",
+      "unit": "°C",
+      "min_value": -40,
+      "max_value": 100,
+      "safety_threshold": 60,
+      "description": "Intake air temperature in Celsius"
+    },
+    "01 11": {
+      "name": "Throttle Position",
+      "unit": "%",
+      "min_value": 0,
+      "max_value": 100,
+      "safety_threshold": 95,
+      "description": "Throttle position percentage"
+    },
+    "01 04": {
+      "name": "Calculated Engine Load",
+      "unit": "%",
+      "min_value": 0,
+      "max_value": 100,
+      "safety_threshold": 90,
+      "description": "Calculated engine load percentage"
+    },
+    "01 06": {
+      "name": "Short Term Fuel Trim Bank 1", 
+      "unit": "%",
+      "min_value": -100,
+      "max_value": 99.22,
+      "safety_threshold": 25,
+      "description": "Short term fuel trim for bank 1"
+    },
+    "01 07": {
+      "name": "Long Term Fuel Trim Bank 1",
+      "unit": "%", 
+      "min_value": -100,
+      "max_value": 99.22,
+      "safety_threshold": 25,
+      "description": "Long term fuel trim for bank 1"
+    },
+    "01 0B": {
+      "name": "Intake Manifold Absolute Pressure",
+      "unit": "kPa",
+      "min_value": 0,
+      "max_value": 255,
+      "safety_threshold": 200,
+      "description": "Intake manifold absolute pressure"
+    },
+    "01 42": {
+      "name": "Control Module Voltage",
+      "unit": "V",
+      "min_value": 0,
+      "max_value": 65.535,
+      "safety_threshold": null,
+      "description": "Control module voltage"
+    }
+  },
+
+  "diagnostic_operations": {
+    "dtc_reading": {
+      "include_stored": true,
+      "include_pending": true,
+      "include_permanent": true,
+      "auto_clear_after_read": false,
+      "require_confirmation_for_clear": true
+    },
+    "vehicle_info": {
+      "read_vin": true,
+      "read_calibration_id": true,
+      "read_ecu_name": true,
+      "read_supported_pids": true
+    },
+    "monitor_tests": {
+      "check_readiness": true,
+      "perform_monitor_tests": false,
+      "include_test_results": true
+    }
+  },
+
+  "safety": {
+    "enable_safety_monitoring": true,
+    "critical_temperature_c": 115,
+    "max_safe_rpm": 6500,
+    "max_safe_speed_kmh": 200,
+    "fuel_trim_warning_threshold": 20,
+    "auto_alert_on_critical": true,
+    "safety_check_interval_seconds": 5
+  },
+
+  "logging": {
+    "enable_mcp_logging": true,
+    "log_level": "INFO",
+    "log_file": "logs/mcp-elm327.log",
+    "max_log_size_mb": 10,
+    "log_rotation_count": 5,
+    "log_sensitive_data": false
+  },
+
+  "integration": {
+    "fastagent_compatible": true,
+    "code_interpreter_compatible": true,
+    "websocket_streaming": true,
+    "rest_api_compatible": true,
+    "enable_caching": true,
+    "cache_duration_seconds": 60
+  },
+
+  "troubleshooting": {
+    "connection_retry_attempts": 3,
+    "connection_retry_delay_ms": 2000,
+    "enable_connection_diagnostics": true,
+    "fallback_to_simulation": false,
+    "simulation_data_file": null,
+    "debug_mode": false
+  },
+
+  "experimental_features": {
+    "enable_predictive_analysis": true,
+    "enable_anomaly_detection": true,
+    "machine_learning_models": false,
+    "advanced_diagnostics": true,
+    "multi_vehicle_support": false
+  }
+}
