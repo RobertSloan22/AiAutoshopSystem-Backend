@@ -531,12 +531,12 @@ if 'plt' in locals():
     }
     
     // Create base64 data for immediate frontend use
-    const base64Data = `data:image/png;base64,${base64Clean}`;
+    const base64DataUrl = `data:image/png;base64,${base64Clean}`;
     
     return { 
       path: plotPath, 
       imageId,
-      data: base64Data,
+      data: base64DataUrl,
       url: `/api/plots/${imageId}`,
       thumbnailUrl: `/api/plots/${imageId}/thumbnail`
     };
