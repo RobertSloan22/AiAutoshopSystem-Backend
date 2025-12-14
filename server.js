@@ -75,6 +75,7 @@ import comprehensiveReportRoutes from './routes/comprehensiveReport.routes.js';
 import obd2RealtimeService from './services/OBD2RealtimeService.js';
 import diagnosticAgentsRoutes from './routes/diagnostic-agents.js';
 import uiGenerationRoutes from './routes/ui-generation.routes.js';
+import idsRoutes from './routes/intelligentDiagnosticSession.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -668,6 +669,9 @@ app.use('/api/obd2', obd2Routes);
 
 // Register comprehensive reports routes
 app.use('/api/obd2', comprehensiveReportRoutes);
+
+// Register Intelligent Diagnostic Session routes
+app.use('/api/ids', idsRoutes);
 
 // Register diagnostic agents routes
 app.use('/api/diagnostic-agents', diagnosticAgentsRoutes);

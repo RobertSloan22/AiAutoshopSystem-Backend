@@ -1,5 +1,8 @@
 // Enhanced Diagnostic Service - Comprehensive Integration Layer
 import EventEmitter from 'events';
+import dotenv from 'dotenv';
+
+
 
 class EnhancedDiagnosticService extends EventEmitter {
   constructor() {

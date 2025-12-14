@@ -92,7 +92,11 @@ const DiagnosticSessionSchema = new mongoose.Schema({
   alertsGenerated: [mongoose.Schema.Types.Mixed],
   maintenanceInsights: [mongoose.Schema.Types.Mixed],
   complianceChecks: [mongoose.Schema.Types.Mixed],
-  performanceMetrics: mongoose.Schema.Types.Mixed
+  performanceMetrics: mongoose.Schema.Types.Mixed,
+  
+  // Intelligent Diagnostic Session linking
+  idsId: { type: String, index: true }, // Reference to IntelligentDiagnosticSession
+  idsStage: { type: String, enum: ['inspection', 'analysis-repair', 'verification-testdriving'] } // Which IDS stage this session belongs to
 }, {
   timestamps: true
 });

@@ -139,7 +139,11 @@ const AnalysisSchema = new mongoose.Schema({
   isDeleted: {
     type: Boolean,
     default: false
-  }
+  },
+
+  // Intelligent Diagnostic Session linking
+  idsId: { type: String, index: true }, // Reference to IntelligentDiagnosticSession
+  idsStage: { type: String, enum: ['inspection', 'analysis-repair', 'verification-testdriving'] } // Which IDS stage this analysis belongs to
 
 }, {
   timestamps: true,
@@ -151,6 +155,7 @@ AnalysisSchema.index({ sessionId: 1, timestamp: -1 });
 AnalysisSchema.index({ analysisType: 1, status: 1 });
 AnalysisSchema.index({ 'context.dtcCodes': 1 });
 AnalysisSchema.index({ tags: 1 });
+AnalysisSchema.index({ idsId: 1, idsStage: 1 });
 
 // Virtual for analysis URL
 AnalysisSchema.virtual('analysisUrl').get(function() {

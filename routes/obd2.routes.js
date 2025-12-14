@@ -6,6 +6,7 @@ import OpenAI from 'openai';
 import crypto from 'crypto';
 import DiagnosticSession from '../models/diagnosticSession.model.js';
 import Analysis from '../models/analysis.model.js';
+import IntelligentDiagnosticSession from '../models/intelligentDiagnosticSession.model.js';
 import obd2RealtimeService from '../services/OBD2RealtimeService.js';
 import OBD2AnalysisService from '../services/obd2AnalysisService.js';
 import PythonExecutionService from '../services/pythonExecutionService.js';
@@ -4203,6 +4204,68 @@ Focus on actionable insights with specific data points, values, and timestamps.`
       'autoAnalysis.duration': parseFloat(duration),
       'aiSummary': analysisResult // Also store in main aiSummary field for backwards compatibility
     });
+
+    // Associate analysis with IDS if session is linked to an IDS
+    try {
+      const session = await DiagnosticSession.findById(sessionId);
+      if (session && session.idsId) {
+        const ids = await IntelligentDiagnosticSession.findOne({ idsId: session.idsId });
+        if (ids && ids.overallStatus === 'active') {
+          const stageName = session.idsStage || ids.currentStage;
+          
+          // Create analysis document and get analysisId
+          const analysisId = Analysis.generateAnalysisId();
+          const analysisDoc = new Analysis({
+            analysisId: analysisId,
+            sessionId: sessionId,
+            analysisType: 'auto',
+            timestamp: new Date(),
+            status: 'completed',
+            duration: parseFloat(duration),
+            result: analysisResult,
+            structuredData: {
+              summary: { autoAnalysis: true },
+              recommendations: []
+            },
+            plots: plots.map(plot => ({
+              filename: plot.filename || `plot_${Date.now()}.png`,
+              base64: plot.base64 || plot.data,
+              mimeType: plot.mimeType || 'image/png',
+              description: plot.description || 'Auto-analysis visualization'
+            })),
+            context: {
+              dataPointCount: session.dataPointCount || 0,
+              timeRange: {
+                start: session.startTime,
+                end: session.endTime
+              },
+              vehicleInfo: session.vehicleInfo || {}
+            },
+            modelInfo: {
+              model: 'o3-mini',
+              reasoningEffort: 'medium'
+            },
+            tags: ['auto-analysis', 'ids-linked'],
+            idsId: session.idsId,
+            idsStage: stageName
+          });
+          
+          await analysisDoc.save();
+          
+          // Associate with IDS stage
+          await ids.associateAnalysis(analysisId, {
+            result: analysisResult,
+            plots: plots,
+            duration: parseFloat(duration)
+          }, stageName);
+          
+          console.log(`✅ [AUTO-ANALYSIS] Associated analysis ${analysisId} with IDS ${session.idsId} stage ${stageName}`);
+        }
+      }
+    } catch (idsError) {
+      console.warn('⚠️ [AUTO-ANALYSIS] Failed to associate with IDS (non-critical):', idsError);
+      // Don't fail analysis if IDS association fails
+    }
 
     console.log(`🤖 [AUTO-ANALYSIS] ✅ Analysis completed in ${duration}s`);
 
