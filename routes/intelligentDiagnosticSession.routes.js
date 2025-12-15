@@ -131,6 +131,28 @@ router.get('/vehicle/:vin', async (req, res) => {
   }
 });
 
+// Get all IDS entries for a vehicle
+router.get('/vehicle/:vin/all', async (req, res) => {
+  try {
+    const { vin } = req.params;
+    logRequest('GET', `/api/ids/vehicle/${vin}/all`);
+
+    const allIDS = await IntelligentDiagnosticSession.find({ vin })
+      .sort({ createdAt: -1 })
+      .populate('linkedLiveDataSessions')
+      .populate('stages.liveDataSessionIds');
+
+    res.json({
+      success: true,
+      idsList: allIDS,
+      count: allIDS.length
+    });
+  } catch (error) {
+    console.error('❌ Failed to get all IDS for vehicle:', error);
+    res.status(500).json({ error: 'Failed to get all IDS for vehicle', message: error.message });
+  }
+});
+
 // Start a stage
 router.put('/:idsId/stage/:stageName/start', async (req, res) => {
   try {
@@ -294,6 +316,189 @@ router.post('/:idsId/stage/:stageName/analysis', async (req, res) => {
   } catch (error) {
     console.error('❌ Failed to associate analysis:', error);
     res.status(500).json({ error: 'Failed to associate analysis', message: error.message });
+  }
+});
+
+// Record workflow event for a stage (used by frontend WorkflowEventBus)
+router.post('/:idsId/stage/:stageName/workflow-event', async (req, res) => {
+  try {
+    const { idsId, stageName } = req.params;
+    const {
+      workflowStage,
+      eventType,
+      from,
+      to,
+      message,
+      data,
+      timestamp
+    } = req.body || {};
+
+    logRequest('POST', `/api/ids/${idsId}/stage/${stageName}/workflow-event`, {
+      workflowStage,
+      eventType
+    });
+
+    const ids = await IntelligentDiagnosticSession.findOne({ idsId });
+    if (!ids) {
+      return res.status(404).json({ error: 'IDS not found' });
+    }
+
+    const stage = ids.getStage(stageName);
+    if (!stage) {
+      return res.status(404).json({ error: 'Stage not found' });
+    }
+
+    const existingMetadata = stage.metadata || {};
+    const existingEvents = Array.isArray(existingMetadata.workflowEvents)
+      ? existingMetadata.workflowEvents
+      : [];
+
+    const eventEntry = {
+      workflowStage: workflowStage || stageName,
+      eventType,
+      from,
+      to,
+      message,
+      data,
+      timestamp: timestamp || new Date().toISOString()
+    };
+
+    const newMetadata = {
+      ...existingMetadata,
+      lastWorkflowStage: eventEntry.workflowStage,
+      lastEventType: eventType,
+      workflowEvents: [...existingEvents, eventEntry]
+    };
+
+    await ids.updateStage(stageName, { metadata: newMetadata });
+
+    res.json({
+      success: true,
+      ids,
+      stage: ids.getStage(stageName)
+    });
+  } catch (error) {
+    console.error('❌ Failed to record workflow event:', error);
+    res.status(500).json({ error: 'Failed to record workflow event', message: error.message });
+  }
+});
+
+// Save AI guided steps for a stage
+router.post('/:idsId/stage/:stageName/ai-steps', async (req, res) => {
+  try {
+    const { idsId, stageName } = req.params;
+    const { aiSteps, metadata } = req.body || {};
+
+    logRequest('POST', `/api/ids/${idsId}/stage/${stageName}/ai-steps`, {
+      stepsCount: Array.isArray(aiSteps) ? aiSteps.length : 0
+    });
+
+    if (!Array.isArray(aiSteps) || aiSteps.length === 0) {
+      return res.status(400).json({ error: 'aiSteps array is required' });
+    }
+
+    const ids = await IntelligentDiagnosticSession.findOne({ idsId });
+    if (!ids) {
+      return res.status(404).json({ error: 'IDS not found' });
+    }
+
+    const stage = ids.getStage(stageName);
+    if (!stage) {
+      return res.status(404).json({ error: 'Stage not found' });
+    }
+
+    const existingMetadata = stage.metadata || {};
+
+    const newMetadata = {
+      ...existingMetadata,
+      aiSteps,
+      aiStepsMeta: {
+        ...(existingMetadata.aiStepsMeta || {}),
+        ...(metadata || {})
+      }
+    };
+
+    await ids.updateStage(stageName, { metadata: newMetadata });
+
+    res.json({
+      success: true,
+      ids,
+      stage: ids.getStage(stageName)
+    });
+  } catch (error) {
+    console.error('❌ Failed to save AI steps for IDS stage:', error);
+    res.status(500).json({ error: 'Failed to save AI steps for IDS stage', message: error.message });
+  }
+});
+
+// Save diagnostic report metadata for a stage
+router.post('/:idsId/stage/:stageName/diagnostic-report', async (req, res) => {
+  try {
+    const { idsId, stageName } = req.params;
+    const {
+      sessionId,
+      reportContent,
+      summary,
+      activitySummary,
+      analysisResults,
+      recommendations,
+      aiDiagnosticSteps,
+      dtcCodes,
+      timestamp
+    } = req.body || {};
+
+    logRequest('POST', `/api/ids/${idsId}/stage/${stageName}/diagnostic-report`, {
+      sessionId,
+      hasSummary: !!summary
+    });
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' });
+    }
+
+    const ids = await IntelligentDiagnosticSession.findOne({ idsId });
+    if (!ids) {
+      return res.status(404).json({ error: 'IDS not found' });
+    }
+
+    const stage = ids.getStage(stageName);
+    if (!stage) {
+      return res.status(404).json({ error: 'Stage not found' });
+    }
+
+    const existingMetadata = stage.metadata || {};
+    const existingReports = Array.isArray(existingMetadata.diagnosticReports)
+      ? existingMetadata.diagnosticReports
+      : [];
+
+    const reportEntry = {
+      sessionId,
+      reportContent,
+      summary,
+      activitySummary,
+      analysisResults,
+      recommendations,
+      aiDiagnosticSteps,
+      dtcCodes,
+      timestamp: timestamp || new Date().toISOString()
+    };
+
+    const newMetadata = {
+      ...existingMetadata,
+      lastDiagnosticReport: reportEntry,
+      diagnosticReports: [...existingReports, reportEntry]
+    };
+
+    await ids.updateStage(stageName, { metadata: newMetadata });
+
+    res.json({
+      success: true,
+      ids,
+      stage: ids.getStage(stageName)
+    });
+  } catch (error) {
+    console.error('❌ Failed to save diagnostic report for IDS stage:', error);
+    res.status(500).json({ error: 'Failed to save diagnostic report for IDS stage', message: error.message });
   }
 });
 
