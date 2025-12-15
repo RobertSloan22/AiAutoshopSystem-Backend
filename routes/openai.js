@@ -236,13 +236,15 @@ router.post('/dashboard-image', async (req, res) => {
  *  - imageUrl: URL of the image to analyze or base64 data URI
  *  - prompt: Specific question or instruction about the image
  *  - userId: (optional) ID of the user making the request
+ *  - stream: (optional) Boolean flag to request streaming response (default: false)
  * 
  * Returns:
- *  - { explanation: string, responseId: string, conversationId: string, status: string } on success
+ *  - For non-streaming: { explanation: string, responseId: string, conversationId: string, status: string } on success
+ *  - For streaming: Server-Sent Events stream with content chunks
  *  - { error: string, details?: string } on failure
  */
 router.post('/explain-image', async (req, res) => {
-  const { imageUrl, prompt, userId } = req.body;
+  const { imageUrl, prompt, userId, stream: shouldStream = false } = req.body;
 
   // Validate required fields
   if (!imageUrl || !prompt) {
@@ -254,25 +256,29 @@ router.post('/explain-image', async (req, res) => {
 
   try {
     console.log('Processing image explanation request...');
+    console.log(`Stream mode: ${shouldStream ? 'enabled' : 'disabled'}`);
     
-    // First, check if we already have this analysis in the database
-    const existingAnalysis = await ImageAnalysis.findOne({ 
-      imageUrl, 
-      prompt 
-    }).sort({ createdAt: -1 }).exec();
-
-    // If we have a recent analysis (less than 24 hours old), return it
-    if (existingAnalysis && 
-        (new Date() - new Date(existingAnalysis.createdAt)) < 24 * 60 * 60 * 1000) {
-      console.log(`Using cached analysis for image with ID: ${existingAnalysis._id}`);
-      
-      return res.status(200).json({
-        explanation: existingAnalysis.explanation,
-        responseId: existingAnalysis.responseId,
-        conversationId: existingAnalysis.conversationId,
-        status: 'success',
-        fromCache: true
-      });
+    // For streaming requests, don't check cache
+    if (!shouldStream) {
+      // First, check if we already have this analysis in the database
+      const existingAnalysis = await ImageAnalysis.findOne({ 
+        imageUrl, 
+        prompt 
+      }).sort({ createdAt: -1 }).exec();
+  
+      // If we have a recent analysis (less than 24 hours old), return it
+      if (existingAnalysis && 
+          (new Date() - new Date(existingAnalysis.createdAt)) < 24 * 60 * 60 * 1000) {
+        console.log(`Using cached analysis for image with ID: ${existingAnalysis._id}`);
+        
+        return res.status(200).json({
+          explanation: existingAnalysis.explanation,
+          responseId: existingAnalysis.responseId,
+          conversationId: existingAnalysis.conversationId,
+          status: 'success',
+          fromCache: true
+        });
+      }
     }
     
     // Create a system message for automotive technical advisor
@@ -306,11 +312,15 @@ router.post('/explain-image', async (req, res) => {
         content: [
           { type: "input_text", text: `As an Automotive Technical Advisor, provide a definitive technical analysis of this image. ${cleanedPrompt} State facts directly and include specific measurements, specifications, and relevant technical details.` },
           { type: "input_image", image_url: imageUrl }
-        ],
-        
+        ]
       }],
       max_output_tokens: 1000
     };
+    
+    // Add streaming option if requested
+    if (shouldStream) {
+      requestPayload.stream = true;
+    }
     
     // Only add conversation_id if one was explicitly provided
     if (req.body.conversationId) {
@@ -320,7 +330,153 @@ router.post('/explain-image', async (req, res) => {
       console.log('No conversation ID provided, a new one will be generated');
     }
 
-    // Create a response using the Responses API
+    // Handle streaming response
+    if (shouldStream) {
+      // Set headers for Server-Sent Events
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+      
+      // Create streaming response
+      const stream = await openai.responses.create(requestPayload);
+      
+      // Generate a conversation ID for this analysis
+      const conversationId = stream.conversation_id || `img-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Send session ID first
+      res.write(`data: ${JSON.stringify({ 
+        type: 'session_started', 
+        sessionId: conversationId,
+        messageType: 'image_analysis'
+      })}\n\n`);
+      
+      // Setup content buffering
+      let contentBuffer = '';
+      let lastFlushTime = Date.now();
+      let flushTimeout = null;
+      let accumulationStartTime = Date.now();
+      let fullText = ''; // Keep track of the full response for saving to DB
+      
+      const flushContentBuffer = () => {
+        if (contentBuffer.length > 0) {
+          // Remove any leading/trailing whitespace for better display
+          const trimmedContent = contentBuffer.trim();
+          
+          if (trimmedContent.length > 0) {
+            res.write(`data: ${JSON.stringify({
+              type: 'content',
+              content: trimmedContent,
+              sessionId: conversationId
+            })}\n\n`);
+            
+            // Add the content to the full text
+            fullText += contentBuffer;
+            
+            // Deliberately add a small delay to let the client process
+            setTimeout(() => {}, 10);
+          }
+          
+          contentBuffer = '';
+          lastFlushTime = Date.now();
+          accumulationStartTime = Date.now();
+        }
+        
+        if (flushTimeout) {
+          clearTimeout(flushTimeout);
+          flushTimeout = null;
+        }
+      };
+      
+      try {
+        // Process the stream
+        for await (const chunk of stream) {
+          if (chunk.choices && chunk.choices.length > 0) {
+            const content = chunk.choices[0].text || '';
+            
+            if (content) {
+              // Buffer the content
+              contentBuffer += content;
+              
+              const now = Date.now();
+              const totalAccumulationTime = now - accumulationStartTime;
+              
+              // More sophisticated sentence boundary detection
+              const sentenceCompletionRegex = /[.!?]\s+[A-Z]|[.!?]$|\n\n/;
+              const hasCompleteSentence = sentenceCompletionRegex.test(contentBuffer);
+              
+              // Use larger thresholds for image analysis
+              const hasLargeContent = contentBuffer.length > 150; // Even larger chunks for image analysis
+              const hasBeenCollectingTooLong = totalAccumulationTime > 1200; // 1.2 second max collection
+              
+              if (hasCompleteSentence || hasLargeContent || hasBeenCollectingTooLong) {
+                flushContentBuffer();
+              } else {
+                if (!flushTimeout) {
+                  flushTimeout = setTimeout(flushContentBuffer, 600); // Longer timeout for image analysis
+                }
+              }
+            }
+            
+            // Handle completion
+            if (chunk.choices[0].finish_reason === 'stop') {
+              flushContentBuffer(); // Flush any remaining content
+              
+              // Save the analysis to the database
+              try {
+                const newAnalysis = new ImageAnalysis({
+                  imageUrl,
+                  prompt,
+                  explanation: fullText,
+                  responseId: stream.id || `id-${Date.now()}`,
+                  conversationId: conversationId,
+                  userId: userId || null,
+                  metadata: {
+                    model: requestPayload.model,
+                    timestamp: new Date().toISOString(),
+                    streamMode: true
+                  }
+                });
+                
+                await newAnalysis.save();
+                console.log(`Saved streamed image analysis to database with ID: ${newAnalysis._id}`);
+              } catch (dbError) {
+                console.error('Error saving to database:', dbError);
+              }
+              
+              // Send completion event
+              res.write(`data: ${JSON.stringify({
+                type: 'stream_complete',
+                sessionId: conversationId
+              })}\n\n`);
+              
+              // End the response
+              res.end();
+              break;
+            }
+          }
+        }
+      } catch (streamError) {
+        console.error('Stream processing error:', streamError);
+        
+        // Send error event
+        res.write(`data: ${JSON.stringify({
+          type: 'error',
+          error: streamError.message,
+          sessionId: conversationId
+        })}\n\n`);
+        
+        // End the response
+        res.end();
+      }
+      
+      return; // End function execution here for streaming
+    }
+    
+    // Regular non-streaming request handling
     const response = await openai.responses.create(requestPayload);
     
     console.log(`Response received with conversation ID: ${response.conversation_id}`);
@@ -1617,6 +1773,753 @@ router.get('/images/conversation/:conversationId', async (req, res) => {
     return res.status(500).json({ 
       error: 'Failed to retrieve conversation',
       details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/openai/explain-image/annotated
+ * 
+ * Analyzes an annotated image where users have highlighted or circled specific areas
+ * for focused analysis using the Responses API
+ * 
+ * Expects a multipart form data containing:
+ *  - image: The annotated image file (required)
+ *  - conversationId: The conversation ID from the original analysis (required)
+ *  - question: Specific question about the annotated areas (optional, has default)
+ *  - context: (optional) Additional context like vehicle information
+ *  - stream: (optional) Boolean flag to request streaming response (default: false)
+ * 
+ * Returns:
+ *  - For non-streaming: { answer: string, responseId: string, conversationId: string, status: string } on success
+ *  - For streaming: Server-Sent Events stream with content chunks
+ *  - { error: string, details?: string } on failure
+ */
+router.post('/explain-image/annotated', upload.single('image'), async (req, res) => {
+  try {
+    const { conversationId, question, context } = req.body;
+    const shouldStream = req.body.stream === 'true' || req.body.stream === true;
+
+    // Validate required fields
+    if (!req.file) {
+      return res.status(400).json({ 
+        error: 'Missing annotated image file',
+        details: 'An annotated image file is required for analysis'
+      });
+    }
+
+    if (!conversationId) {
+      return res.status(400).json({ 
+        error: 'Missing conversation ID',
+        details: 'Conversation ID is required to maintain context from the original analysis'
+      });
+    }
+
+    console.log('--------------------------------------------');
+    console.log(`Processing annotated image analysis for conversation: ${conversationId}`);
+    console.log(`Uploaded file: ${req.file.filename} (${req.file.size} bytes)`);
+    console.log(`Question: "${question || 'Default annotation analysis'}"`);
+    console.log(`Stream mode: ${shouldStream ? 'enabled' : 'disabled'}`);
+
+    // Process the uploaded annotated image
+    const imagePath = req.file.path;
+    let imageBuffer;
+
+    try {
+      // Resize and optimize the annotated image if needed
+      imageBuffer = await sharp(imagePath)
+        .resize({
+          width: 1024,  // Max width for optimal processing
+          height: 1024, // Max height for optimal processing
+          fit: 'inside', // Maintain aspect ratio
+          withoutEnlargement: true // Don't enlarge smaller images
+        })
+        .jpeg({ quality: 85 }) // Higher quality for annotation details
+        .toBuffer();
+      
+      console.log(`Processed annotated image: ${(imageBuffer.length / (1024 * 1024)).toFixed(2)} MB`);
+    } catch (resizeError) {
+      console.error('Error processing annotated image:', resizeError);
+      // If resize fails, use the original file
+      imageBuffer = await fs.promises.readFile(imagePath);
+    }
+
+    // Convert to base64 data URI
+    const base64Image = imageBuffer.toString('base64');
+    const dataUri = `data:image/jpeg;base64,${base64Image}`;
+
+    // Check image size for OpenAI limit (20MB)
+    const sizeInMB = imageBuffer.length / (1024 * 1024);
+    if (sizeInMB > 20) {
+      return res.status(400).json({
+        error: 'Annotated image size exceeds OpenAI limit of 20MB',
+        details: `Image is ${sizeInMB.toFixed(2)} MB, must be under 20MB`
+      });
+    }
+
+    // Prepare the analysis question
+    const defaultQuestion = 'Please analyze the areas I have highlighted or circled in this annotated image. Focus specifically on the annotated regions and provide detailed insights about what you observe in those specific areas. Identify any issues, components, or details that are emphasized by the annotations.';
+    const analysisQuestion = question || defaultQuestion;
+
+    // Prepare context for the vehicle if available
+    let userMessage = analysisQuestion;
+    if (context) {
+      try {
+        const contextObj = typeof context === 'string' ? JSON.parse(context) : context;
+        const vehicleInfo = `Vehicle Information: ${contextObj.vehicleYear || ''} ${contextObj.vehicleMake || ''} ${contextObj.vehicleModel || ''} ${contextObj.vehicleEngine ? `with ${contextObj.vehicleEngine} engine` : ''}`;
+        userMessage = `${vehicleInfo}\n\n${analysisQuestion}`;
+        console.log(`Added vehicle context: ${vehicleInfo}`);
+      } catch (contextError) {
+        console.warn('Failed to parse context, using as string:', context);
+        userMessage = `${context}\n\n${analysisQuestion}`;
+      }
+    }
+
+    // Create a specialized system message for annotated image analysis
+    const systemMessage = `You are an expert Automotive Technical Advisor analyzing an annotated image. The user has added visual annotations (circles, rectangles, or freehand markings) to highlight specific areas of interest in an automotive component or system. 
+
+Your task is to:
+1. Identify and focus on the annotated/highlighted areas in the image
+2. Provide detailed technical analysis of what is shown in those specific regions
+3. Explain any issues, components, or conditions visible in the annotated areas
+4. Use definitive language and avoid tentative phrases
+5. Reference the annotations explicitly in your response (e.g., "In the circled area...", "The highlighted region shows...")
+6. Provide actionable insights based on what the annotations are pointing out
+
+This is a follow-up analysis to a previous conversation (ID: ${conversationId}), so maintain technical context while focusing specifically on the annotated regions.`;
+
+    // Create request payload for OpenAI Responses API
+    const requestPayload = {
+      model: "gpt-4o",
+      user: "Technician",
+      input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
+        role: "user",
+        content: [
+          { type: "input_text", text: `This is an annotated image analysis. Original conversation ID: ${conversationId}. ${userMessage}` },
+          { type: "input_image", image_url: dataUri }
+        ]
+      }],
+      max_output_tokens: 1500
+    };
+    
+    // Add streaming if requested
+    if (shouldStream) {
+      requestPayload.stream = true;
+    }
+
+    console.log('Sending annotated image analysis request to OpenAI...');
+    console.log(`System message length: ${systemMessage.length} characters`);
+    console.log(`User message length: ${userMessage.length} characters`);
+
+    // Handle streaming response
+    if (shouldStream) {
+      // Set headers for Server-Sent Events
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+      
+      // Create streaming response
+      const stream = await openai.responses.create(requestPayload);
+      
+      // Generate a conversation ID for this annotated analysis
+      const responseConversationId = stream.conversation_id || `annotated-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Send session ID first
+      res.write(`data: ${JSON.stringify({ 
+        type: 'session_started', 
+        sessionId: responseConversationId,
+        originalConversationId: conversationId,
+        messageType: 'annotated_image_analysis'
+      })}\n\n`);
+      
+      // Setup content buffering
+      let contentBuffer = '';
+      let lastFlushTime = Date.now();
+      let flushTimeout = null;
+      let accumulationStartTime = Date.now();
+      let fullText = ''; // Keep track of the full response for saving to DB
+      
+      // Cleanup file after establishing the stream
+      try {
+        await fs.promises.unlink(imagePath);
+        console.log(`Cleaned up uploaded file: ${req.file.filename}`);
+      } catch (cleanupError) {
+        console.warn('Failed to clean up uploaded file:', cleanupError.message);
+      }
+      
+      const flushContentBuffer = () => {
+        if (contentBuffer.length > 0) {
+          // Remove any leading/trailing whitespace for better display
+          const trimmedContent = contentBuffer.trim();
+          
+          if (trimmedContent.length > 0) {
+            res.write(`data: ${JSON.stringify({
+              type: 'content',
+              content: trimmedContent,
+              sessionId: responseConversationId
+            })}\n\n`);
+            
+            // Add the content to the full text
+            fullText += contentBuffer;
+            
+            // Deliberately add a small delay to let the client process
+            setTimeout(() => {}, 10);
+          }
+          
+          contentBuffer = '';
+          lastFlushTime = Date.now();
+          accumulationStartTime = Date.now();
+        }
+        
+        if (flushTimeout) {
+          clearTimeout(flushTimeout);
+          flushTimeout = null;
+        }
+      };
+      
+      try {
+        // Process the stream
+        for await (const chunk of stream) {
+          if (chunk.choices && chunk.choices.length > 0) {
+            const content = chunk.choices[0].text || '';
+            
+            if (content) {
+              // Buffer the content
+              contentBuffer += content;
+              
+              const now = Date.now();
+              const totalAccumulationTime = now - accumulationStartTime;
+              
+              // More sophisticated sentence boundary detection
+              const sentenceCompletionRegex = /[.!?]\s+[A-Z]|[.!?]$|\n\n/;
+              const hasCompleteSentence = sentenceCompletionRegex.test(contentBuffer);
+              
+              // Use larger thresholds for image analysis
+              const hasLargeContent = contentBuffer.length > 150; // Even larger chunks for image analysis
+              const hasBeenCollectingTooLong = totalAccumulationTime > 1200; // 1.2 second max collection
+              
+              if (hasCompleteSentence || hasLargeContent || hasBeenCollectingTooLong) {
+                flushContentBuffer();
+              } else {
+                if (!flushTimeout) {
+                  flushTimeout = setTimeout(flushContentBuffer, 600); // Longer timeout for image analysis
+                }
+              }
+            }
+            
+            // Handle completion
+            if (chunk.choices[0].finish_reason === 'stop') {
+              flushContentBuffer(); // Flush any remaining content
+              
+              // Save the analysis to the database
+              try {
+                const annotatedAnalysis = new ImageAnalysis({
+                  imageUrl: dataUri, // Store the annotated image
+                  prompt: `ANNOTATED: ${analysisQuestion}`,
+                  explanation: fullText,
+                  responseId: stream.id || `id-${Date.now()}`,
+                  conversationId: responseConversationId,
+                  userId: req.body.userId || null,
+                  metadata: {
+                    model: requestPayload.model,
+                    timestamp: new Date().toISOString(),
+                    type: 'annotated_analysis',
+                    originalConversationId: conversationId,
+                    annotationContext: context || null,
+                    streamMode: true
+                  }
+                });
+                
+                await annotatedAnalysis.save();
+                console.log(`Saved streamed annotated analysis to database with ID: ${annotatedAnalysis._id}`);
+              } catch (dbError) {
+                console.error('Error saving to database:', dbError);
+              }
+              
+              // Send completion event
+              res.write(`data: ${JSON.stringify({
+                type: 'stream_complete',
+                sessionId: responseConversationId,
+                originalConversationId: conversationId
+              })}\n\n`);
+              
+              // End the response
+              res.end();
+              break;
+            }
+          }
+        }
+      } catch (streamError) {
+        console.error('Stream processing error:', streamError);
+        
+        // Send error event
+        res.write(`data: ${JSON.stringify({
+          type: 'error',
+          error: streamError.message,
+          sessionId: responseConversationId
+        })}\n\n`);
+        
+        // End the response
+        res.end();
+      }
+      
+      return; // End function execution here for streaming
+    }
+
+    // Non-streaming response
+    const response = await openai.responses.create(requestPayload);
+
+    // Generate a conversation ID for this annotated analysis
+    const responseConversationId = response.conversation_id || `annotated-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    
+    console.log(`Annotated analysis response received with ID: ${response.id}`);
+    console.log(`Response text length: ${response.output_text.length} characters`);
+    console.log('--------------------------------------------');
+
+    // Clean up the uploaded file
+    try {
+      await fs.promises.unlink(imagePath);
+      console.log(`Cleaned up uploaded file: ${req.file.filename}`);
+    } catch (cleanupError) {
+      console.warn('Failed to clean up uploaded file:', cleanupError.message);
+    }
+
+    // Optionally save the annotated analysis to database
+    try {
+      const annotatedAnalysis = new ImageAnalysis({
+        imageUrl: dataUri, // Store the annotated image
+        prompt: `ANNOTATED: ${analysisQuestion}`,
+        explanation: response.output_text,
+        responseId: response.id,
+        conversationId: responseConversationId,
+        userId: req.body.userId || null,
+        metadata: {
+          model: requestPayload.model,
+          timestamp: new Date().toISOString(),
+          type: 'annotated_analysis',
+          originalConversationId: conversationId,
+          annotationContext: context || null
+        }
+      });
+      
+      await annotatedAnalysis.save();
+      console.log(`Saved annotated analysis to database with ID: ${annotatedAnalysis._id}`);
+    } catch (dbError) {
+      console.warn('Failed to save annotated analysis to database:', dbError.message);
+      // Continue without failing the request
+    }
+
+    return res.status(200).json({
+      answer: response.output_text,
+      responseId: response.id,
+      conversationId: responseConversationId,
+      originalConversationId: conversationId,
+      status: 'success',
+      type: 'annotated_analysis'
+    });
+
+  } catch (error) {
+    console.error('Error processing annotated image analysis:', error);
+    
+    // Clean up uploaded file in case of error
+    if (req.file && req.file.path) {
+      try {
+        await fs.promises.unlink(req.file.path);
+      } catch (cleanupError) {
+        console.warn('Failed to clean up file after error:', cleanupError.message);
+      }
+    }
+    
+    // Provide more specific error messages
+    if (error.response) {
+      return res.status(error.response.status).json({
+        error: 'Failed to process annotated image',
+        details: error.response.data || error.message
+      });
+    }
+    
+    if (error.code === 'ECONNREFUSED' || error.code === 'ECONNABORTED') {
+      return res.status(503).json({
+        error: 'Service temporarily unavailable',
+        details: 'Could not connect to AI service'
+      });
+    }
+    
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Failed to analyze annotated image'
+    });
+  }
+});
+
+/**
+ * GET /api/openai/annotated-analyses/:originalConversationId
+ * 
+ * Retrieves all annotated analyses for a given original conversation ID
+ * 
+ * Path Parameters:
+ *  - originalConversationId: The conversation ID from the original image analysis
+ * 
+ * Query Parameters:
+ *  - userId: (optional) Filter by user ID
+ *  - limit: (optional) Limit number of results (default: 10, max: 50)
+ * 
+ * Returns:
+ *  - { analyses: Array, count: number } on success
+ *  - { error: string } on failure
+ */
+router.get('/annotated-analyses/:originalConversationId', async (req, res) => {
+  try {
+    const { originalConversationId } = req.params;
+    const { userId, limit = 10 } = req.query;
+    
+    if (!originalConversationId) {
+      return res.status(400).json({ 
+        error: 'Missing originalConversationId parameter'
+      });
+    }
+    
+    // Validate limit
+    const parsedLimit = Math.min(parseInt(limit) || 10, 50);
+    
+    const query = { 
+      'metadata.originalConversationId': originalConversationId,
+      'metadata.type': 'annotated_analysis'
+    };
+    
+    // Add userId filter if provided
+    if (userId) {
+      query.userId = userId;
+    }
+    
+    const analyses = await ImageAnalysis.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parsedLimit);
+      
+    const count = await ImageAnalysis.countDocuments(query);
+    
+    return res.status(200).json({
+      analyses: analyses.map(analysis => ({
+        id: analysis._id,
+        imageUrl: analysis.imageUrl,
+        prompt: analysis.prompt,
+        explanation: analysis.explanation,
+        responseId: analysis.responseId,
+        conversationId: analysis.conversationId,
+        originalConversationId: analysis.metadata?.originalConversationId,
+        createdAt: analysis.createdAt,
+        metadata: analysis.metadata
+      })),
+      count,
+      hasMore: count > parsedLimit
+    });
+    
+  } catch (error) {
+    console.error('Error retrieving annotated analyses:', error);
+    return res.status(500).json({
+      error: 'Failed to retrieve annotated analyses',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * DELETE /api/openai/annotated-analysis/:analysisId
+ * 
+ * Deletes a specific annotated analysis by ID
+ * 
+ * Path Parameters:
+ *  - analysisId: The ID of the annotated analysis to delete
+ * 
+ * Query Parameters:
+ *  - userId: (optional) Verify ownership by user ID
+ * 
+ * Returns:
+ *  - { message: string, deletedId: string } on success
+ *  - { error: string } on failure
+ */
+router.delete('/annotated-analysis/:analysisId', async (req, res) => {
+  try {
+    const { analysisId } = req.params;
+    const { userId } = req.query;
+    
+    if (!analysisId) {
+      return res.status(400).json({ 
+        error: 'Missing analysisId parameter'
+      });
+    }
+    
+    const query = { 
+      _id: analysisId,
+      'metadata.type': 'annotated_analysis'
+    };
+    
+    // Add userId filter if provided for ownership verification
+    if (userId) {
+      query.userId = userId;
+    }
+    
+    const deletedAnalysis = await ImageAnalysis.findOneAndDelete(query);
+    
+    if (!deletedAnalysis) {
+      return res.status(404).json({
+        error: 'Annotated analysis not found or access denied'
+      });
+    }
+    
+    console.log(`Deleted annotated analysis: ${analysisId}`);
+    
+    return res.status(200).json({
+      message: 'Annotated analysis deleted successfully',
+      deletedId: analysisId
+    });
+    
+  } catch (error) {
+    console.error('Error deleting annotated analysis:', error);
+    return res.status(500).json({
+      error: 'Failed to delete annotated analysis',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * POST /api/openai/explain-image/batch-annotated
+ * 
+ * Analyzes multiple annotated images in a batch for comparison or comprehensive analysis
+ * 
+ * Expects a multipart form data containing:
+ *  - images: Multiple annotated image files (required, max 5)
+ *  - conversationId: The conversation ID from the original analysis (required)
+ *  - question: Specific question about the annotated areas (optional)
+ *  - context: (optional) Additional context like vehicle information
+ *  - comparisonMode: (optional) boolean - whether to compare annotations across images
+ * 
+ * Returns:
+ *  - { answer: string, responseId: string, conversationId: string, imageCount: number, status: string } on success
+ *  - { error: string, details?: string } on failure
+ */
+router.post('/explain-image/batch-annotated', upload.array('images', 5), async (req, res) => {
+  try {
+    const { conversationId, question, context, comparisonMode = false } = req.body;
+
+    // Validate required fields
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ 
+        error: 'Missing annotated image files',
+        details: 'At least one annotated image file is required for analysis'
+      });
+    }
+
+    if (req.files.length > 5) {
+      return res.status(400).json({ 
+        error: 'Too many images',
+        details: 'Maximum 5 annotated images allowed per batch'
+      });
+    }
+
+    if (!conversationId) {
+      return res.status(400).json({ 
+        error: 'Missing conversation ID',
+        details: 'Conversation ID is required to maintain context from the original analysis'
+      });
+    }
+
+    console.log('--------------------------------------------');
+    console.log(`Processing batch annotated image analysis for conversation: ${conversationId}`);
+    console.log(`Number of images: ${req.files.length}`);
+    console.log(`Comparison mode: ${comparisonMode}`);
+
+    const processedImages = [];
+    
+    // Process each uploaded image
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      console.log(`Processing image ${i + 1}: ${file.filename} (${file.size} bytes)`);
+
+      try {
+        // Resize and optimize each image
+        const imageBuffer = await sharp(file.path)
+          .resize({
+            width: 800,  // Smaller size for batch processing
+            height: 800,
+            fit: 'inside',
+            withoutEnlargement: true
+          })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+
+        // Convert to base64 data URI
+        const base64Image = imageBuffer.toString('base64');
+        const dataUri = `data:image/jpeg;base64,${base64Image}`;
+
+        processedImages.push({
+          index: i + 1,
+          filename: file.filename,
+          dataUri: dataUri,
+          size: imageBuffer.length
+        });
+
+        // Clean up the uploaded file
+        await fs.promises.unlink(file.path);
+      } catch (processError) {
+        console.error(`Error processing image ${i + 1}:`, processError);
+        // Continue with other images
+      }
+    }
+
+    if (processedImages.length === 0) {
+      return res.status(400).json({
+        error: 'No images could be processed',
+        details: 'All uploaded images failed processing'
+      });
+    }
+
+    // Prepare the analysis question
+    const defaultQuestion = comparisonMode 
+      ? 'Please analyze and compare the annotated areas across these images. Identify patterns, differences, and relationships between the highlighted regions. Provide a comprehensive analysis of what the annotations are showing across all images.'
+      : 'Please analyze the annotated areas in these images. Focus on the highlighted regions in each image and provide detailed insights about what is shown in the annotated areas.';
+    
+    const analysisQuestion = question || defaultQuestion;
+
+    // Create a specialized system message for batch annotated analysis
+    const systemMessage = `You are an expert Automotive Technical Advisor analyzing ${processedImages.length} annotated images${comparisonMode ? ' in comparison mode' : ''}. Each image contains visual annotations (circles, rectangles, or freehand markings) highlighting specific areas of interest.
+
+Your task is to:
+1. Analyze the annotated areas in each image systematically
+2. ${comparisonMode ? 'Compare and contrast the highlighted regions across all images' : 'Provide detailed analysis of each annotated area'}
+3. Reference specific images and annotations in your response (e.g., "In Image 1, the circled area shows...")
+4. Identify any issues, components, or conditions visible in the annotated areas
+5. ${comparisonMode ? 'Look for patterns, progressions, or differences between the images' : 'Provide actionable insights for each annotated region'}
+6. Use definitive technical language and automotive terminology
+
+This is a follow-up analysis to conversation ID: ${conversationId}.`;
+
+    // Prepare user message with context
+    let userMessage = `Analyzing ${processedImages.length} annotated images. ${analysisQuestion}`;
+    if (context) {
+      try {
+        const contextObj = typeof context === 'string' ? JSON.parse(context) : context;
+        const vehicleInfo = `Vehicle: ${contextObj.vehicleYear || ''} ${contextObj.vehicleMake || ''} ${contextObj.vehicleModel || ''}`;
+        userMessage = `${vehicleInfo}\n\n${userMessage}`;
+      } catch (contextError) {
+        userMessage = `${context}\n\n${userMessage}`;
+      }
+    }
+
+    // Create content array with text and all images
+    const content = [
+      { type: "input_text", text: userMessage }
+    ];
+
+    // Add all processed images to the content
+    processedImages.forEach((img, index) => {
+      content.push({
+        type: "input_image",
+        image_url: img.dataUri
+      });
+    });
+
+    // Create request payload
+    const requestPayload = {
+      model: "gpt-4o",
+      user: "Technician",
+      input: [{
+        role: "system",
+        content: [
+          { type: "input_text", text: systemMessage }
+        ]
+      }, {
+        role: "user",
+        content: content
+      }],
+      max_output_tokens: 2000 // More tokens for batch analysis
+    };
+
+    console.log(`Sending batch annotated analysis request to OpenAI...`);
+    console.log(`Total images: ${processedImages.length}`);
+    console.log(`Total content size: ${JSON.stringify(requestPayload).length} characters`);
+
+    // Create a response using the Responses API
+    const response = await openai.responses.create(requestPayload);
+
+    const responseConversationId = response.conversation_id || `batch-annotated-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    
+    console.log(`Batch annotated analysis response received with ID: ${response.id}`);
+    console.log(`Response text length: ${response.output_text.length} characters`);
+    console.log('--------------------------------------------');
+
+    // Save the batch analysis to database
+    try {
+      const batchAnalysis = new ImageAnalysis({
+        imageUrl: `BATCH:${processedImages.length}_IMAGES`, // Special marker for batch
+        prompt: `BATCH_ANNOTATED${comparisonMode ? '_COMPARISON' : ''}: ${analysisQuestion}`,
+        explanation: response.output_text,
+        responseId: response.id,
+        conversationId: responseConversationId,
+        userId: req.body.userId || null,
+        metadata: {
+          model: requestPayload.model,
+          timestamp: new Date().toISOString(),
+          type: 'batch_annotated_analysis',
+          originalConversationId: conversationId,
+          imageCount: processedImages.length,
+          comparisonMode: comparisonMode,
+          imageFilenames: processedImages.map(img => img.filename),
+          annotationContext: context || null
+        }
+      });
+      
+      await batchAnalysis.save();
+      console.log(`Saved batch annotated analysis to database with ID: ${batchAnalysis._id}`);
+    } catch (dbError) {
+      console.warn('Failed to save batch analysis to database:', dbError.message);
+    }
+
+    return res.status(200).json({
+      answer: response.output_text,
+      responseId: response.id,
+      conversationId: responseConversationId,
+      originalConversationId: conversationId,
+      imageCount: processedImages.length,
+      comparisonMode: comparisonMode,
+      status: 'success',
+      type: 'batch_annotated_analysis'
+    });
+
+  } catch (error) {
+    console.error('Error processing batch annotated image analysis:', error);
+    
+    // Clean up uploaded files in case of error
+    if (req.files) {
+      for (const file of req.files) {
+        try {
+          await fs.promises.unlink(file.path);
+        } catch (cleanupError) {
+          console.warn(`Failed to clean up file ${file.filename}:`, cleanupError.message);
+        }
+      }
+    }
+    
+    if (error.response) {
+      return res.status(error.response.status).json({
+        error: 'Failed to process batch annotated images',
+        details: error.response.data || error.message
+      });
+    }
+    
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Failed to analyze batch annotated images'
     });
   }
 });

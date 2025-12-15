@@ -15,13 +15,14 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { specs } from './swagger.js';
 import lmStudioRoutes from './routes/lmStudio.routes.js';
 import licensePlateRoutes from './routes/licensePlate.routes.js';
-import blenderRoutes from './routes/blenderRoutes.js';
-import { initializeBlender } from './blender.js';
 import authRoutes from "./routes/auth.routes.js";
 import researchRoutes from './routes/research.routes.js';
-import researchServiceRoutes from './routes/research.service.js';
+import researchServiceRoutes from './routes/research.service.simple.js';
 import researchO3ServiceRoutes from './routes/research.o3.service.js';
 import multiagentResearchRoutes from './routes/multiagent-research.routes.js';
+import integratedResearchRoutes from './routes/integrated-research.routes.js';
+import deepResearchRoutes from './routes/deepResearch.routes.js';
+import researchResultRoutes from './routes/researchResult.routes.js';
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import agentproxyRoutes from "./routes/agentproxy.routes.js"
@@ -46,20 +47,33 @@ import proxyRoutes from './routes/proxy.routes.js';
 import forumCrawlerRoutes from './routes/forumCrawler.js';
 import localRoutes from './routes/local.routes.js';
 import localResearchRoutes from './routes/localResearch.routes.js';
+import imageanalysisRoutes from './routes/imageanalysis.routes.js';
 import localresearchServiceRoutes from './routes/localresearch.service.js';
 import embeddingsRoutes from './routes/embeddings.routes.js';
-import supabaseRoutes from './routes/supabase.routes.js';
 import vectorStoreRoutes from './routes/vectorStore.routes.js';
 import openaiRoutes from './routes/openai.js';
+import assistantsRoutes from './routes/assistants.routes.js';
+import assistantsV2Routes from './routes/assistant-v2.routes.js';
 import turnResponseRoutes from './routes/turnResponse.routes.js';
 import functionRoutes from './routes/functions.routes.js';
 import responseImageRoutes from './routes/responseImage.routes.js';
+import agentReportsRoutes from './routes/agent-reports.routes.js';
 import vehicleQuestionsRoutes from './routes/vehicle-questions.routes.js';
 import plateToVinRoutes from './routes/plateToVin.js';
 import serpRoutes from './routes/serp.routes.js';
 import { VectorService } from './services/VectorService.js';
 import { MemoryVectorService } from './services/MemoryVectorService.js';
 import memoryVectorRoutes from './routes/memoryVector.routes.js';
+import responsesRoutes from './routes/responses.js';
+import imagesRoutes from './routes/images.js';
+import plotsRoutes from './routes/plots.routes.js';
+import plotsFallbackRoutes from './routes/plots-fallback.routes.js';
+import elizaProxyRoutes from './routes/elizaProxy.routes.js';
+import obd2Routes from './routes/obd2.routes.js';
+import obd2RealtimeService from './services/OBD2RealtimeService.js';
+import diagnosticAgentsRoutes from './routes/diagnostic-agents.js';
+import uiGenerationRoutes from './routes/ui-generation.routes.js';
+import dynamicToolsRoutes from './routes/dynamicTools.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,7 +86,7 @@ const server = http.createServer(app);
 
 // Connect to MongoDB first
 console.log('Connecting to MongoDB...');
-mongoose.connect(process.env.MONGO_DB_URI)
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((error) => {
     console.error('MongoDB connection error:', error);
@@ -135,7 +149,11 @@ const allowedOrigins = [
   // App protocols
   'app://*',
   'file://*',
-  'electron://*'
+  'electron://*',
+  
+  // OBD2-specific origins (if needed)
+  // Add any specific OBD2 frontend URLs here
+  // 'https://your-obd2-frontend.vercel.app',
 ];
 
 // Single CORS middleware configuration
@@ -210,8 +228,6 @@ app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
 
-// Initialize Blender functionality
-initializeBlender(app);
 
 // Proxy middleware setup
 // Proxy requests to Eliza system
@@ -302,60 +318,60 @@ app.use('/ws', createProxyMiddleware({
   ignorePath: false,
   timeout: 60000,
   proxyTimeout: 60000,
-  
+
   // Handle WebSocket upgrade - FIXED to prevent header duplication
   onProxyReqWs: (proxyReq, req, socket, options, head) => {
-    console.log('��� Research WebSocket Proxy: Upgrade request');
-    console.log('��� Origin:', req.headers.origin);
-    console.log('��� URL:', req.url);
-    
+    console.log('🚀 Research WebSocket Proxy: Upgrade request');
+    console.log('🌐 Origin:', req.headers.origin);
+    console.log('📡 URL:', req.url);
+
     // IMPORTANT: Remove any existing headers that might cause conflicts
     // Let the proxy handle WebSocket headers automatically
-    
+
     // Only set essential headers, don't duplicate WebSocket headers
     proxyReq.setHeader('Host', 'localhost:8001');
-    
+
     // Forward the origin without modification
     if (req.headers.origin) {
       proxyReq.setHeader('Origin', req.headers.origin);
     }
-    
+
     // Forward client information
     proxyReq.setHeader('X-Forwarded-For', req.connection.remoteAddress || req.socket.remoteAddress);
     proxyReq.setHeader('X-Real-IP', req.connection.remoteAddress || req.socket.remoteAddress);
-    
+
     // Extract client_id from query params ONLY
     const url = new URL(`http://localhost${req.url}`);
     const clientId = url.searchParams.get('client_id');
     if (clientId) {
       proxyReq.setHeader('X-Client-ID', clientId);
-      console.log('��� Forwarding client_id:', clientId);
+      console.log('🔑 Forwarding client_id:', clientId);
     }
-    
+
     // DO NOT manually set WebSocket headers - let http-proxy-middleware handle them
     // DO NOT set: Sec-WebSocket-Key, Sec-WebSocket-Version, etc.
-    
-    console.log('��� Headers being sent to Python service:', {
+
+    console.log('📝 Headers being sent to Python service:', {
       host: proxyReq.getHeader('Host'),
       origin: proxyReq.getHeader('Origin'),
       'x-forwarded-for': proxyReq.getHeader('X-Forwarded-For'),
       'x-client-id': proxyReq.getHeader('X-Client-ID')
     });
   },
-  
+
   // Handle successful connection
   onProxyReqWsComplete: () => {
     console.log('✅ Research WebSocket proxy connection established successfully');
   },
-  
+
   // Handle errors with better logging
   onError: (err, req, res) => {
     console.error('❌ Research WebSocket Proxy Error:', err.message);
     console.error('❌ Error code:', err.code);
     console.error('❌ Request headers:', req.headers);
-    
+
     const isWebSocket = req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket';
-    
+
     if (isWebSocket) {
       console.error('❌ WebSocket connection failed - likely header conflict');
       if (req.socket && !req.socket.destroyed) {
@@ -363,7 +379,7 @@ app.use('/ws', createProxyMiddleware({
       }
       return;
     }
-    
+
     // Only handle HTTP errors
     if (res && !res.headersSent) {
       const origin = req.headers.origin;
@@ -380,7 +396,7 @@ app.use('/ws', createProxyMiddleware({
       }));
     }
   },
-  
+
   // CRITICAL: Remove duplicate CORS headers from Python service response
   onProxyRes: (proxyRes, req, res) => {
     // Remove any CORS headers that might be set by the Python service
@@ -389,15 +405,15 @@ app.use('/ws', createProxyMiddleware({
     delete proxyRes.headers['access-control-allow-credentials'];
     delete proxyRes.headers['access-control-allow-methods'];
     delete proxyRes.headers['access-control-allow-headers'];
-    
+
     // Set our own CORS headers
     const origin = req.headers.origin;
     if (origin) {
       proxyRes.headers['access-control-allow-origin'] = origin;
       proxyRes.headers['access-control-allow-credentials'] = 'true';
     }
-    
-    console.log('��� Proxy response headers cleaned and set');
+
+    console.log('🔧 Proxy response headers cleaned and set');
   }
 }));
 // Add research WebSocket proxy route - use the same enhanced configuration
@@ -491,7 +507,7 @@ app.use('/install-data-analysis-deps', createProxyMiddleware({
 }));
 
 // Research and Data Analysis REST API endpoints
-app.use('/research', createProxyMiddleware({
+app.use('/fastagent/research', createProxyMiddleware({
   target: 'http://localhost:8001',
   changeOrigin: true,
   onError: (err, req, res) => {
@@ -527,6 +543,7 @@ app.use('/analysis', createProxyMiddleware({
   }
 }));
 
+
 app.use('/visualization', createProxyMiddleware({
   target: 'http://localhost:8001',
   changeOrigin: true,
@@ -539,12 +556,103 @@ app.use('/visualization', createProxyMiddleware({
   }
 }));
 
+// =====================================================
+// Data Analysis System Integration
+// =====================================================
+
+// Proxy requests to the data analysis system
+app.use('/data-analysis', createProxyMiddleware({
+  target: 'http://localhost:8080',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/data-analysis': '' // Remove the prefix when forwarding to analysis server
+  },
+  onError: (err, req, res) => {
+    console.error('Data Analysis API error:', err);
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("Data Analysis service is currently unavailable");
+    }
+  }
+}));
+
+// Proxy requests to the analysis dashboard
+app.use('/analysis-dashboard', createProxyMiddleware({
+  target: 'http://localhost:8080',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/analysis-dashboard': '' // Remove the prefix when forwarding to analysis server
+  },
+  onError: (err, req, res) => {
+    console.error('Analysis Dashboard API error:', err);
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("Analysis Dashboard service is currently unavailable");
+    }
+  }
+}));
+
+// Proxy requests to the session analysis system
+app.use('/session-analysis', createProxyMiddleware({
+  target: 'http://localhost:8080',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/session-analysis': '' // Remove the prefix when forwarding to analysis server
+  },
+  onError: (err, req, res) => {
+    console.error('Session Analysis API error:', err);
+    if (res.writeHead && !res.headersSent) {
+      res.writeHead(502);
+      res.end("Session Analysis service is currently unavailable");
+    }
+  }
+}));
+
+console.log('✅ Data Analysis System integrated via proxy');
+
+// =====================================================
+// OBD2 HTTP Service Integration
+// =====================================================
+
+console.log('✅ OBD2 HTTP-based service integrated');
+
+// =====================================================
+// End OBD2 HTTP Service Integration
+// =====================================================
+
 // API Routes
 app.use("/api/auth", authRoutes);
+// Enable research routes
 app.use("/api/research", researchRoutes);
-app.use("/api/research", researchServiceRoutes);
-app.use("/api/research/o3", researchO3ServiceRoutes);
+app.use("/api/research1", researchServiceRoutes);
+app.use("/api/researcho3/o3", researchO3ServiceRoutes);
 app.use("/api/multiagent-research", multiagentResearchRoutes);
+// Integrated research bot - direct endpoint
+app.use("/api/integrated-research", integratedResearchRoutes);
+// Deep research service with OpenAI Agents SDK
+app.use("/api/deep-research", deepResearchRoutes);
+
+// Research progress tracking
+import researchProgressRoutes from './routes/researchProgress.routes.js';
+import apiRoutes from './routes/api.routes.js';
+
+// Add the new API routes
+app.use("/api/", apiRoutes);
+
+app.use("/api/research-progress", researchProgressRoutes);
+// Research results endpoints
+app.use("/api/research-results", researchResultRoutes);
+app.use("/api/agent-reports", agentReportsRoutes); // Agent reports endpoint
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
 app.use("/api/agentproxy", agentproxyRoutes);
 app.use("/api/local", localRoutes);
 app.use("/api/agent", agentRoutes);
@@ -556,7 +664,8 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/lmStudio', lmStudioRoutes);
 app.use(dtcRoutes);
 app.use("/api/vehicles", vehicleRoutes);
-app.use('/api/forum-crawler', forumCrawlerRoutes);
+// Forum crawler disabled to reduce vector service startup overhead
+// app.use('/api/forum-crawler', forumCrawlerRoutes);
 app.use("/api/services", serviceRoutes);
 app.use("/api/parts", partsRoutes);
 app.use("/api/technicians", technicianRoutes);
@@ -568,20 +677,46 @@ app.use('/api/search', searchRoutes);
 app.use('/api/serper', serperRoutes);
 app.use('/api', imageRoutes);
 app.use('/api', proxyRoutes);
+app.use('/api/imageanalysis', imageanalysisRoutes);
 app.use('/api/researchl', localResearchRoutes);
 app.use('/api/rservice', localresearchServiceRoutes);
 app.use('/api/embeddings', embeddingsRoutes);
-app.use('/api', supabaseRoutes);
+// Vector store routes disabled to reduce startup overhead
 app.use('/api/vector-store', vectorStoreRoutes);
+app.use('/api/assistants', assistantsRoutes);
+app.use('/api/assistants-v2', assistantsV2Routes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/v1/responses', turnResponseRoutes);
+app.use('/api/turn_response', turnResponseRoutes);
 app.use('/api/functions', functionRoutes);
 app.use('/api', responseImageRoutes);
 app.use("/api/vehicle-questions", vehicleQuestionsRoutes);
 app.use('/api/license-plate', licensePlateRoutes);
 app.use('/api/plate-to-vin', plateToVinRoutes);
-app.use('/api/serp', serpRoutes);
-app.use('/api/memory-vector', memoryVectorRoutes);
+app.use('/api/serp', serperRoutes);
+// Memory vector routes disabled to reduce startup overhead
+// app.use('/api/memory-vector', memoryVectorRoutes);
+app.use('/api/responses', responsesRoutes);
+app.use('/api/images', imagesRoutes);
+app.use('/api/plots', plotsRoutes);
+app.use('/api/plots/fallback', plotsFallbackRoutes);
+app.use('/api/ui', uiGenerationRoutes);
+
+// Register dynamic tools routes
+app.use('/api/dynamic-tools', dynamicToolsRoutes);
+
+// Register Eliza proxy router for direct communication with Eliza system
+app.use('/api/eliza-direct', elizaProxyRoutes);
+
+// Register OBD2 data routes
+app.use('/api/obd2', obd2Routes);
+import analysisDashboardRoutes from './routes/analysisDashboard.routes.js';
+
+// Register analysis dashboard routes
+app.use('/api/analysis', analysisDashboardRoutes);
+
+// Register diagnostic agents routes
+app.use('/api/diagnostic-agents', diagnosticAgentsRoutes);
 
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
@@ -589,6 +724,66 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
   customfavIcon: "/favicon.ico",
   customCss: '.swagger-ui .topbar { display: none }'
 }));
+
+
+// Chrome Extension Routes
+app.post('/api/diagnostic-data', async (req, res) => {
+  try {
+    const { extensionData, sessionId } = req.body;
+    
+    console.log('📥 Received diagnostic data from Chrome extension:', {
+      sessionId,
+      dtcCodes: extensionData?.dtcCodes?.length || 0,
+      vehicleInfo: extensionData?.vehicleInfo?.length || 0,
+      diagnosticText: extensionData?.diagnosticText?.length || 0,
+      pageUrl: extensionData?.pageUrl,
+      pageTitle: extensionData?.pageTitle
+    });
+
+    // Store the data (you can save to MongoDB or process immediately)
+    const processedData = {
+      sessionId,
+      extensionData,
+      timestamp: new Date(),
+      status: 'received'
+    };
+
+    // If you have DTC codes, you might want to trigger additional processing
+    if (extensionData?.dtcCodes?.length > 0) {
+      console.log('🔧 DTC codes detected, ready for diagnostic agent processing:', extensionData.dtcCodes);
+    }
+
+    // If you have diagnostic text, you might want to analyze it
+    if (extensionData?.diagnosticText?.length > 0) {
+      console.log('📝 Diagnostic text extracted from page:', extensionData.diagnosticText.length, 'items');
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Diagnostic data received and processed successfully',
+      sessionId,
+      dataReceived: {
+        dtcCodes: extensionData?.dtcCodes?.length || 0,
+        vehicleInfo: extensionData?.vehicleInfo?.length || 0,
+        diagnosticText: extensionData?.diagnosticText?.length || 0,
+        hasPageData: !!(extensionData?.pageUrl && extensionData?.pageTitle)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error processing diagnostic data from extension:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process diagnostic data',
+      message: error.message
+    });
+  }
+});
+
+
+
+
+
+
 
 // Base URL route
 app.get('/', (req, res) => {
@@ -649,7 +844,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <div class="container">
-        <div class="logo">���</div>
+        <div class="logo">🚗</div>
         <h1>Automotive AI Platform</h1>
         <p>Welcome to the Automotive AI Platform API the tool for noobs. This is the backend service for our automotive intelligence system.</p>
 
@@ -657,6 +852,7 @@ app.get('/', (req, res) => {
           <h3>Available Proxy Routes:</h3>
           <ul>
             <li><span class="route">/api/*</span> - Main backend services</li>
+            <li><span class="route">/api/deep-research</span> - Deep Research with OpenAI Agents SDK</li>
             <li><span class="route">/eliza</span> - Eliza chat system</li>
             <li><span class="route">/ws</span> - WebSocket server</li>
             <li><span class="route">/research-ws</span> - Research WebSocket server</li>
@@ -710,47 +906,64 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Initialize VectorService
+// Initialize VectorService (DISABLED to reduce startup overhead)
 async function initializeServices() {
   try {
-    console.log('Initializing Vector Services...');
+    console.log('Vector Services initialization DISABLED to reduce startup overhead');
+    console.log('Vector services can be enabled by setting ENABLE_VECTOR_SERVICES=true');
 
-    // Initialize persistent vector storage
-    await VectorService.initialize({
-      useLocal: process.env.USE_LOCAL_STORAGE !== 'false',
-      useOpenAI: process.env.USE_OPENAI_STORAGE === 'true',
-      useDualStorage: process.env.USE_DUAL_STORAGE === 'true',
-      chromaUrl: process.env.CHROMA_URL,
-      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
-      openaiApiKey: process.env.OPENAI_API_KEY
-    });
-    console.log('Persistent Vector Service initialized successfully');
+    // Only initialize vector services if explicitly enabled
+    if (process.env.ENABLE_VECTOR_SERVICES === 'true') {
+      console.log('Initializing Vector Services...');
 
-    // Initialize memory vector storage
-    // Create default instance
-    await MemoryVectorService.initialize('default', {
-      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
-      useOpenAI: false // Default to local embeddings for memory store
-    });
+      // Initialize persistent vector storage
+      await VectorService.initialize({
+        useLocal: process.env.USE_LOCAL_STORAGE !== 'false',
+        useOpenAI: process.env.USE_OPENAI_STORAGE === 'true',
+        useDualStorage: process.env.USE_DUAL_STORAGE === 'true',
+        chromaUrl: process.env.CHROMA_URL,
+        localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+        openaiApiKey: process.env.OPENAI_API_KEY
+      });
+      console.log('Persistent Vector Service initialized successfully');
 
-    // Create a session-specific instance for temporary user interactions
-    await MemoryVectorService.initialize('user_sessions', {
-      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
-      useOpenAI: false
-    });
+      // Initialize memory vector storage
+      // Create default instance
+      await MemoryVectorService.initialize('default', {
+        localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+        useOpenAI: false // Default to local embeddings for memory store
+      });
 
-    // Create a forum-crawler instance for temporary forum crawling
-    await MemoryVectorService.initialize('forum_crawler', {
-      localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
-      useOpenAI: false
-    });
+      // Create a session-specific instance for temporary user interactions
+      await MemoryVectorService.initialize('user_sessions', {
+        localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+        useOpenAI: false
+      });
 
-    console.log('Memory Vector Service initialized successfully');
+      // Create a forum-crawler instance for temporary forum crawling
+      await MemoryVectorService.initialize('forum_crawler', {
+        localEmbeddingUrl: process.env.LOCAL_EMBEDDING_URL,
+        useOpenAI: false
+      });
+
+      console.log('Memory Vector Service initialized successfully');
+    }
   } catch (error) {
     console.error('Error initializing Vector Services:', error);
     // Don't exit - the server should still start, but vector services might be limited
   }
 }
+
+// Import the agent service starter
+import { startAgentService } from './services/agentService.js';
+import obd2WebSocketService from './services/obd2WebSocketService.js';
+// Import the RealtimeRelay
+import { RealtimeRelay } from './services/RealtimeRelay.js';
+// Import child_process to start agent service
+import { spawn } from 'child_process';
+
+// Global reference to the agent service process
+let agentServiceProcess = null;
 
 // Start the server
 server.listen(PORT, async () => {
@@ -774,16 +987,138 @@ server.listen(PORT, async () => {
   });
 
   await initializeServices();
+
+  // Initialize OBD2 WebSocket service
+  obd2WebSocketService.initialize(server);
+  obd2WebSocketService.startHealthCheck();
+
+  // Start periodic cleanup of old sessions
+  setInterval(() => {
+    obd2WebSocketService.cleanupOldSessions(24); // Clean up sessions older than 24 hours
+  }, 60 * 60 * 1000); // Run every hour
+
+  // =====================================================
+  // OBD2 Data Cleanup Job
+  // =====================================================
+  
+  // Cleanup old OBD2 data periodically (optional)
+  if (process.env.ENABLE_OBD2_CLEANUP === 'true') {
+    const OBD2_CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+    const OBD2_DATA_RETENTION_DAYS = parseInt(process.env.OBD2_DATA_RETENTION_DAYS) || 365;
+
+    setInterval(async () => {
+      try {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - OBD2_DATA_RETENTION_DAYS);
+        
+        // Import the models (you may need to adjust the import path)
+        const { DiagnosticSession, OBD2DataPoint, DTCEvent } = await import('./routes/obd2.routes.js');
+        
+        // Delete old completed sessions and their data
+        const oldSessions = await DiagnosticSession.find({
+          status: 'completed',
+          startTime: { $lt: cutoffDate }
+        }).select('_id');
+        
+        const sessionIds = oldSessions.map(s => s._id);
+        
+        if (sessionIds.length > 0) {
+          await OBD2DataPoint.deleteMany({ sessionId: { $in: sessionIds } });
+          await DTCEvent.deleteMany({ sessionId: { $in: sessionIds } });
+          await DiagnosticSession.deleteMany({ _id: { $in: sessionIds } });
+          
+          console.log(`🧹 Cleaned up ${sessionIds.length} old OBD2 sessions`);
+        }
+      } catch (error) {
+        console.error('❌ OBD2 cleanup error:', error);
+      }
+    }, OBD2_CLEANUP_INTERVAL);
+  }
+
+  // Start the agent service (client service)
+  startAgentService();
+
+  // Start the separate agent service server
+  console.log('🚀 Starting Agent Research Service...');
+  agentServiceProcess = spawn('npm', ['start'], {
+    cwd: path.join(__dirname, 'agent-service'),
+    stdio: 'inherit',
+    shell: true,
+    env: {
+      ...process.env,
+      PORT: '3003' // Force the agent service to use port 3003
+    }
+  });
+
+  agentServiceProcess.on('error', (error) => {
+    console.error('❌ Failed to start Agent Research Service:', error);
+  });
+
+  agentServiceProcess.on('exit', (code) => {
+    console.warn(`⚠️ Agent Research Service exited with code ${code}`);
+    agentServiceProcess = null;
+  });
+
+  console.log('✅ Agent Research Service started on port 3003');
+
+  // Initialize the OpenAI Realtime API relay
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const realtimeRelay = new RealtimeRelay(process.env.OPENAI_API_KEY, server);
+      realtimeRelay.initialize();
+      console.log('OpenAI Realtime API relay initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize OpenAI Realtime API relay:', error);
+    }
+  } else {
+    console.warn('OPENAI_API_KEY not provided, Realtime API relay not initialized');
+  }
 });
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
+  console.log('SIGTERM received, cleaning up services...');
+  
+  // Cleanup OBD2 services
+  obd2RealtimeService.shutdown();
+  
+  // Cleanup agent service
+  if (agentServiceProcess && !agentServiceProcess.killed) {
+    console.log('Shutting down agent service...');
+    agentServiceProcess.kill('SIGTERM');
+    
+    // Force kill after 5 seconds if not closed gracefully
+    setTimeout(() => {
+      if (agentServiceProcess && !agentServiceProcess.killed) {
+        console.log('Force killing agent service...');
+        agentServiceProcess.kill('SIGKILL');
+      }
+    }, 5000);
+  }
+  
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
+  console.log('SIGINT received, cleaning up services...');
+  
+  // Cleanup OBD2 services
+  obd2RealtimeService.shutdown();
+  
+  // Cleanup agent service
+  if (agentServiceProcess && !agentServiceProcess.killed) {
+    console.log('Shutting down agent service...');
+    agentServiceProcess.kill('SIGTERM');
+    
+    // Force kill after 5 seconds if not closed gracefully
+    setTimeout(() => {
+      if (agentServiceProcess && !agentServiceProcess.killed) {
+        console.log('Force killing agent service...');
+        agentServiceProcess.kill('SIGKILL');
+      }
+    }, 5000);
+  }
+  
   process.exit(0);
 });
 

@@ -388,7 +388,7 @@ async function getInitialAssessment(vehicleInfo, symptoms) {
     4. Safety considerations`;
 
     const completion = await openaiClient.chat.completions.create({
-        model: "gpt-4-turbo-preview",
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini", // Changed from gpt-4-turbo-preview for cost savings
         messages: [{ role: "user", content: prompt }],
         temperature: 0.7,
         max_tokens: 1000
@@ -679,9 +679,9 @@ router.post('/service', async (req, res) => {
     const { serviceRequest, vehicle, customer } = req.body;
     let parsedResults = {};  // Declare parsedResults at the top level
     try {
-        // Initialize LangChain components with more powerful model
+        // Initialize LangChain components with cost-optimized model
         const chatModel = new ChatOpenAI({
-            modelName: 'o3-mini',  // Upgraded from gpt-4o-mini for more detailed responses
+            modelName: process.env.OPENAI_MODEL || 'gpt-4o-mini', // Changed from o3-mini for cost savings
             openAIApiKey: process.env.OPENAI_API_KEY,
             configuration: {
                 timeout: 90000,    // Increased timeout to 90 seconds for more thorough research

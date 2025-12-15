@@ -5,9 +5,8 @@ const openai = new OpenAI();
 export async function POST(request: Request) {
   const { name } = await request.json();
   try {
-    const vectorStore = await openai.embeddings.create({
-      model: "text-embedding-ada-002",
-      input: name
+    const vectorStore = await openai.vectorStores.create({
+      name,
     });
     return new Response(JSON.stringify(vectorStore), { status: 200 });
   } catch (error) {

@@ -1,0 +1,970 @@
+OpenAI API Key configured: true
+Initializing VectorService with config: {
+  useLocal: true,
+  useOpenAI: true,
+  chromaUrl: 'http://localhost:8000',
+  localEmbeddingUrl: 'http://localhost:8080',
+  useDualStorage: true,
+  batchSize: 50,
+  hasOpenAIKey: true
+}
+ChromaDB client initialized at http://localhost:8000
+WebSearchService initialized: { serper: true, googleSearch: false, openai: true }
+PDFProcessingService initialized
+WebSearchService initialized: { serper: true, googleSearch: false, openai: true }
+PDFProcessingService initialized
+🤖 Real-time Diagnostic Agent initialized
+WebSearchService initialized: { serper: true, googleSearch: false, openai: true }
+PDFProcessingService initialized
+Connecting to MongoDB...
+✅ Data Analysis System integrated via proxy
+✅ OBD2 HTTP-based service integrated
+Server Running on port 5005
+Vector Services initialization DISABLED to reduce startup overhead
+Vector services can be enabled by setting ENABLE_VECTOR_SERVICES=true
+OBD2 WebSocket service initialized
+Agent service started
+🚀 Starting Agent Research Service...
+✅ Agent Research Service started on port 3003
+[RealtimeRelay] Realtime relay initialized on path: /realtime-relay
+OpenAI Realtime API relay initialized successfully
+MCP server not available: connect ECONNREFUSED 127.0.0.1:3700
+MCP server not available: connect ECONNREFUSED 127.0.0.1:3700
+MCP server not available: connect ECONNREFUSED 127.0.0.1:3700
+⚠️ Python server not available - will use local Python execution: connect ECONNREFUSED 127.0.0.1:8001
+⚠️ Python server not available - will use local Python execution: connect ECONNREFUSED 127.0.0.1:8001
+⚠️ Python server not available - will use local Python execution: connect ECONNREFUSED 127.0.0.1:8001
+⚠️ Python server not available - will use local Python execution: connect ECONNREFUSED 127.0.0.1:8001
+Connected to MongoDB
+Using existing ChromaDB collection
+✅ Dynamic Tool Service: 3 tools already loaded
+✅ OBD2 Realtime Service initialized successfully
+Local vector store initialized with ChromaDB
+OpenAI client initialized
+VectorService initialized with collection: vehicle_research_store
+Memory vector store 'vehicle_store_memory' initialized
+MemoryVectorService initialized with instance: vehicle_store_memory
+
+> research-agent-service@1.0.0 start
+> node server.js
+
+API Request: GET /api/obd2/diagnostic-agent/status
+🚀 Research Agent Service running on port 3003
+📍 Health check: http://localhost:3003/research/health
+🔍 Research endpoint: http://localhost:3003/research/research
+📡 Streaming endpoint: http://localhost:3003/research/research/stream
+✅ OpenAI API key configured
+API Request: GET /api/obd2/diagnostic-agent/status
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: POST /api/agent/realtime
+Sending SDP to OpenAI: v=0
+o=- 7070100552184782427 2 IN IP4 127.0.0.1
+s=-
+t=0 0
+a=group:BUNDLE 0 1
+a=extmap-allow-mixed
+a=msid-semantic: WMS 8a138553-e940-4060-9abd-1b036a96172d
+m=audio 50923 UDP/TLS/RTP/SAVPF 111 63 9 0 8 13 110 126
+c=IN IP4 99.37.183.149
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:4233973390 1 udp 2122260223 172.17.32.1 50922 typ host generation 0 network-id 5
+a=candidate:690179664 1 udp 2121998079 192.168.1.143 50923 typ host generation 0 network-id 1 network-cost 10
+a=candidate:1386993429 1 udp 2122197247 2600:1700:1fd0:6c20:7461:d84c:3c53:44cb 50924 typ host generation 0 network-id 2 network-cost 10
+a=candidate:709157127 1 udp 2122131711 2600:1700:1fd0:6c20::2c 50925 typ host generation 0 network-id 3 network-cost 10
+a=candidate:3685604335 1 udp 2122066175 2600:1700:1fd0:6c20:c18a:eafe:555a:76ee 50926 typ host generation 0 network-id 4 network-cost 10
+a=candidate:2255073134 1 udp 1685790463 99.37.183.149 50923 typ srflx raddr 192.168.1.143 rport 50923 generation 0 network-id 1 network-cost 10
+a=candidate:2190650390 1 tcp 1518280447 172.17.32.1 9 typ host tcptype active generation 0 network-id 5
+a=candidate:1475128520 1 tcp 1518018303 192.168.1.143 9 typ host tcptype active generation 0 network-id 1 network-cost 10
+a=candidate:744764813 1 tcp 1518217471 2600:1700:1fd0:6c20:7461:d84c:3c53:44cb 9 typ host tcptype active generation 0 network-id 2 network-cost 10
+a=candidate:1418396575 1 tcp 1518151935 2600:1700:1fd0:6c20::2c 9 typ host tcptype active generation 0 network-id 3 network-cost 10
+a=candidate:2774677879 1 tcp 1518086399 2600:1700:1fd0:6c20:c18a:eafe:555a:76ee 9 typ host tcptype active generation 0 network-id 4 network-cost 10
+a=ice-ufrag:VQ8P
+a=ice-pwd:RPiitaguugXcDRVI2+lA1WWi
+a=ice-options:trickle
+a=fingerprint:sha-256 2C:8B:48:E1:B5:92:67:FB:6C:F0:EF:AD:1E:EE:69:F6:8F:72:C9:CA:42:56:8F:D3:36:0E:0E:F0:BA:4A:E8:19
+a=setup:actpass
+a=mid:0
+a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level
+a=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time
+a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=msid:8a138553-e940-4060-9abd-1b036a96172d d2393f25-a3d4-4f49-b808-1e17c9fc7be4
+a=rtcp-mux
+a=rtcp-rsize
+a=rtpmap:111 opus/48000/2
+a=rtcp-fb:111 transport-cc
+a=fmtp:111 minptime=10;useinbandfec=1
+a=rtpmap:63 red/48000/2
+a=fmtp:63 111/111
+a=rtpmap:9 G722/8000
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:13 CN/8000
+a=rtpmap:110 telephone-event/48000
+a=rtpmap:126 telephone-event/8000
+a=ssrc:75499447 cname:C3A2j3xSwumeQlQr
+a=ssrc:75499447 msid:8a138553-e940-4060-9abd-1b036a96172d d2393f25-a3d4-4f49-b808-1e17c9fc7be4
+m=application 50928 UDP/DTLS/SCTP webrtc-datachannel
+c=IN IP4 99.37.183.149
+a=candidate:4233973390 1 udp 2122260223 172.17.32.1 50927 typ host generation 0 network-id 5
+a=candidate:690179664 1 udp 2121998079 192.168.1.143 50928 typ host generation 0 network-id 1 network-cost 10
+a=candidate:1386993429 1 udp 2122197247 2600:1700:1fd0:6c20:7461:d84c:3c53:44cb 50929 typ host generation 0 network-id 2 network-cost 10
+a=candidate:709157127 1 udp 2122131711 2600:1700:1fd0:6c20::2c 50930 typ host generation 0 network-id 3 network-cost 10
+a=candidate:3685604335 1 udp 2122066175 2600:1700:1fd0:6c20:c18a:eafe:555a:76ee 50931 typ host generation 0 network-id 4 network-cost 10
+a=candidate:2255073134 1 udp 1685790463 99.37.183.149 50928 typ srflx raddr 192.168.1.143 rport 50928 generation 0 network-id 1 network-cost 10
+a=candidate:2190650390 1 tcp 1518280447 172.17.32.1 9 typ host tcptype active generation 0 network-id 5
+a=candidate:1475128520 1 tcp 1518018303 192.168.1.143 9 typ host tcptype active generation 0 network-id 1 network-cost 10
+a=candidate:744764813 1 tcp 1518217471 2600:1700:1fd0:6c20:7461:d84c:3c53:44cb 9 typ host tcptype active generation 0 network-id 2 network-cost 10
+a=candidate:1418396575 1 tcp 1518151935 2600:1700:1fd0:6c20::2c 9 typ host tcptype active generation 0 network-id 3 network-cost 10
+a=candidate:2774677879 1 tcp 1518086399 2600:1700:1fd0:6c20:c18a:eafe:555a:76ee 9 typ host tcptype active generation 0 network-id 4 network-cost 10
+a=ice-ufrag:VQ8P
+a=ice-pwd:RPiitaguugXcDRVI2+lA1WWi
+a=ice-options:trickle
+a=fingerprint:sha-256 2C:8B:48:E1:B5:92:67:FB:6C:F0:EF:AD:1E:EE:69:F6:8F:72:C9:CA:42:56:8F:D3:36:0E:0E:F0:BA:4A:E8:19
+a=setup:actpass
+a=mid:1
+a=sctp-port:5000
+a=max-message-size:262144
+
+Received SDP from OpenAI: v=0
+o=- 3059746433249657299 1762497774 IN IP4 0.0.0.0
+s=-
+t=0 0
+a=msid-semantic:WMS*
+a=fingerprint:sha-256 B5:7D:9B:BB:E4:2C:A2:35:4C:2D:6F:34:0F:7C:3E:8D:82:DE:69:83:D7:A3:E9:4D:05:48:76:11:02:D1:DD:9D
+a=extmap-allow-mixed
+a=group:BUNDLE 0 1
+m=audio 9 UDP/TLS/RTP/SAVPF 111 0 8
+c=IN IP4 0.0.0.0
+a=setup:active
+a=mid:0
+a=ice-ufrag:0yw0LzNR/u2
+a=ice-pwd:UcHHluY6bRZClaINX8cjaCEvHkZ5ut0f
+a=rtcp-mux
+a=rtcp-rsize
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;useinbandfec=1
+a=rtcp-fb:111 transport-cc 
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
+a=ssrc:335909450 cname:realtimeapi
+a=ssrc:335909450 msid:realtimeapi audio
+a=ssrc:335909450 mslabel:realtimeapi
+a=ssrc:335909450 label:audio
+a=msid:realtimeapi audio
+a=sendrecv
+a=candidate:38269317 1 udp 2130706431 172.214.226.198 3478 typ host ufrag 0yw0LzNR/u2
+a=candidate:2394539241 1 tcp 1671430143 172.214.226.198 443 typ host tcptype passive ufrag 0yw0LzNR/u2
+a=candidate:4152413238 1 udp 2130706431 172.203.39.49 3478 typ host ufrag 0yw0LzNR/u2
+a=candidate:1788861106 1 tcp 1671430143 172.203.39.49 443 typ host tcptype passive ufrag 0yw0LzNR/u2
+a=candidate:727169150 1 udp 2130706431 4.151.200.38 3478 typ host ufrag 0yw0LzNR/u2
+a=candidate:1878291698 1 tcp 1671430143 4.151.200.38 443 typ host tcptype passive ufrag 0yw0LzNR/u2
+m=application 9 UDP/DTLS/SCTP webrtc-datachannel
+c=IN IP4 0.0.0.0
+a=setup:active
+a=mid:1
+a=sendrecv
+a=sctp-port:5000
+a=max-message-size:1073741823
+a=ice-ufrag:0yw0LzNR/u2
+a=ice-pwd:UcHHluY6bRZClaINX8cjaCEvHkZ5ut0f
+
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: POST /api/agent/realtime
+Sending SDP to OpenAI: v=0
+o=- 2140497190993613308 2 IN IP4 127.0.0.1
+s=-
+t=0 0
+a=group:BUNDLE 0 1
+a=extmap-allow-mixed
+a=msid-semantic: WMS 0c9d77c4-199f-4d5e-9a14-856392efb53a
+m=audio 56037 UDP/TLS/RTP/SAVPF 111 63 9 0 8 13 110 126
+c=IN IP4 99.37.183.149
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:415320382 1 udp 2122260223 172.17.32.1 56036 typ host generation 0 network-id 5
+a=candidate:3451865568 1 udp 2121998079 192.168.1.143 56037 typ host generation 0 network-id 1 network-cost 10
+a=candidate:3057111205 1 udp 2122197247 2600:1700:1fd0:6c20:7461:d84c:3c53:44cb 56038 typ host generation 0 network-id 2 network-cost 10
+a=candidate:3470321335 1 udp 2122131711 2600:1700:1fd0:6c20::2c 56039 typ host generation 0 network-id 3 network-cost 10
+a=candidate:1060232287 1 udp 2122066175 2600:1700:1fd0:6c20:c18a:eafe:555a:76ee 56040 typ host generation 0 network-id 4 network-cost 10
+a=candidate:1660266718 1 udp 1685790463 99.37.183.149 56037 typ srflx raddr 192.168.1.143 rport 56037 generation 0 network-id 1 network-cost 10
+a=candidate:1712237478 1 tcp 1518280447 172.17.32.1 9 typ host tcptype active generation 0 network-id 5
+a=candidate:3010505592 1 tcp 1518018303 192.168.1.143 9 typ host tcptype active generation 0 network-id 1 network-cost 10
+a=candidate:3371708989 1 tcp 1518217471 2600:1700:1fd0:6c20:7461:d84c:3c53:44cb 9 typ host tcptype active generation 0 network-id 2 network-cost 10
+a=candidate:2954298415 1 tcp 1518151935 2600:1700:1fd0:6c20::2c 9 typ host tcptype active generation 0 network-id 3 network-cost 10
+a=candidate:1107181255 1 tcp 1518086399 2600:1700:1fd0:6c20:c18a:eafe:555a:76ee 9 typ host tcptype active generation 0 network-id 4 network-cost 10
+a=ice-ufrag:uWzx
+a=ice-pwd:H0DNaGmi/vmIOTN4wwgJIDcG
+a=ice-options:trickle
+a=fingerprint:sha-256 8B:7E:AC:C4:F5:E8:3A:DA:DB:E8:B3:1C:7D:27:B3:22:FC:FE:AA:CB:9D:4C:03:AF:1E:79:B2:45:5E:93:71:CD
+a=setup:actpass
+a=mid:0
+a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level
+a=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time
+a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=msid:0c9d77c4-199f-4d5e-9a14-856392efb53a 27204318-0cf0-407b-94ba-3a9b256da4d0
+a=rtcp-mux
+a=rtcp-rsize
+a=rtpmap:111 opus/48000/2
+a=rtcp-fb:111 transport-cc
+a=fmtp:111 minptime=10;useinbandfec=1
+a=rtpmap:63 red/48000/2
+a=fmtp:63 111/111
+a=rtpmap:9 G722/8000
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:13 CN/8000
+a=rtpmap:110 telephone-event/48000
+a=rtpmap:126 telephone-event/8000
+a=ssrc:1979532679 cname:O4sK/7P9j1tkuzwv
+a=ssrc:1979532679 msid:0c9d77c4-199f-4d5e-9a14-856392efb53a 27204318-0cf0-407b-94ba-3a9b256da4d0
+m=application 56042 UDP/DTLS/SCTP webrtc-datachannel
+c=IN IP4 99.37.183.149
+a=candidate:415320382 1 udp 2122260223 172.17.32.1 56041 typ host generation 0 network-id 5
+a=candidate:3451865568 1 udp 2121998079 192.168.1.143 56042 typ host generation 0 network-id 1 network-cost 10
+a=candidate:3057111205 1 udp 2122197247 2600:1700:1fd0:6c20:7461:d84c:3c53:44cb 56043 typ host generation 0 network-id 2 network-cost 10
+a=candidate:3470321335 1 udp 2122131711 2600:1700:1fd0:6c20::2c 56044 typ host generation 0 network-id 3 network-cost 10
+a=candidate:1060232287 1 udp 2122066175 2600:1700:1fd0:6c20:c18a:eafe:555a:76ee 56045 typ host generation 0 network-id 4 network-cost 10
+a=candidate:1660266718 1 udp 1685790463 99.37.183.149 56042 typ srflx raddr 192.168.1.143 rport 56042 generation 0 network-id 1 network-cost 10
+a=candidate:1712237478 1 tcp 1518280447 172.17.32.1 9 typ host tcptype active generation 0 network-id 5
+a=candidate:3010505592 1 tcp 1518018303 192.168.1.143 9 typ host tcptype active generation 0 network-id 1 network-cost 10
+a=candidate:3371708989 1 tcp 1518217471 2600:1700:1fd0:6c20:7461:d84c:3c53:44cb 9 typ host tcptype active generation 0 network-id 2 network-cost 10
+a=candidate:2954298415 1 tcp 1518151935 2600:1700:1fd0:6c20::2c 9 typ host tcptype active generation 0 network-id 3 network-cost 10
+a=candidate:1107181255 1 tcp 1518086399 2600:1700:1fd0:6c20:c18a:eafe:555a:76ee 9 typ host tcptype active generation 0 network-id 4 network-cost 10
+a=ice-ufrag:uWzx
+a=ice-pwd:H0DNaGmi/vmIOTN4wwgJIDcG
+a=ice-options:trickle
+a=fingerprint:sha-256 8B:7E:AC:C4:F5:E8:3A:DA:DB:E8:B3:1C:7D:27:B3:22:FC:FE:AA:CB:9D:4C:03:AF:1E:79:B2:45:5E:93:71:CD
+a=setup:actpass
+a=mid:1
+a=sctp-port:5000
+a=max-message-size:262144
+
+Received SDP from OpenAI: v=0
+o=- 4787828078846439255 1762497890 IN IP4 0.0.0.0
+s=-
+t=0 0
+a=msid-semantic:WMS*
+a=fingerprint:sha-256 13:DE:AA:77:5E:62:9C:04:1C:D4:6E:65:B9:01:4F:4D:A8:E4:4A:44:3C:09:67:50:36:1A:44:42:EA:A3:49:FA
+a=extmap-allow-mixed
+a=group:BUNDLE 0 1
+m=audio 9 UDP/TLS/RTP/SAVPF 111 0 8
+c=IN IP4 0.0.0.0
+a=setup:active
+a=mid:0
+a=ice-ufrag:m807yPMC/u1
+a=ice-pwd:f1aOqLzDqy9fDU9v3lpajwMnsuEsFfYn
+a=rtcp-mux
+a=rtcp-rsize
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;useinbandfec=1
+a=rtcp-fb:111 transport-cc 
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
+a=ssrc:1153065451 cname:realtimeapi
+a=ssrc:1153065451 msid:realtimeapi audio
+a=ssrc:1153065451 mslabel:realtimeapi
+a=ssrc:1153065451 label:audio
+a=msid:realtimeapi audio
+a=sendrecv
+a=candidate:38269317 1 udp 2130706431 172.214.226.198 3478 typ host ufrag m807yPMC/u1
+a=candidate:2394539241 1 tcp 1671430143 172.214.226.198 443 typ host tcptype passive ufrag m807yPMC/u1
+a=candidate:4152413238 1 udp 2130706431 172.203.39.49 3478 typ host ufrag m807yPMC/u1
+a=candidate:1788861106 1 tcp 1671430143 172.203.39.49 443 typ host tcptype passive ufrag m807yPMC/u1
+a=candidate:727169150 1 udp 2130706431 4.151.200.38 3478 typ host ufrag m807yPMC/u1
+a=candidate:1878291698 1 tcp 1671430143 4.151.200.38 443 typ host tcptype passive ufrag m807yPMC/u1
+m=application 9 UDP/DTLS/SCTP webrtc-datachannel
+c=IN IP4 0.0.0.0
+a=setup:active
+a=mid:1
+a=sendrecv
+a=sctp-port:5000
+a=max-message-size:1073741823
+a=ice-ufrag:m807yPMC/u1
+a=ice-pwd:f1aOqLzDqy9fDU9v3lpajwMnsuEsFfYn
+
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/health
+API Request: POST /api/obd2/sessions
+API Request: GET /api/obd2/sessions
+📊 New OBD2 diagnostic session started: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-stream
+🤖 Client connected to diagnostic stream: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/overlay_session_1762498000767/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/start
+🔍 Starting real-time diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+🤖 Started diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/active-session/range?limit=100
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/stop
+🛑 Stopped monitoring session: 690d95c9f7ba4da1ad3ae037
+🛑 Stopped diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/start
+🔍 Starting real-time diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+🤖 Started diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/active-session/range?limit=100
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-stream
+🤖 Client connected to diagnostic stream: 690d95c9f7ba4da1ad3ae037
+🔌 Diagnostic stream client disconnected: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498005427/range?limit=100
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/overlay_session_1762498005427/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/overlay_session_1762498005427/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498005427/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/overlay_session_1762498005427/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498005427/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/overlay_session_1762498005427/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498005427/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/stop
+🛑 Stopped monitoring session: 690d95c9f7ba4da1ad3ae037
+🛑 Stopped diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/start
+🔍 Starting real-time diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+🤖 Started diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/stop
+🛑 Stopped monitoring session: 690d95c9f7ba4da1ad3ae037
+🛑 Stopped diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/start
+🔍 Starting real-time diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+🤖 Started diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-stream
+🤖 Client connected to diagnostic stream: 690d95c9f7ba4da1ad3ae037
+🔌 Diagnostic stream client disconnected: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/range?limit=100
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/range?limit=100
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/stop
+🛑 Stopped monitoring session: 690d95c9f7ba4da1ad3ae037
+🛑 Stopped diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/start
+🔍 Starting real-time diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+🤖 Started diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/stop
+🛑 Stopped monitoring session: 690d95c9f7ba4da1ad3ae037
+🛑 Stopped diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/start
+🔍 Starting real-time diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+🤖 Started diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions
+🔌 Diagnostic stream client disconnected: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-stream
+🤖 Client connected to diagnostic stream: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/range?limit=100
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/range?limit=100
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/range?limit=100
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+🔬 Performing diagnostic analysis for session: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions?page=1&limit=20
+API Request: GET /api/obd2/sessions?page=1&limit=20
+✅ Diagnostic analysis completed for session: 690d95c9f7ba4da1ad3ae037 {
+  vacuum_leak: 7,
+  fuel_mixture_rich: 14,
+  fuel_mixture_lean: 21,
+  egr_valve_issue: 4,
+  mass_air_flow_sensor: 11,
+  oxygen_sensor_b1s1: 18,
+  oxygen_sensor_b1s2: 14,
+  catalytic_converter: 7,
+  fuel_injector_issue: 11,
+  intake_manifold_issue: 4,
+  pcv_valve_issue: 4,
+  fuel_pump_weak: 7,
+  carbon_buildup: 7,
+  timing_issue: 4,
+  overall_engine_health: 79
+}
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/data
+API Request: PUT /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/end
+API Request: PUT /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/end
+📊 OBD2 diagnostic session ended: 690d95c9f7ba4da1ad3ae037
+📊 OBD2 diagnostic session ended: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: GET /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/status
+API Request: POST /api/obd2/sessions/690d95c9f7ba4da1ad3ae037/diagnostic-monitoring/stop
+🛑 Stopped monitoring session: 690d95c9f7ba4da1ad3ae037
+🛑 Stopped diagnostic monitoring for session: 690d95c9f7ba4da1ad3ae037
+🔌 Diagnostic stream client disconnected: 690d95c9f7ba4da1ad3ae037
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/overlay_session_1762498081119/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/sessions/active-session/updates?since=0&limit=50
+API Request: GET /api/obd2/diagnostic-agent/status

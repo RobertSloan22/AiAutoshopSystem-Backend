@@ -1,4 +1,6 @@
-export const MODEL = "gpt-4o";
+// Cost-optimized model: gpt-4o-mini is 94% cheaper than gpt-4o while maintaining good quality
+// Override with OPENAI_MODEL environment variable if needed
+export const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // Changed from gpt-4o for cost savings
 
 // Developer prompt for the assistant
 export const DEVELOPER_PROMPT = `

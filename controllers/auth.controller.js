@@ -2,6 +2,9 @@ import bcrypt from "bcryptjs";
 import User from "../models/user.model.js";
 import generateTokenAndSetCookie from "../utils/generateToken.js";
 import jwt from "jsonwebtoken";
+import { OAuth2Client } from 'google-auth-library';
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export const signup = async (req, res) => {
 	try {
@@ -177,5 +180,161 @@ export const refreshToken = async (req, res) => {
 			return res.status(401).json({ error: "Invalid or expired refresh token" });
 		}
 		res.status(500).json({ error: "Internal Server Error" });
+	}
+};
+
+// Google OAuth verification
+async function verifyGoogleToken(token) {
+	try {
+		const ticket = await googleClient.verifyIdToken({
+			idToken: token,
+			audience: process.env.GOOGLE_CLIENT_ID,
+		});
+		
+		const payload = ticket.getPayload();
+		
+		if (payload.aud !== process.env.GOOGLE_CLIENT_ID) {
+			throw new Error('Invalid audience');
+		}
+		
+		if (payload.exp * 1000 < Date.now()) {
+			throw new Error('Token expired');
+		}
+		
+		return {
+			googleId: payload.sub,
+			email: payload.email,
+			name: payload.name,
+			picture: payload.picture,
+			emailVerified: payload.email_verified,
+		};
+	} catch (error) {
+		console.error('Google token verification failed:', error);
+		throw new Error('Invalid Google token');
+	}
+}
+
+export const googleAuth = async (req, res) => {
+	try {
+		const { token } = req.body;
+		
+		if (!token) {
+			return res.status(400).json({ 
+				success: false, 
+				error: 'Google token is required' 
+			});
+		}
+		
+		// Verify the Google token
+		const googleUser = await verifyGoogleToken(token);
+		
+		// Check if user exists with Google ID
+		let user = await User.findOne({ googleId: googleUser.googleId });
+		
+		if (!user) {
+			// Check if user exists with same email (account linking)
+			const existingUser = await User.findOne({ email: googleUser.email });
+			
+			if (existingUser) {
+				// Link Google account to existing user
+				existingUser.googleId = googleUser.googleId;
+				existingUser.profilePic = googleUser.picture || existingUser.profilePic;
+				existingUser.emailVerified = googleUser.emailVerified || existingUser.emailVerified;
+				existingUser.authProvider = 'google';
+				existingUser.lastLoginAt = new Date();
+				user = await existingUser.save();
+			} else {
+				// Create new user
+				user = new User({
+					googleId: googleUser.googleId,
+					email: googleUser.email,
+					fullName: googleUser.name,
+					profilePic: googleUser.picture,
+					emailVerified: googleUser.emailVerified,
+					authProvider: 'google',
+					lastLoginAt: new Date(),
+				});
+				await user.save();
+			}
+		} else {
+			// Update last login time and picture
+			user.lastLoginAt = new Date();
+			user.profilePic = googleUser.picture || user.profilePic;
+			await user.save();
+		}
+		
+		// Generate app tokens
+		const appToken = jwt.sign(
+			{ userId: user._id },
+			process.env.JWT_SECRET,
+			{ expiresIn: '24h' }
+		);
+		
+		const refreshToken = jwt.sign(
+			{ userId: user._id },
+			process.env.JWT_SECRET,
+			{ expiresIn: '7d' }
+		);
+		
+		// Set cookie for backward compatibility
+		generateTokenAndSetCookie(user._id, res);
+		
+		res.json({
+			success: true,
+			token: appToken,
+			refreshToken,
+			user: {
+				_id: user._id,
+				email: user.email,
+				fullName: user.fullName,
+				profilePic: user.profilePic,
+				emailVerified: user.emailVerified,
+				authProvider: user.authProvider,
+			}
+		});
+		
+	} catch (error) {
+		console.error('Google auth verification error:', error);
+		res.status(400).json({
+			success: false,
+			error: error.message || 'Authentication failed'
+		});
+	}
+};
+
+export const verifyToken = async (req, res) => {
+	try {
+		const authHeader = req.headers['authorization'];
+		const token = authHeader && authHeader.split(' ')[1];
+		
+		if (!token) {
+			return res.status(401).json({ error: 'Access token required' });
+		}
+		
+		const decoded = jwt.verify(token, process.env.JWT_SECRET);
+		const user = await User.findById(decoded.userId).select('-password');
+		
+		if (!user) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		
+		res.json({
+			success: true,
+			user: {
+				_id: user._id,
+				email: user.email,
+				username: user.username,
+				fullName: user.fullName,
+				profilePic: user.profilePic,
+				emailVerified: user.emailVerified,
+				authProvider: user.authProvider,
+			}
+		});
+	} catch (error) {
+		console.error('Token verification error:', error);
+		if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+			return res.status(403).json({ error: 'Invalid or expired token' });
+		}
+		res.status(500).json({ error: 'Internal server error' });
 	}
 };
