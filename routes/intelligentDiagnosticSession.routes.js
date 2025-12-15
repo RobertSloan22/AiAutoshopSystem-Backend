@@ -131,6 +131,28 @@ router.get('/vehicle/:vin', async (req, res) => {
   }
 });
 
+// Get all IDS entries for a vehicle
+router.get('/vehicle/:vin/all', async (req, res) => {
+  try {
+    const { vin } = req.params;
+    logRequest('GET', `/api/ids/vehicle/${vin}/all`);
+
+    const allIDS = await IntelligentDiagnosticSession.find({ vin })
+      .sort({ createdAt: -1 })
+      .populate('linkedLiveDataSessions')
+      .populate('stages.liveDataSessionIds');
+
+    res.json({
+      success: true,
+      idsList: allIDS,
+      count: allIDS.length
+    });
+  } catch (error) {
+    console.error('❌ Failed to get all IDS for vehicle:', error);
+    res.status(500).json({ error: 'Failed to get all IDS for vehicle', message: error.message });
+  }
+});
+
 // Start a stage
 router.put('/:idsId/stage/:stageName/start', async (req, res) => {
   try {
