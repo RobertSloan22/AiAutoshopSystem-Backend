@@ -4345,12 +4345,103 @@ router.post('/sessions/:sessionId/analyze/secure', async (req, res) => {
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`🔒 [SECURE] ✅ Analysis complete in ${duration}s`);
 
+    // Save analysis to Analysis model and auto-save to IDS
+    let analysisId = null;
+    try {
+      // Get session for context
+      const session = await DiagnosticSession.findById(sessionId);
+      if (!session) {
+        console.warn(`⚠️ Session ${sessionId} not found, skipping analysis save`);
+      } else {
+        // Generate unique analysis ID
+        analysisId = Analysis.generateAnalysisId();
+
+        // Create Analysis document with comprehensive data including plots
+        const analysisDoc = new Analysis({
+          analysisId: analysisId,
+          sessionId: sessionId,
+          analysisType: 'custom', // o3 advanced analysis is custom type
+          timestamp: new Date(),
+          status: 'completed',
+          duration: parseFloat(duration),
+          result: typeof analysisResult === 'string' ? analysisResult : JSON.stringify(analysisResult, null, 2),
+          structuredData: {
+            summary: typeof analysisResult === 'object' ? analysisResult : { text: analysisResult },
+            recommendations: []
+          },
+          plots: plots.map(plot => ({
+            filename: plot.filename || `plot_${Date.now()}.png`,
+            base64: plot.base64 || plot.data,
+            mimeType: plot.mimeType || 'image/png',
+            description: plot.description || 'o3 Advanced Analysis Visualization'
+          })),
+          context: {
+            dataPointCount: session.dataPointCount || 0,
+            timeRange: {
+              start: session.startTime,
+              end: session.endTime
+            },
+            dtcCodes: session.dtcCodes || [],
+            vehicleInfo: session.vehicleInfo || {}
+          },
+          modelInfo: {
+            model: 'o3-mini',
+            reasoningEffort: reasoningEffort,
+            tokenUsage: {}
+          },
+          tags: ['o3_analysis', 'secure_interpreter', 'advanced']
+        });
+
+        await analysisDoc.save();
+        console.log(`✅ Analysis saved with ID: ${analysisId}`);
+
+        // Auto-save to IDS if session is linked to an IDS
+        if (session.idsId) {
+          try {
+            const ids = await IntelligentDiagnosticSession.findOne({ idsId: session.idsId });
+            if (ids && ids.overallStatus === 'active') {
+              const stageName = session.idsStage || ids.currentStage;
+              
+              // Associate analysis with IDS stage, including full analysis document with plots
+              await ids.associateAnalysis(analysisId, {
+                analysisId: analysisId,
+                result: analysisDoc.result,
+                structuredData: analysisDoc.structuredData,
+                plots: analysisDoc.plots,
+                duration: analysisDoc.duration,
+                timestamp: analysisDoc.timestamp,
+                question: question,
+                modelInfo: analysisDoc.modelInfo
+              }, stageName);
+
+              // Also update the Analysis document to reference the IDS
+              await Analysis.findOneAndUpdate({ analysisId }, {
+                $set: {
+                  idsId: session.idsId,
+                  idsStage: stageName
+                }
+              });
+
+              console.log(`✅ Analysis ${analysisId} auto-saved to IDS ${session.idsId} stage ${stageName}`);
+            }
+          } catch (idsError) {
+            console.error('❌ Failed to auto-save analysis to IDS:', idsError);
+            // Don't fail the request if IDS save fails
+          }
+        }
+      }
+    } catch (saveError) {
+      console.error('❌ Failed to save analysis:', saveError);
+      // Don't fail the request if analysis save fails
+    }
+
     res.json({
       success: true,
       sessionId,
       question,
       analysis: analysisResult,
       plots: plots,
+      analysisId: analysisId, // Include analysisId in response
       method: 'secure_docker_execution',
       model: 'o3-mini',
       reasoningEffort,

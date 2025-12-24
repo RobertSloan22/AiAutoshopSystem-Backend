@@ -90,6 +90,15 @@ IntelligentDiagnosticSessionSchema.methods.getStage = function(stageName) {
   return this.stages.find(s => s.stage === stageName);
 };
 
+// Helper method to check if all required stages are completed
+IntelligentDiagnosticSessionSchema.methods.areAllStagesCompleted = function() {
+  const requiredStages = ['inspection', 'analysis-repair', 'verification-testdriving'];
+  return requiredStages.every(stageName => {
+    const stage = this.stages.find(s => s.stage === stageName);
+    return stage && stage.status === 'completed';
+  });
+};
+
 // Helper method to update stage
 IntelligentDiagnosticSessionSchema.methods.updateStage = function(stageName, updates) {
   const stageIndex = this.stages.findIndex(s => s.stage === stageName);

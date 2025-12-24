@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
-import MCPService from './mcpService.js';
+import multiMCPService from './multiMCPService.js';
+import sequentialThinkingService from './sequentialThinkingService.js';
 import PythonExecutionService from './pythonExecutionService.js';
 import WebSearchService from './webSearchService.js';
 import PDFProcessingService from './pdfProcessingService.js';
@@ -17,7 +18,8 @@ class ResponsesAPIService {
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
-    this.mcpService = new MCPService(process.env.MCP_SERVER_URL || 'http://localhost:3700');
+    this.multiMCPService = multiMCPService;
+    this.sequentialThinkingService = sequentialThinkingService;
     this.pythonService = new PythonExecutionService();
     this.webSearchService = new WebSearchService();
     this.pdfService = new PDFProcessingService();
@@ -25,6 +27,11 @@ class ResponsesAPIService {
     this.conversationHistory = new Map(); // Add conversation history storage
     this.fallbackModels = ['gpt-3.5-turbo', 'claude-3-haiku-20240307'];
     this.primaryModel = 'gpt-4o-mini';
+    
+    // Initialize Multi-MCP Service
+    this.multiMCPService.initialize().catch(err => {
+      console.error('Failed to initialize Multi-MCP Service:', err);
+    });
     
     // Set up periodic cleanup for Python outputs
     setInterval(() => {
@@ -46,7 +53,7 @@ class ResponsesAPIService {
     const systemPrompt = this.buildSystemPrompt(vehicleContext, customerContext);
     
     // Get MCP tools, Python execution tool, web search tools, and PDF processing tool
-    const mcpTools = this.mcpService.getToolDefinitions();
+    const mcpTools = this.multiMCPService.getToolDefinitions();
     const pythonTool = this.pythonService.getToolDefinition();
     const webSearchTools = this.webSearchService.getToolDefinitions();
     const pdfTool = this.pdfService.getToolDefinition();
@@ -238,6 +245,20 @@ WEB SEARCH CAPABILITIES:
   * Provide vehicle context for more relevant results
   * Image types: diagram, wiring, flowchart, parts, general
 
+ADVANCED REASONING CAPABILITIES:
+- Sequential Thinking: For complex diagnostic problems, break them down into manageable steps
+  * Automatically used for multi-step troubleshooting and complex analysis
+  * Helps structure diagnostic procedures systematically
+  * Useful for intermittent issues, root cause analysis, and systematic problem-solving
+
+- Memory: Persistent context storage across conversations
+  * Maintains vehicle history and previous diagnostic findings
+  * Helps provide continuity in long-term diagnostic sessions
+
+- Fetch: Retrieve content from URLs
+  * Access technical documentation, service bulletins, and repair guides
+  * Useful for getting detailed information from external sources
+
 INSTRUCTIONS:
 1. Use the appropriate tools to gather vehicle data when requested
 2. When mathematical calculations or data analysis are needed, use the Python execution tool
@@ -252,6 +273,8 @@ INSTRUCTIONS:
 11. When analyzing sensor data patterns, consider using Python to create trend charts
 12. Use web search for recent recalls, TSBs, or when you need current information beyond your training data
 13. Search for technical images when diagrams would help explain complex repairs or diagnostics
+14. For complex or multi-step diagnostic problems, break them down systematically
+15. Use sequential thinking approach for intermittent issues or when multiple systems are involved
 
 PYTHON USAGE EXAMPLES:
 - Calculate fuel efficiency from OBD2 data
@@ -260,7 +283,7 @@ PYTHON USAGE EXAMPLES:
 - Create diagnostic trouble code frequency charts
 - Perform statistical analysis on sensor readings
 
-Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use visualizations when they would help explain complex data patterns.`;
+Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use visualizations when they would help explain complex data patterns. For complex problems, break them down into clear, manageable steps.`;
 
     return prompt;
   }
@@ -285,6 +308,9 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     }
 
     const toolResults = [];
+    
+    // Get MCP server information for all tools
+    const toolsServerInfo = this.multiMCPService.getToolsServerInfo(toolCalls);
 
     for (const toolCall of toolCalls) {
       try {
@@ -298,6 +324,19 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
               : toolCall.function.arguments;
           } catch (e) {
             parameters = {};
+          }
+        }
+
+        // Auto-inject vehicle context for search tools if missing
+        if (['search_technical_images', 'web_search'].includes(toolCall.function.name)) {
+          if (!parameters.vehicle_context && session.vehicleContext && 
+              (session.vehicleContext.make || session.vehicleContext.model || session.vehicleContext.year)) {
+            parameters.vehicle_context = {
+              make: session.vehicleContext.make,
+              model: session.vehicleContext.model,
+              year: session.vehicleContext.year
+            };
+            console.log(`🔧 Auto-injected vehicle context for ${toolCall.function.name}:`, parameters.vehicle_context);
           }
         }
 
@@ -392,8 +431,8 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
           console.log(`Executing PDF processing tool: ${toolCall.function.name}`);
           result = await this.pdfService.executeTool(toolCall.function.name, parameters);
         } else {
-          // Handle MCP tools
-          result = await this.mcpService.callTool(toolCall.function.name, parameters);
+          // Handle MCP tools (from any connected MCP server)
+          result = await this.multiMCPService.callTool(toolCall.function.name, parameters);
         }
         
         const toolResult = {
@@ -472,7 +511,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
     })));
 
     // Get tools again in case they've changed
-    const mcpTools = this.mcpService.getToolDefinitions();
+    const mcpTools = this.multiMCPService.getToolDefinitions();
     const pythonTool = this.pythonService.getToolDefinition();
     const webSearchTools = this.webSearchService.getToolDefinitions();
     const pdfTool = this.pdfService.getToolDefinition();
@@ -604,7 +643,7 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
   }
 
   async getMCPStatus() {
-    return await this.mcpService.getConnectionStatus();
+    return await this.multiMCPService.getConnectionStatus();
   }
 
   async getWebSearchStatus() {
@@ -626,6 +665,410 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
       },
       pdf: this.pdfService.getStatus()
     };
+  }
+
+  /**
+   * Extract key technical terms from step information for more targeted searches
+   */
+  extractKeyTerms(stepTitle, stepDescription, componentLocation, tools) {
+    const terms = new Set();
+    
+    // Extract component names, part numbers, system names
+    const text = `${stepTitle || ''} ${stepDescription || ''} ${componentLocation || ''}`.toLowerCase();
+    
+    // Common automotive components and systems
+    const componentPatterns = [
+      /\b(sensor|actuator|valve|pump|motor|relay|fuse|connector|harness|module|ecu|pcm|tcm|bcm)\w*/gi,
+      /\b(injector|coil|spark|plug|filter|gasket|seal|bearing|bushing|bracket)\w*/gi,
+      /\b(engine|transmission|brake|suspension|steering|cooling|fuel|exhaust|electrical)\w*/gi,
+      /\b(cylinder|piston|camshaft|crankshaft|timing|belt|chain|pulley)\w*/gi
+    ];
+    
+    componentPatterns.forEach(pattern => {
+      const matches = text.match(pattern);
+      if (matches) {
+        matches.forEach(match => terms.add(match.toLowerCase()));
+      }
+    });
+    
+    // Add tools if they're technical
+    if (tools && Array.isArray(tools)) {
+      tools.forEach(tool => {
+        if (tool && typeof tool === 'string') {
+          const toolLower = tool.toLowerCase();
+          if (toolLower.includes('meter') || toolLower.includes('scope') || 
+              toolLower.includes('scanner') || toolLower.includes('tester')) {
+            terms.add(toolLower);
+          }
+        }
+      });
+    }
+    
+    // Extract part numbers (alphanumeric patterns like "P0301", "TD73-1234")
+    const partNumberPattern = /\b[A-Z0-9]{2,}[-]?[A-Z0-9]{2,}\b/g;
+    const partNumbers = text.match(partNumberPattern);
+    if (partNumbers) {
+      partNumbers.forEach(pn => terms.add(pn.toUpperCase()));
+    }
+    
+    return Array.from(terms).slice(0, 10); // Limit to top 10 terms
+  }
+
+  /**
+   * Score image relevance based on step content
+   * @param {Object} image - Image object with title and source
+   * @param {string} stepTitle - Diagnostic step title
+   * @param {string} stepDescription - Diagnostic step description
+   * @param {string} componentLocation - Component location information
+   * @param {Array<string>} keyTerms - Extracted key technical terms
+   * @returns {number} Relevance score (higher is more relevant)
+   */
+  scoreImageRelevance(image, stepTitle, stepDescription, componentLocation, keyTerms) {
+    let score = 0;
+    const imageText = `${image.title || ''} ${image.source || ''}`.toLowerCase();
+    
+    // Check for key term matches (high weight)
+    keyTerms.forEach(term => {
+      if (imageText.includes(term.toLowerCase())) {
+        score += 5;
+      }
+    });
+    
+    // Check for component location matches
+    if (componentLocation) {
+      const locationWords = componentLocation.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      locationWords.forEach(word => {
+        if (imageText.includes(word)) {
+          score += 3;
+        }
+      });
+    }
+    
+    // Boost for professional/technical indicators
+    const professionalTerms = [
+      'schematic', 'diagram', 'technical', 'service manual', 'factory',
+      'OEM', 'workshop', 'professional', 'parts breakdown', 'exploded',
+      'wiring diagram', 'diagnostic', 'troubleshooting', 'flowchart',
+      'blueprint', 'drawing', 'technical drawing', 'repair manual'
+    ];
+    
+    professionalTerms.forEach(term => {
+      if (imageText.includes(term)) {
+        score += 2;
+      }
+    });
+    
+    // Penalize non-technical sources
+    const nonTechnicalTerms = ['forum', 'blog', 'social media', 'reddit', 'facebook', 'youtube'];
+    nonTechnicalTerms.forEach(term => {
+      if (imageText.includes(term)) {
+        score -= 3;
+      }
+    });
+    
+    // Check for step title keywords in image
+    if (stepTitle) {
+      const titleWords = stepTitle.toLowerCase().split(/\s+/).filter(w => w.length > 4);
+      titleWords.forEach(word => {
+        if (imageText.includes(word)) {
+          score += 4;
+        }
+      });
+    }
+    
+    return Math.max(0, score); // Don't allow negative scores
+  }
+
+  /**
+   * Use the agent's intelligence to search for technical images
+   * This method creates a session, asks the agent to search for images,
+   * and extracts the results from tool calls with relevance scoring and filtering
+   * 
+   * @param {Object} options - Search options
+   * @param {string} options.query - Search query or step information
+   * @param {string} options.stepTitle - Diagnostic step title (optional)
+   * @param {string} options.stepDescription - Diagnostic step description (optional)
+   * @param {string} options.componentLocation - Component location information (optional)
+   * @param {Array<string>} options.tools - Tools used in the step (optional)
+   * @param {Object} options.vehicleContext - Vehicle context (year, make, model)
+   * @param {string} options.imageType - Type of image to search for (diagram, wiring, parts, flowchart, general)
+   * @param {number} options.imageCount - Number of images to return (default: 5, max: 10)
+   * @returns {Promise<Object>} Object with success, images array, query used, keyTerms, and filtered flag
+   */
+  async searchImagesWithAgent(options = {}) {
+    const {
+      query,
+      stepTitle,
+      stepDescription,
+      componentLocation,
+      tools,
+      vehicleContext = {},
+      imageType = 'general',
+      imageCount = 5
+    } = options;
+
+    try {
+      // Extract key technical terms for more targeted search
+      const keyTerms = this.extractKeyTerms(stepTitle, stepDescription, componentLocation, tools);
+      
+      // Build a highly specific, directive message for the agent
+      let message = 'You are searching for technical images to help a professional automotive technician with a specific diagnostic step. ';
+      message += 'The images MUST be highly relevant and specific to this exact step. ';
+      
+      // Construct very specific query from step information
+      if (query) {
+        message += `Search for images specifically related to: ${query}. `;
+      } else {
+        message += 'Search for images related to: ';
+        const parts = [];
+        
+        if (stepTitle) {
+          parts.push(`"${stepTitle}"`);
+        }
+        
+        if (componentLocation) {
+          parts.push(`component located at "${componentLocation}"`);
+        }
+        
+        if (stepDescription) {
+          // Extract the most important part of description (first 40 words, focusing on technical terms)
+          const descWords = stepDescription.split(/\s+/).slice(0, 40).join(' ');
+          parts.push(`diagnostic procedure: ${descWords}`);
+        }
+        
+        if (keyTerms.length > 0) {
+          parts.push(`specifically showing: ${keyTerms.slice(0, 5).join(', ')}`);
+        }
+        
+        if (tools && tools.length > 0) {
+          parts.push(`using tools: ${tools.slice(0, 3).join(', ')}`);
+        }
+        
+        if (parts.length > 0) {
+          message += parts.join('. ') + '. ';
+        }
+      }
+
+      // Add very specific image type requirements
+      if (imageType !== 'general') {
+        const typeDescriptions = {
+          wiring: 'wiring diagrams, electrical schematics, connector pinouts, circuit diagrams from factory service manuals',
+          parts: 'parts breakdown diagrams, exploded views, component assemblies, OEM parts catalogs',
+          flowchart: 'diagnostic flowcharts, troubleshooting decision trees, step-by-step diagnostic procedures',
+          diagram: 'technical schematics, system diagrams, component layouts, factory service manual illustrations'
+        };
+        message += `CRITICAL: Only return ${imageType} type images - specifically ${typeDescriptions[imageType] || 'technical diagrams'}. `;
+      } else {
+        message += 'Focus on professional technical diagrams, schematics, and service manual illustrations. ';
+      }
+
+      // Add vehicle context with emphasis on specificity
+      if (vehicleContext.year || vehicleContext.make || vehicleContext.model) {
+        const vehicleInfo = [
+          vehicleContext.year,
+          vehicleContext.make,
+          vehicleContext.model
+        ].filter(Boolean).join(' ');
+        message += `IMPORTANT: These images must be specific to a ${vehicleInfo}. `;
+        if (vehicleContext.engine) {
+          message += `Engine: ${vehicleContext.engine}. `;
+        }
+      }
+
+      message += `Return exactly ${Math.min(imageCount, 10)} highly relevant, professional technical images that directly relate to this specific diagnostic step. `;
+      message += 'Prioritize factory service manual diagrams, OEM technical drawings, and professional workshop illustrations. ';
+      message += 'Exclude generic images, forum posts, or non-technical sources.';
+
+      console.log(`🔍 AGENT IMAGE SEARCH: Requesting targeted images with message: "${message}"`);
+      console.log(`🔍 AGENT IMAGE SEARCH: Extracted key terms: ${keyTerms.join(', ')}`);
+
+      // Create a streaming session with the agent
+      const { sessionId, stream } = await this.createStreamingSession(
+        message,
+        vehicleContext,
+        {},
+        null // No conversationId for one-off searches
+      );
+
+      let toolCalls = [];
+      let images = [];
+      let searchQuery = null;
+      let rawImagesCount = 0;
+
+      // Process the stream to find tool calls
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta;
+
+        if (delta?.tool_calls) {
+          for (const toolCallDelta of delta.tool_calls) {
+            if (toolCallDelta.index !== undefined) {
+              if (!toolCalls[toolCallDelta.index]) {
+                toolCalls[toolCallDelta.index] = {
+                  id: toolCallDelta.id,
+                  type: 'function',
+                  function: { name: '', arguments: '' }
+                };
+              }
+
+              if (toolCallDelta.function?.name) {
+                toolCalls[toolCallDelta.index].function.name += toolCallDelta.function.name;
+              }
+              if (toolCallDelta.function?.arguments) {
+                toolCalls[toolCallDelta.index].function.arguments += toolCallDelta.function.arguments;
+              }
+            }
+          }
+        }
+
+        if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+          // Add the assistant message with tool_calls to conversation
+          const session = this.getSession(sessionId);
+          if (session) {
+            const assistantMessage = {
+              role: 'assistant',
+              content: null,
+              tool_calls: toolCalls
+            };
+            session.messages.push(assistantMessage);
+          }
+
+          // Process tool calls - this will execute search_technical_images
+          const toolResults = await this.processToolCalls(toolCalls, sessionId);
+
+          // Extract images from tool results
+          for (let i = 0; i < toolCalls.length; i++) {
+            const toolCall = toolCalls[i];
+            
+            if (toolCall.function.name === 'search_technical_images') {
+              try {
+                const resultContent = JSON.parse(toolResults[i].content);
+                console.log(`🔍 AGENT IMAGE SEARCH: Tool result success: ${resultContent.success}`);
+                
+                if (resultContent.success) {
+                  // Extract the query used
+                  searchQuery = resultContent.query || query || message;
+                  
+                  // Get images from results
+                  const rawImages = resultContent.images || resultContent.results || [];
+                  rawImagesCount = rawImages.length;
+                  
+                  if (rawImages.length > 0) {
+                    console.log(`🔍 AGENT IMAGE SEARCH: Found ${rawImages.length} raw images from agent`);
+                    
+                    // Normalize image structure first
+                    const normalizedImages = rawImages.map((img) => ({
+                      url: img.image_url || img.url || img.link || '',
+                      thumbnail_url: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                      thumbnail: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                      title: img.title || 'Technical Image',
+                      source: img.source || 'Search Result',
+                      link: img.url || img.link || img.image_url || '',
+                      width: img.width,
+                      height: img.height
+                    }));
+
+                    // Score and filter images for relevance
+                    const scoredImages = normalizedImages.map((img) => {
+                      const relevanceScore = this.scoreImageRelevance(
+                        img,
+                        stepTitle,
+                        stepDescription,
+                        componentLocation,
+                        keyTerms
+                      );
+                      return { ...img, _relevanceScore: relevanceScore };
+                    });
+
+                    // Sort by relevance score (highest first)
+                    scoredImages.sort((a, b) => b._relevanceScore - a._relevanceScore);
+
+                    // Filter out low-relevance images (score < 3) unless we don't have enough
+                    const minRelevanceScore = 3;
+                    let filteredImages = scoredImages.filter(img => img._relevanceScore >= minRelevanceScore);
+                    
+                    // If filtering removed too many, keep top scored ones even if below threshold
+                    if (filteredImages.length < Math.min(imageCount, 5)) {
+                      console.log(`🔍 AGENT IMAGE SEARCH: Low relevance threshold, keeping top ${Math.min(imageCount, 5)} scored images`);
+                      filteredImages = scoredImages.slice(0, Math.min(imageCount, 10));
+                    }
+
+                    // Remove score field and limit to requested count
+                    images = filteredImages.slice(0, Math.min(imageCount, 10)).map((img) => {
+                      // eslint-disable-next-line no-unused-vars
+                      const { _relevanceScore, ...rest } = img;
+                      return rest;
+                    });
+                    
+                    console.log(`🔍 AGENT IMAGE SEARCH: Filtered to ${images.length} highly relevant images`);
+                    if (images.length > 0) {
+                      console.log(`🔍 AGENT IMAGE SEARCH: Top image relevance scores: ${scoredImages.slice(0, 3).map(img => img._relevanceScore).join(', ')}`);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('Error parsing image search tool results:', e);
+              }
+            }
+          }
+
+          // If we got images, we can close the session
+          if (images.length > 0) {
+            this.closeSession(sessionId);
+            break;
+          }
+
+          // If no images yet, continue the stream to see if agent provides more info
+          // But limit to one continuation to avoid infinite loops
+          try {
+            const continuedStream = await this.continueStreamWithToolResults(sessionId, toolResults);
+            
+            for await (const continueChunk of continuedStream) {
+              // Just consume the stream - we already got images if available
+              if (continueChunk.choices[0]?.finish_reason === 'stop') {
+                break;
+              }
+            }
+          } catch (continueError) {
+            console.error('Error continuing stream:', continueError);
+          }
+
+          // Close the session
+          this.closeSession(sessionId);
+          break;
+        }
+
+        if (chunk.choices[0]?.finish_reason === 'stop') {
+          // Agent didn't call tools, close session
+          this.closeSession(sessionId);
+          break;
+        }
+      }
+
+      // If we got images but they might not be relevant enough, log a warning
+      if (images.length > 0 && images.length < imageCount) {
+        console.log(`⚠️ AGENT IMAGE SEARCH: Only found ${images.length} relevant images (requested ${imageCount})`);
+      }
+
+      // Return results with relevance information
+      return {
+        success: images.length > 0,
+        images: images,
+        query: searchQuery || query || message,
+        total_results: images.length,
+        keyTerms: keyTerms,
+        filtered: images.length < rawImagesCount
+      };
+
+    } catch (error) {
+      console.error('Error in agent image search:', error);
+      return {
+        success: false,
+        error: error.message,
+        images: [],
+        query: query || 'Image search',
+        total_results: 0
+      };
+    }
   }
 }
 

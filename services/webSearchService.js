@@ -138,16 +138,25 @@ class WebSearchService {
       enhancedQuery = `${vehicleInfo} ${query}`;
     }
 
-    // Add image type specific terms
+    // Add image type specific terms with professional/technical focus
     const imageTypeTerms = {
-      diagram: 'diagram schematic blueprint',
-      wiring: 'wiring diagram electrical schematic',
-      flowchart: 'diagnostic flowchart troubleshooting guide',
-      parts: 'parts diagram exploded view',
-      general: 'automotive technical'
+      diagram: 'technical schematic diagram factory service manual OEM professional',
+      wiring: 'wiring diagram electrical schematic factory service manual professional technical',
+      flowchart: 'diagnostic flowchart troubleshooting guide professional technical service manual',
+      parts: 'parts diagram exploded view breakdown factory service manual professional OEM',
+      general: 'technical schematic diagram professional factory service manual automotive'
     };
     
-    enhancedQuery += ` ${imageTypeTerms[image_type] || imageTypeTerms.general}`;
+    // Only add terms if they're not already in the query (to avoid duplication)
+    const queryLower = enhancedQuery.toLowerCase();
+    const termsToAdd = imageTypeTerms[image_type] || imageTypeTerms.general;
+    const newTerms = termsToAdd.split(' ').filter(term => 
+      !queryLower.includes(term.toLowerCase())
+    ).join(' ');
+    
+    if (newTerms) {
+      enhancedQuery += ` ${newTerms}`;
+    }
 
     try {
       if (this.hasSerper) {

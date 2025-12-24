@@ -16,10 +16,15 @@ import { z } from 'zod';
 // import { MemoryVectorService } from '../services/MemoryVectorService.js';
 // Import the research cache model
 import ResearchCache from '../models/researchCache.model.js';
+// Import ResponsesAPIService to use the same image search system as the agent
+import ResponsesAPIService from '../services/responsesService.js';
 
 dotenv.config();
 
 const router = express.Router();
+
+// Initialize ResponsesAPIService to use the same webSearchService instance as the agent
+const responsesService = new ResponsesAPIService();
 
 /**
  * @swagger
@@ -1138,6 +1143,94 @@ router.post('/search-similar', async (req, res) => {
     console.error('Error searching similar research:', error);
     return res.status(500).json({
       error: 'Failed to search similar research',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * POST /api/research/step-images
+ * 
+ * On-demand image search for diagnostic steps
+ * Searches for professional technical images: schematics, diagrams, parts breakdowns, and style pictures
+ * Optimized for professional automotive technicians
+ */
+router.post('/step-images', async (req, res) => {
+  const { 
+    stepTitle, 
+    stepDescription, 
+    stepDetails, 
+    componentLocation,
+    tools,
+    vehicleContext,
+    imageCount = 5
+  } = req.body;
+
+  if (!stepTitle && !stepDescription) {
+    return res.status(400).json({ 
+      error: 'Missing required fields. stepTitle or stepDescription is required.' 
+    });
+  }
+
+  try {
+    // Determine image type based on step content for agent context
+    let imageType = 'diagram'; // Default to diagram for professional content
+    const searchText = ((stepTitle || '') + ' ' + (stepDescription || '') + ' ' + (stepDetails || '')).toLowerCase();
+    
+    // Determine image type based on keywords - prioritize technical content
+    if (searchText.includes('wiring') || searchText.includes('electrical') || 
+        searchText.includes('connector') || searchText.includes('circuit') ||
+        searchText.includes('pin') || searchText.includes('voltage') ||
+        searchText.includes('sensor') || searchText.includes('harness') ||
+        searchText.includes('ecu') || searchText.includes('pcm')) {
+      imageType = 'wiring';
+    } else if (searchText.includes('part') || searchText.includes('component') ||
+               searchText.includes('assembly') || searchText.includes('exploded') ||
+               searchText.includes('breakdown') || searchText.includes('disassembly')) {
+      imageType = 'parts';
+    } else if (searchText.includes('flowchart') || searchText.includes('diagnostic') ||
+               searchText.includes('troubleshooting') || searchText.includes('procedure') ||
+               searchText.includes('decision tree')) {
+      imageType = 'flowchart';
+    } else if (searchText.includes('diagram') || searchText.includes('schematic') ||
+               searchText.includes('blueprint') || searchText.includes('layout') ||
+               searchText.includes('technical drawing')) {
+      imageType = 'diagram';
+    }
+
+    console.log(`🔍 RESEARCH ROUTES: Using agent to search for ${imageType} images`);
+
+    // Use the agent's intelligence to search for images
+    // The agent will construct the best query and use its tool execution system
+    const imageResults = await responsesService.searchImagesWithAgent({
+      stepTitle,
+      stepDescription,
+      componentLocation,
+      tools,
+      vehicleContext: vehicleContext || {},
+      imageType,
+      imageCount: Math.min(imageCount, 10)
+    });
+
+    if (!imageResults.success) {
+      return res.status(500).json({
+        error: 'Image search failed',
+        details: imageResults.error || 'Unknown error'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      query: imageResults.query,
+      imageType: imageType,
+      images: imageResults.images,
+      total_results: imageResults.total_results
+    });
+
+  } catch (error) {
+    console.error('Error processing step image search:', error);
+    return res.status(500).json({
+      error: 'Failed to retrieve step images',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
