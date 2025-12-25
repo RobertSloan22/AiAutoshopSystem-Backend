@@ -50,17 +50,17 @@ const mcpServersConfig = {
     healthCheckInterval: 30000
   },
 
-  // Fetch Server - for URL retrieval
-  fetch: {
+  // Filesystem Server - for file operations
+  filesystem: {
     type: isDockerMode ? 'http' : 'stdio',
     command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-fetch'],
+    args: ['-y', '@modelcontextprotocol/server-filesystem'],
     url: isDockerMode
-      ? (process.env.MCP_FETCH_URL || 'http://mcp-fetch:3703')
+      ? (process.env.MCP_FILESYSTEM_URL || 'http://mcp-filesystem:3703')
       : null,
-    enabled: process.env.MCP_FETCH_ENABLED !== 'false',
-    name: 'fetch',
-    description: 'Fetch server for retrieving content from URLs',
+    enabled: process.env.MCP_FILESYSTEM_ENABLED !== 'false',
+    name: 'filesystem',
+    description: 'Filesystem server for file operations',
     timeout: 30000,
     autoRestart: !isDockerMode,
     maxRestarts: 3,
