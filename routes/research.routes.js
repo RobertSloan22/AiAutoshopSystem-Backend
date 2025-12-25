@@ -18,6 +18,8 @@ import { z } from 'zod';
 import ResearchCache from '../models/researchCache.model.js';
 // Import ResponsesAPIService to use the same image search system as the agent
 import ResponsesAPIService from '../services/responsesService.js';
+// Import WebSearchService for image search capability
+import WebSearchService from '../services/webSearchService.js';
 
 dotenv.config();
 
@@ -25,6 +27,8 @@ const router = express.Router();
 
 // Initialize ResponsesAPIService to use the same webSearchService instance as the agent
 const responsesService = new ResponsesAPIService();
+// Initialize WebSearchService for image search
+const webSearchService = new WebSearchService();
 
 /**
  * @swagger
@@ -1153,7 +1157,7 @@ router.post('/search-similar', async (req, res) => {
  * 
  * On-demand image search for diagnostic steps
  * Searches for professional technical images: schematics, diagrams, parts breakdowns, and style pictures
- * Optimized for professional automotive technicians
+ * Optimized for professional automotive technicians with smart image type selection
  */
 router.post('/step-images', async (req, res) => {
   const { 
@@ -1173,9 +1177,34 @@ router.post('/step-images', async (req, res) => {
   }
 
   try {
-    // Determine image type based on step content for agent context
+    // Build search query from step information
+    let searchQuery = '';
+    
+    // Start with step title if available
+    if (stepTitle) {
+      searchQuery = stepTitle;
+    }
+    
+    // Add component location if available (very useful for image search)
+    if (componentLocation) {
+      searchQuery += ` ${componentLocation}`;
+    }
+    
+    // Add step description if available
+    if (stepDescription) {
+      // Extract key terms from description (first 50 words)
+      const descriptionWords = stepDescription.split(/\s+/).slice(0, 50).join(' ');
+      searchQuery += ` ${descriptionWords}`;
+    }
+    
+    // Add tools if available (helps find relevant diagrams)
+    if (tools && Array.isArray(tools) && tools.length > 0) {
+      searchQuery += ` ${tools.slice(0, 3).join(' ')}`;
+    }
+
+    // Smart image type selection based on step content - prioritize technical content
     let imageType = 'diagram'; // Default to diagram for professional content
-    const searchText = ((stepTitle || '') + ' ' + (stepDescription || '') + ' ' + (stepDetails || '')).toLowerCase();
+    const searchText = (searchQuery + ' ' + (stepDetails || '')).toLowerCase();
     
     // Determine image type based on keywords - prioritize technical content
     if (searchText.includes('wiring') || searchText.includes('electrical') || 
@@ -1198,19 +1227,29 @@ router.post('/step-images', async (req, res) => {
       imageType = 'diagram';
     }
 
-    console.log(`🔍 RESEARCH ROUTES: Using agent to search for ${imageType} images`);
+    console.log(`🔍 RESEARCH ROUTES: Using agent to search for ${imageType} images with query: "${searchQuery}"`);
 
-    // Use the agent's intelligence to search for images
-    // The agent will construct the best query and use its tool execution system
-    const imageResults = await responsesService.searchImagesWithAgent({
-      stepTitle,
-      stepDescription,
-      componentLocation,
-      tools,
-      vehicleContext: vehicleContext || {},
-      imageType,
-      imageCount: Math.min(imageCount, 10)
-    });
+    // Try agent-based search first (preferred method)
+    let imageResults;
+    try {
+      // Use the agent's intelligence to search for images
+      imageResults = await responsesService.searchImagesWithAgent({
+        stepTitle,
+        stepDescription,
+        componentLocation,
+        tools,
+        vehicleContext: vehicleContext || {},
+        imageType,
+        imageCount: Math.min(imageCount, 10)
+      });
+    } catch (agentError) {
+      console.log(`Agent search failed, falling back to web search: ${agentError.message}`);
+      // Fallback to direct web search
+      imageResults = await webSearchService.searchTechnicalImages(searchQuery, {
+        vehicle_context: vehicleContext || {},
+        image_type: imageType
+      });
+    }
 
     if (!imageResults.success) {
       return res.status(500).json({
@@ -1219,12 +1258,38 @@ router.post('/step-images', async (req, res) => {
       });
     }
 
+    // Handle different response formats from agent vs web search
+    let images = [];
+    if (imageResults.images) {
+      // Agent response format
+      images = imageResults.images;
+    } else if (imageResults.results) {
+      // Web search response format
+      images = imageResults.results;
+    }
+
+    // Limit results to requested count (default 5, max 10)
+    const maxImages = Math.min(imageCount, 10);
+    const limitedImages = images.slice(0, maxImages);
+
+    // Normalize image structure to match frontend expectations
+    const normalizedImages = limitedImages.map((img) => ({
+      url: img.image_url || img.url || img.link || '',
+      thumbnail_url: img.thumbnail_url || img.image_url || img.url || img.link || '',
+      thumbnail: img.thumbnail_url || img.image_url || img.url || img.link || '',
+      title: img.title || 'Technical Image',
+      source: img.source || 'Search Result',
+      link: img.url || img.link || img.image_url || '',
+      width: img.width,
+      height: img.height
+    }));
+
     return res.status(200).json({
       success: true,
-      query: imageResults.query,
+      query: imageResults.query || searchQuery,
       imageType: imageType,
-      images: imageResults.images,
-      total_results: imageResults.total_results
+      images: normalizedImages,
+      total_results: imageResults.total_results || normalizedImages.length
     });
 
   } catch (error) {
