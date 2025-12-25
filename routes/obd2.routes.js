@@ -746,11 +746,11 @@ router.get('/sessions', async (req, res) => {
       startDate,
       endDate,
       tags,
-      limit = 50,
+      limit = 20,
       offset = 0,
       sortBy = 'startTime',
       sortOrder = 'desc',
-      includeSummary
+      includeSummary = 'true' // Default to summary mode to prevent memory overload
     } = req.query;
 
     let query = {};
@@ -831,11 +831,58 @@ router.get('/sessions', async (req, res) => {
       });
     }
 
-    // Map MongoDB _id to id for frontend compatibility
-    const mappedSessions = sessions.map(session => ({
-      ...session,
-      id: session._id.toString()
-    }));
+    // Map MongoDB _id to id for frontend compatibility and apply summary mode if requested
+    const isSummaryMode = includeSummary === 'true' || includeSummary === true;
+    const mappedSessions = sessions.map(session => {
+      const baseSession = {
+        ...session,
+        id: session._id.toString()
+      };
+      
+      // If summary mode, exclude heavy data fields
+      if (isSummaryMode) {
+        const summarySession = { ...baseSession };
+        
+        // Remove heavy data fields but keep metadata
+        if (summarySession.dataPoints && Array.isArray(summarySession.dataPoints)) {
+          summarySession.dataPointCount = summarySession.dataPoints.length;
+          delete summarySession.dataPoints;
+        }
+        
+        // Remove analysis results but keep analysis ID if exists
+        if (summarySession.analysisResults) {
+          summarySession.hasAnalysisResults = true;
+          summarySession.analysisId = summarySession.analysisResults.analysisId || summarySession.analysisId;
+          delete summarySession.analysisResults;
+        }
+        
+        // Remove interval analysis but keep flag
+        if (summarySession.intervalAnalysis) {
+          summarySession.hasIntervalAnalysis = true;
+          delete summarySession.intervalAnalysis;
+        }
+        
+        // Remove auto analysis but keep flag
+        if (summarySession.autoAnalysis) {
+          summarySession.hasAutoAnalysis = true;
+          delete summarySession.autoAnalysis;
+        }
+        
+        // Keep metadata but remove heavy nested data
+        if (summarySession.metadata) {
+          const metadata = { ...summarySession.metadata };
+          // Remove heavy metadata fields
+          if (metadata.dataPoints) delete metadata.dataPoints;
+          if (metadata.rawData) delete metadata.rawData;
+          if (metadata.analysisData) delete metadata.analysisData;
+          summarySession.metadata = metadata;
+        }
+        
+        return summarySession;
+      }
+      
+      return baseSession;
+    });
 
     const total = await DiagnosticSession.countDocuments(query);
     logRouteProcess('/sessions', `Total matching sessions: ${total}`);

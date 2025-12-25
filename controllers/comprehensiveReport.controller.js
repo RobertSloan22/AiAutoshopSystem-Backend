@@ -276,7 +276,7 @@ export const deleteReport = async (req, res) => {
 // GET /api/obd2/reports/all - Get all comprehensive reports from database
 export const getAllComprehensiveReports = async (req, res) => {
   try {
-    const { limit = 50, offset = 0, sortBy = 'createdAt', order = 'desc' } = req.query;
+    const { limit = 20, offset = 0, sortBy = 'createdAt', order = 'desc' } = req.query;
 
     const limitNum = parseInt(limit);
     const offsetNum = parseInt(offset);

@@ -104,7 +104,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Get IDS by ID
+// Get IDS by ID (summary mode - same as list view)
 router.get('/:idsId', async (req, res) => {
   try {
     const { idsId } = req.params;
@@ -125,6 +125,66 @@ router.get('/:idsId', async (req, res) => {
   } catch (error) {
     console.error('❌ Failed to get IDS:', error);
     res.status(500).json({ error: 'Failed to get IDS', message: error.message });
+  }
+});
+
+// Get full IDS details with all populated data
+router.get('/:idsId/full', async (req, res) => {
+  try {
+    const { idsId } = req.params;
+    logRequest('GET', `/api/ids/${idsId}/full`);
+
+    const ids = await IntelligentDiagnosticSession.findOne({ idsId })
+      .populate('linkedLiveDataSessions')
+      .populate('stages.liveDataSessionIds');
+
+    if (!ids) {
+      return res.status(404).json({ error: 'IDS not found' });
+    }
+
+    res.json({
+      success: true,
+      ids
+    });
+  } catch (error) {
+    console.error('❌ Failed to get full IDS details:', error);
+    res.status(500).json({ error: 'Failed to get full IDS details', message: error.message });
+  }
+});
+
+// Get full stage details including analysis results, reports, freeze frames
+router.get('/:idsId/stage/:stageName/details', async (req, res) => {
+  try {
+    const { idsId, stageName } = req.params;
+    logRequest('GET', `/api/ids/${idsId}/stage/${stageName}/details`);
+
+    const validStages = ['inspection', 'analysis-repair', 'verification-testdriving'];
+    if (!validStages.includes(stageName)) {
+      return res.status(400).json({ error: 'Invalid stage name' });
+    }
+
+    const ids = await IntelligentDiagnosticSession.findOne({ idsId })
+      .populate('stages.liveDataSessionIds');
+
+    if (!ids) {
+      return res.status(404).json({ error: 'IDS not found' });
+    }
+
+    const stage = ids.getStage(stageName);
+    if (!stage) {
+      return res.status(404).json({ error: 'Stage not found' });
+    }
+
+    // Return full stage data
+    res.json({
+      success: true,
+      stage,
+      idsId: ids.idsId,
+      vin: ids.vin
+    });
+  } catch (error) {
+    console.error('❌ Failed to get stage details:', error);
+    res.status(500).json({ error: 'Failed to get stage details', message: error.message });
   }
 });
 
@@ -167,29 +227,101 @@ router.get('/vehicle/:vin', async (req, res) => {
   }
 });
 
-// Get all IDS entries for a vehicle
+// Get all IDS entries for a vehicle (with pagination and summary mode)
 router.get('/vehicle/:vin/all', async (req, res) => {
   try {
     const { vin } = req.params;
-    logRequest('GET', `/api/ids/vehicle/${vin}/all`);
+    const { page = '1', limit = '20', summary = 'true' } = req.query;
+    
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10))); // Max 100, min 1
+    const isSummary = summary === 'true' || summary === true;
+    
+    logRequest('GET', `/api/ids/vehicle/${vin}/all`, { page: pageNum, limit: limitNum, summary: isSummary });
 
-    const allIDS = await IntelligentDiagnosticSession.find({ vin })
+    // Get total count first
+    const total = await IntelligentDiagnosticSession.countDocuments({ vin });
+    
+    // Build query with pagination
+    let query = IntelligentDiagnosticSession.find({ vin })
       .sort({ createdAt: -1 })
-      .populate('linkedLiveDataSessions')
-      .populate('stages.liveDataSessionIds');
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
+
+    // Only populate heavy data when not in summary mode
+    if (!isSummary) {
+      query = query
+        .populate('linkedLiveDataSessions')
+        .populate('stages.liveDataSessionIds');
+    }
+
+    const allIDS = await query;
+
+    // Transform response to exclude heavy fields when in summary mode
+    const transformedIDS = allIDS.map(ids => {
+      const idsObj = ids.toObject();
+      
+      if (isSummary) {
+        // Remove heavy fields from stages
+        if (idsObj.stages && Array.isArray(idsObj.stages)) {
+          idsObj.stages = idsObj.stages.map(stage => {
+            const stageObj = { ...stage };
+            // Keep analysisId but remove analysisResults
+            if (stageObj.analysisResults) {
+              delete stageObj.analysisResults;
+            }
+            // Keep report existence flag but remove full report
+            if (stageObj.stageReport) {
+              stageObj.hasStageReport = true;
+              delete stageObj.stageReport;
+            } else {
+              stageObj.hasStageReport = false;
+            }
+            // Keep freeze frame count but remove data
+            if (stageObj.freezeFrameData && Array.isArray(stageObj.freezeFrameData)) {
+              stageObj.freezeFrameCount = stageObj.freezeFrameData.length;
+              delete stageObj.freezeFrameData;
+            }
+            // Keep session IDs but don't populate
+            if (stageObj.liveDataSessionIds && Array.isArray(stageObj.liveDataSessionIds)) {
+              // Already just IDs if not populated
+              stageObj.liveDataSessionCount = stageObj.liveDataSessionIds.length;
+            }
+            return stageObj;
+          });
+        }
+        
+        // Keep linked session IDs but don't populate
+        if (idsObj.linkedLiveDataSessions && Array.isArray(idsObj.linkedLiveDataSessions)) {
+          idsObj.linkedLiveDataSessionCount = idsObj.linkedLiveDataSessions.length;
+          // If populated, extract IDs; otherwise already IDs
+          idsObj.linkedLiveDataSessions = idsObj.linkedLiveDataSessions.map(s => 
+            typeof s === 'object' && s._id ? s._id.toString() : s.toString()
+          );
+        }
+      }
+      
+      return idsObj;
+    });
 
     // Log status breakdown for debugging
-    const statusBreakdown = allIDS.reduce((acc, ids) => {
+    const statusBreakdown = transformedIDS.reduce((acc, ids) => {
       const status = ids.overallStatus || 'unknown';
       acc[status] = (acc[status] || 0) + 1;
       return acc;
     }, {});
-    console.log(`📊 Found ${allIDS.length} IDS entries for VIN ${vin}:`, statusBreakdown);
+    console.log(`📊 Found ${transformedIDS.length} IDS entries (page ${pageNum}) for VIN ${vin}:`, statusBreakdown);
+
+    const hasMore = (pageNum * limitNum) < total;
 
     res.json({
       success: true,
-      idsList: allIDS,
-      count: allIDS.length
+      idsList: transformedIDS,
+      count: transformedIDS.length,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      hasMore
     });
   } catch (error) {
     console.error('❌ Failed to get all IDS for vehicle:', error);
