@@ -1150,16 +1150,16 @@ router.post('/search-similar', async (req, res) => {
 
 /**
  * POST /api/research/step-images
- * 
+ *
  * On-demand image search for diagnostic steps
  * Searches for professional technical images: schematics, diagrams, parts breakdowns, and style pictures
  * Optimized for professional automotive technicians
  */
 router.post('/step-images', async (req, res) => {
-  const { 
-    stepTitle, 
-    stepDescription, 
-    stepDetails, 
+  const {
+    stepTitle,
+    stepDescription,
+    stepDetails,
     componentLocation,
     tools,
     vehicleContext,
@@ -1167,8 +1167,8 @@ router.post('/step-images', async (req, res) => {
   } = req.body;
 
   if (!stepTitle && !stepDescription) {
-    return res.status(400).json({ 
-      error: 'Missing required fields. stepTitle or stepDescription is required.' 
+    return res.status(400).json({
+      error: 'Missing required fields. stepTitle or stepDescription is required.'
     });
   }
 
@@ -1176,9 +1176,9 @@ router.post('/step-images', async (req, res) => {
     // Determine image type based on step content for agent context
     let imageType = 'diagram'; // Default to diagram for professional content
     const searchText = ((stepTitle || '') + ' ' + (stepDescription || '') + ' ' + (stepDetails || '')).toLowerCase();
-    
+
     // Determine image type based on keywords - prioritize technical content
-    if (searchText.includes('wiring') || searchText.includes('electrical') || 
+    if (searchText.includes('wiring') || searchText.includes('electrical') ||
         searchText.includes('connector') || searchText.includes('circuit') ||
         searchText.includes('pin') || searchText.includes('voltage') ||
         searchText.includes('sensor') || searchText.includes('harness') ||

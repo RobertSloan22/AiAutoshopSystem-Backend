@@ -155,4 +155,3 @@ IntelligentDiagnosticSessionSchema.statics.findAllForVehicle = function(vin, lim
 };
 
 export default mongoose.model('IntelligentDiagnosticSession', IntelligentDiagnosticSessionSchema);
-
