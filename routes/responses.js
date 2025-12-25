@@ -447,6 +447,53 @@ router.post('/chat/stream', async (req, res) => {
             sessionId
           })}\n\n`);
 
+          // Extract and send image search results if any tool calls were image searches
+          console.log(`📊 CHAT/STREAM: Processing ${toolCalls.length} tool calls for image extraction`);
+          for (let i = 0; i < toolCalls.length; i++) {
+            const toolCall = toolCalls[i];
+            console.log(`📊 CHAT/STREAM: Tool ${i}: ${toolCall.function.name}`);
+            
+            if (toolCall.function.name === 'search_technical_images') {
+              try {
+                const resultContent = JSON.parse(toolResults[i].content);
+                console.log(`📊 CHAT/STREAM: Image search result success: ${resultContent.success}`);
+                
+                // Normalize: webSearchService returns 'results', but we need 'images' for frontend
+                const images = resultContent.images || resultContent.results || [];
+                
+                if (resultContent.success && images.length > 0) {
+                  console.log(`📊 CHAT/STREAM: Found ${images.length} search result images`);
+                  
+                  // Normalize image structure to match frontend expectations
+                  // Frontend expects: url, thumbnail_url (or thumbnail), title, source, etc.
+                  const normalizedImages = images.map((img) => ({
+                    url: img.image_url || img.url || img.link || '',
+                    thumbnail_url: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                    thumbnail: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                    title: img.title || 'Technical Image',
+                    source: img.source || 'Search Result',
+                    link: img.url || img.link || img.image_url || '',
+                    width: img.width,
+                    height: img.height
+                  }));
+                  
+                  // Send image search results to frontend
+                  const imageSearchData = {
+                    type: 'image_search_ready',
+                    images: normalizedImages,
+                    query: resultContent.query || 'Technical images',
+                    sessionId
+                  };
+                  
+                  res.write(`data: ${JSON.stringify(imageSearchData)}\n\n`);
+                  console.log(`📊 CHAT/STREAM: Sent image_search_ready event with ${normalizedImages.length} images to frontend`);
+                }
+              } catch (e) {
+                console.error('Error parsing image search tool results in chat/stream:', e);
+              }
+            }
+          }
+
           // Continue stream with tool results
           const continuedStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
           
@@ -818,8 +865,9 @@ router.post('/chat/analyze', async (req, res) => {
             try {
               const resultContent = JSON.parse(toolResults[i].content);
               console.log(`📊 ANALYZE: Image search result success: ${resultContent.success}`);
-              if (resultContent.images && resultContent.images.length > 0) {
-                console.log(`📊 ANALYZE: Found ${resultContent.images.length} search result images`);
+              const images = resultContent.images || resultContent.results || [];
+              if (images.length > 0) {
+                console.log(`📊 ANALYZE: Found ${images.length} search result images`);
               }
             } catch (e) {
               console.error('Error parsing image search tool results:', e);
@@ -1111,19 +1159,35 @@ router.post('/chat/analyze/stream', async (req, res) => {
               const resultContent = JSON.parse(toolResults[i].content);
               console.log(`📊 STREAM: Image search result success: ${resultContent.success}`);
               
-              if (resultContent.success && resultContent.images && resultContent.images.length > 0) {
-                console.log(`📊 STREAM: Found ${resultContent.images.length} search result images`);
+              // Normalize: webSearchService returns 'results', but we need 'images' for frontend
+              const images = resultContent.images || resultContent.results || [];
+              
+              if (resultContent.success && images.length > 0) {
+                console.log(`📊 STREAM: Found ${images.length} search result images`);
+                
+                // Normalize image structure to match frontend expectations
+                // Frontend expects: url, thumbnail_url (or thumbnail), title, source, etc.
+                const normalizedImages = images.map((img) => ({
+                  url: img.image_url || img.url || img.link || '',
+                  thumbnail_url: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                  thumbnail: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                  title: img.title || 'Technical Image',
+                  source: img.source || 'Search Result',
+                  link: img.url || img.link || img.image_url || '',
+                  width: img.width,
+                  height: img.height
+                }));
                 
                 // Send image search results to frontend
                 const imageSearchData = {
                   type: 'image_search_ready',
-                  images: resultContent.images,
+                  images: normalizedImages,
                   query: resultContent.query || 'Technical images',
                   sessionId
                 };
                 
                 res.write(`data: ${JSON.stringify(imageSearchData)}\n\n`);
-                console.log(`📊 STREAM: Sent image_search_ready event with ${resultContent.images.length} images to frontend`);
+                console.log(`📊 STREAM: Sent image_search_ready event with ${normalizedImages.length} images to frontend`);
               }
             } catch (e) {
               console.error('Error parsing image search tool results in stream:', e);
@@ -1236,6 +1300,62 @@ router.delete('/conversation/:conversationId', (req, res) => {
   } catch (error) {
     console.error('Error clearing conversation history:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// DIRECT IMAGE SEARCH ENDPOINT
+router.post('/images/search', async (req, res) => {
+  try {
+    const { query, vehicleContext, imageType = 'general' } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+    
+    console.log('🖼️ Direct image search request:', {
+      query,
+      hasVehicleContext: !!vehicleContext,
+      imageType
+    });
+    
+    const results = await responsesService.webSearchService.searchTechnicalImages(
+      query,
+      {
+        vehicle_context: vehicleContext,
+        image_type: imageType
+      }
+    );
+    
+    // Normalize results to match frontend expectations
+    const rawImages = results.results || results.images || [];
+    const normalizedImages = rawImages.map((img) => ({
+      url: img.image_url || img.url || img.link || '',
+      thumbnail_url: img.thumbnail_url || img.image_url || img.url || img.link || '',
+      thumbnail: img.thumbnail_url || img.image_url || img.url || img.link || '',
+      title: img.title || 'Technical Image',
+      source: img.source || 'Search Result',
+      link: img.url || img.link || img.image_url || '',
+      width: img.width,
+      height: img.height
+    }));
+    
+    console.log('🖼️ Direct image search results:', {
+      success: results.success,
+      imageCount: normalizedImages.length,
+      query: results.query || query
+    });
+    
+    res.json({
+      success: results.success,
+      query: results.query || query,
+      images: normalizedImages,
+      total_results: normalizedImages.length
+    });
+  } catch (error) {
+    console.error('Image search error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Image search failed' 
+    });
   }
 });
 

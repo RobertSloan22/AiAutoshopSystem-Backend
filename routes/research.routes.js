@@ -16,10 +16,15 @@ import { z } from 'zod';
 // import { MemoryVectorService } from '../services/MemoryVectorService.js';
 // Import the research cache model
 import ResearchCache from '../models/researchCache.model.js';
+// Import WebSearchService for image search capability
+import WebSearchService from '../services/webSearchService.js';
 
 dotenv.config();
 
 const router = express.Router();
+
+// Initialize WebSearchService for image search
+const webSearchService = new WebSearchService();
 
 /**
  * @swagger
@@ -1138,6 +1143,124 @@ router.post('/search-similar', async (req, res) => {
     console.error('Error searching similar research:', error);
     return res.status(500).json({
       error: 'Failed to search similar research',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * POST /api/research/step-images
+ * 
+ * On-demand image search for diagnostic steps
+ * Searches for technical images based on step content with smart image type selection
+ */
+router.post('/step-images', async (req, res) => {
+  const { 
+    stepTitle, 
+    stepDescription, 
+    stepDetails, 
+    componentLocation,
+    tools,
+    vehicleContext,
+    imageCount = 5
+  } = req.body;
+
+  if (!stepTitle && !stepDescription) {
+    return res.status(400).json({ 
+      error: 'Missing required fields. stepTitle or stepDescription is required.' 
+    });
+  }
+
+  try {
+    // Build search query from step information
+    let searchQuery = '';
+    
+    // Start with step title if available
+    if (stepTitle) {
+      searchQuery = stepTitle;
+    }
+    
+    // Add component location if available (very useful for image search)
+    if (componentLocation) {
+      searchQuery += ` ${componentLocation}`;
+    }
+    
+    // Add step description if available
+    if (stepDescription) {
+      // Extract key terms from description (first 50 words)
+      const descriptionWords = stepDescription.split(/\s+/).slice(0, 50).join(' ');
+      searchQuery += ` ${descriptionWords}`;
+    }
+    
+    // Add tools if available (helps find relevant diagrams)
+    if (tools && Array.isArray(tools) && tools.length > 0) {
+      searchQuery += ` ${tools.slice(0, 3).join(' ')}`;
+    }
+
+    // Smart image type selection based on step content
+    let imageType = 'general';
+    const searchText = (searchQuery + ' ' + (stepDetails || '')).toLowerCase();
+    
+    // Determine image type based on keywords
+    if (searchText.includes('wiring') || searchText.includes('electrical') || 
+        searchText.includes('connector') || searchText.includes('circuit') ||
+        searchText.includes('pin') || searchText.includes('voltage') ||
+        searchText.includes('sensor') || searchText.includes('harness')) {
+      imageType = 'wiring';
+    } else if (searchText.includes('diagram') || searchText.includes('schematic') ||
+               searchText.includes('blueprint') || searchText.includes('layout')) {
+      imageType = 'diagram';
+    } else if (searchText.includes('flowchart') || searchText.includes('diagnostic') ||
+               searchText.includes('troubleshooting') || searchText.includes('procedure')) {
+      imageType = 'flowchart';
+    } else if (searchText.includes('part') || searchText.includes('component') ||
+               searchText.includes('assembly') || searchText.includes('exploded')) {
+      imageType = 'parts';
+    }
+
+    console.log(`Searching for images with query: "${searchQuery}" (type: ${imageType})`);
+
+    // Perform image search
+    const imageResults = await webSearchService.searchTechnicalImages(searchQuery, {
+      vehicle_context: vehicleContext || {},
+      image_type: imageType
+    });
+
+    if (!imageResults.success) {
+      return res.status(500).json({
+        error: 'Image search failed',
+        details: imageResults.error || 'Unknown error'
+      });
+    }
+
+    // Limit results to requested count (default 5, max 10)
+    const maxImages = Math.min(imageCount, 10);
+    const images = (imageResults.results || []).slice(0, maxImages);
+
+    // Normalize image structure to match frontend expectations
+    const normalizedImages = images.map((img) => ({
+      url: img.image_url || img.url || img.link || '',
+      thumbnail_url: img.thumbnail_url || img.image_url || img.url || img.link || '',
+      thumbnail: img.thumbnail_url || img.image_url || img.url || img.link || '',
+      title: img.title || 'Technical Image',
+      source: img.source || 'Search Result',
+      link: img.url || img.link || img.image_url || '',
+      width: img.width,
+      height: img.height
+    }));
+
+    return res.status(200).json({
+      success: true,
+      query: searchQuery,
+      imageType: imageType,
+      images: normalizedImages,
+      total_results: normalizedImages.length
+    });
+
+  } catch (error) {
+    console.error('Error processing step image search:', error);
+    return res.status(500).json({
+      error: 'Failed to retrieve step images',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
