@@ -1298,6 +1298,425 @@ router.post('/chat/analyze/stream', async (req, res) => {
   }
 });
 
+// UNIFIED MASTER AGENT ENDPOINT - Combines all capabilities
+router.post('/chat/unified', async (req, res) => {
+  try {
+    const { 
+      message, 
+      vehicleContext, 
+      customerContext, 
+      conversationId,
+      mode = 'chat', // 'chat' | 'analyze' | 'execute'
+      stream = true,
+      includeVisualization = true,
+      tools,
+      options = {}
+    } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Extract OBD2 session ID if requested or if mode is analyze
+    const extractOBD2SessionId = options.extractOBD2SessionId !== false && (mode === 'analyze' || options.extractOBD2SessionId === true);
+    const obd2SessionId = extractOBD2SessionId ? (message.match(/session\s+([a-f0-9]{24})/i)?.[1] || null) : null;
+
+    // Create streaming session with all available tools
+    const { sessionId, stream: responseStream } = await responsesService.createStreamingSession(
+      message,
+      vehicleContext,
+      customerContext,
+      conversationId,
+      obd2SessionId
+    );
+
+    // If not streaming, collect full response and return JSON
+    if (!stream) {
+      let fullResponse = '';
+      let toolCalls = [];
+      let plotResults = [];
+      let pythonCode = '';
+      let pythonOutput = '';
+      let collectedImages = [];
+
+      for await (const chunk of responseStream) {
+        const delta = chunk.choices[0]?.delta;
+        
+        if (delta?.content) {
+          fullResponse += delta.content;
+        }
+
+        if (delta?.tool_calls) {
+          for (const toolCallDelta of delta.tool_calls) {
+            if (toolCallDelta.index !== undefined) {
+              if (!toolCalls[toolCallDelta.index]) {
+                toolCalls[toolCallDelta.index] = {
+                  id: toolCallDelta.id,
+                  type: 'function',
+                  function: { name: '', arguments: '' }
+                };
+              }
+              if (toolCallDelta.function?.name) {
+                toolCalls[toolCallDelta.index].function.name += toolCallDelta.function.name;
+              }
+              if (toolCallDelta.function?.arguments) {
+                toolCalls[toolCallDelta.index].function.arguments += toolCallDelta.function?.arguments;
+              }
+            }
+          }
+        }
+
+        if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+          const session = responsesService.getSession(sessionId);
+          if (session) {
+            session.messages.push({
+              role: 'assistant',
+              content: fullResponse || null,
+              tool_calls: toolCalls
+            });
+          }
+          
+          const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
+          
+          // Extract visualizations and images from tool results
+          for (let i = 0; i < toolCalls.length; i++) {
+            const toolCall = toolCalls[i];
+            try {
+              const resultContent = JSON.parse(toolResults[i].content);
+              
+              if (toolCall.function.name === 'execute_python_code' && resultContent.success) {
+                pythonCode = JSON.parse(toolCall.function.arguments).code || '';
+                pythonOutput = resultContent.output || '';
+                if (resultContent.plots) {
+                  plotResults = resultContent.plots;
+                }
+              } else if (toolCall.function.name === 'search_technical_images' && resultContent.success) {
+                const images = resultContent.images || resultContent.results || [];
+                collectedImages = images.map((img) => ({
+                  url: img.image_url || img.url || img.link || '',
+                  thumbnail_url: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                  thumbnail: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                  title: img.title || 'Technical Image',
+                  source: img.source || 'Search Result',
+                  link: img.url || img.link || img.image_url || '',
+                  width: img.width,
+                  height: img.height
+                }));
+              }
+            } catch (e) {
+              console.error('Error parsing tool result:', e);
+            }
+          }
+
+          const continuedStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
+          for await (const continueChunk of continuedStream) {
+            const continueDelta = continueChunk.choices[0]?.delta;
+            if (continueDelta?.content) {
+              fullResponse += continueDelta.content;
+            }
+            if (continueChunk.choices[0]?.finish_reason === 'stop') {
+              break;
+            }
+          }
+          break;
+        }
+
+        if (chunk.choices[0]?.finish_reason === 'stop') {
+          break;
+        }
+      }
+
+      responsesService.closeSession(sessionId);
+
+      const response = {
+        message: fullResponse,
+        sessionId,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined
+      };
+
+      if (plotResults.length > 0) {
+        response.visualizations = plotResults;
+        response.codeExecution = { code: pythonCode, output: pythonOutput, success: true };
+      }
+
+      if (collectedImages.length > 0) {
+        response.images = collectedImages;
+      }
+
+      if (vehicleContext || customerContext) {
+        response.context = { vehicle: vehicleContext, customer: customerContext };
+      }
+
+      return res.json(response);
+    }
+
+    // Streaming response
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Cache-Control'
+    });
+
+    res.write(`data: ${JSON.stringify({ 
+      type: 'session_started', 
+      sessionId,
+      mode,
+      timestamp: new Date().toISOString()
+    })}\n\n`);
+
+    let toolCalls = [];
+    let fullResponse = '';
+    let plotResults = [];
+    let pythonCode = '';
+    let pythonOutput = '';
+    
+    // Improved buffering strategy
+    let contentBuffer = '';
+    let bufferTimeout = null;
+    const BUFFER_TIME = 100;
+    const MIN_CHUNK_SIZE = 20;
+    
+    const flushContentBuffer = () => {
+      if (contentBuffer.length > 0) {
+        const trimmedContent = contentBuffer.trim();
+        if (trimmedContent.length > 0) {
+          res.write(`data: ${JSON.stringify({
+            type: 'content',
+            content: trimmedContent,
+            sessionId
+          })}\n\n`);
+        }
+        contentBuffer = '';
+      }
+      if (bufferTimeout) {
+        clearTimeout(bufferTimeout);
+        bufferTimeout = null;
+      }
+    };
+
+    const scheduleFlush = (forceTime = BUFFER_TIME) => {
+      if (bufferTimeout) {
+        clearTimeout(bufferTimeout);
+      }
+      bufferTimeout = setTimeout(flushContentBuffer, forceTime);
+    };
+
+    for await (const chunk of responseStream) {
+      const delta = chunk.choices[0]?.delta;
+      
+      if (delta?.content) {
+        contentBuffer += delta.content;
+        fullResponse += delta.content;
+        
+        const hasGoodBreakpoint = /[.!?]\s+|[.!?]$|\n/.test(contentBuffer);
+        const isLongEnough = contentBuffer.length >= MIN_CHUNK_SIZE;
+        const hasWordBoundary = /\s+\w+$/.test(contentBuffer);
+        
+        if (hasGoodBreakpoint && isLongEnough) {
+          flushContentBuffer();
+        } else if (contentBuffer.length >= 40 && hasWordBoundary) {
+          flushContentBuffer();
+        } else {
+          scheduleFlush(BUFFER_TIME);
+        }
+      }
+
+      if (delta?.tool_calls) {
+        flushContentBuffer();
+        
+        for (const toolCallDelta of delta.tool_calls) {
+          if (toolCallDelta.index !== undefined) {
+            if (!toolCalls[toolCallDelta.index]) {
+              toolCalls[toolCallDelta.index] = {
+                id: toolCallDelta.id,
+                type: 'function',
+                function: { name: '', arguments: '' }
+              };
+            }
+            if (toolCallDelta.function?.name) {
+              toolCalls[toolCallDelta.index].function.name += toolCallDelta.function.name;
+            }
+            if (toolCallDelta.function?.arguments) {
+              toolCalls[toolCallDelta.index].function.arguments += toolCallDelta.function.arguments;
+            }
+
+            res.write(`data: ${JSON.stringify({
+              type: 'tool_call_progress',
+              toolCall: toolCalls[toolCallDelta.index],
+              sessionId
+            })}\n\n`);
+          }
+        }
+      }
+
+      if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+        flushContentBuffer();
+        
+        const session = responsesService.getSession(sessionId);
+        if (session) {
+          session.messages.push({
+            role: 'assistant',
+            content: fullResponse || null,
+            tool_calls: toolCalls
+          });
+        }
+        
+        const toolsServerInfo = responsesService.multiMCPService.getToolsServerInfo(toolCalls);
+        
+        res.write(`data: ${JSON.stringify({
+          type: 'tool_calls_started',
+          toolCalls,
+          mcpServerInfo: toolsServerInfo,
+          sessionId
+        })}\n\n`);
+
+        try {
+          const toolResults = await responsesService.processToolCalls(toolCalls, sessionId);
+          
+          res.write(`data: ${JSON.stringify({
+            type: 'tool_calls_completed',
+            results: toolResults,
+            sessionId
+          })}\n\n`);
+
+          // Process tool results and extract visualizations/images
+          for (let i = 0; i < toolCalls.length; i++) {
+            const toolCall = toolCalls[i];
+            try {
+              const resultContent = JSON.parse(toolResults[i].content);
+              
+              if (toolCall.function.name === 'execute_python_code' && resultContent.success) {
+                const args = JSON.parse(toolCall.function.arguments);
+                pythonCode = args.code || '';
+                pythonOutput = resultContent.output || '';
+                
+                res.write(`data: ${JSON.stringify({
+                  type: 'code_execution',
+                  code: pythonCode,
+                  output: pythonOutput,
+                  sessionId
+                })}\n\n`);
+                
+                if (resultContent.plots && resultContent.plots.length > 0) {
+                  plotResults = resultContent.plots;
+                  res.write(`data: ${JSON.stringify({
+                    type: 'visualization_ready',
+                    visualizations: plotResults.map(plot => ({
+                      imageId: plot.imageId,
+                      url: plot.url,
+                      thumbnailUrl: plot.thumbnailUrl,
+                      data: plot.data,
+                      path: plot.path
+                    })),
+                    sessionId
+                  })}\n\n`);
+                }
+              } else if (toolCall.function.name === 'search_technical_images' && resultContent.success) {
+                const images = resultContent.images || resultContent.results || [];
+                if (images.length > 0) {
+                  const normalizedImages = images.map((img) => ({
+                    url: img.image_url || img.url || img.link || '',
+                    thumbnail_url: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                    thumbnail: img.thumbnail_url || img.image_url || img.url || img.link || '',
+                    title: img.title || 'Technical Image',
+                    source: img.source || 'Search Result',
+                    link: img.url || img.link || img.image_url || '',
+                    width: img.width,
+                    height: img.height
+                  }));
+                  
+                  res.write(`data: ${JSON.stringify({
+                    type: 'image_search_ready',
+                    images: normalizedImages,
+                    query: resultContent.query || 'Technical images',
+                    sessionId
+                  })}\n\n`);
+                }
+              }
+            } catch (e) {
+              console.error('Error processing tool result:', e);
+            }
+          }
+
+          const continuedStream = await responsesService.continueStreamWithToolResults(sessionId, toolResults);
+          contentBuffer = '';
+          
+          for await (const continueChunk of continuedStream) {
+            const continueDelta = continueChunk.choices[0]?.delta;
+            
+            if (continueDelta?.content) {
+              contentBuffer += continueDelta.content;
+              fullResponse += continueDelta.content;
+              
+              const hasGoodBreakpoint = /[.!?]\s+|[.!?]$|\n/.test(contentBuffer);
+              const isLongEnough = contentBuffer.length >= MIN_CHUNK_SIZE;
+              const hasWordBoundary = /\s+\w+$/.test(contentBuffer);
+              
+              if (hasGoodBreakpoint && isLongEnough) {
+                flushContentBuffer();
+              } else if (contentBuffer.length >= 40 && hasWordBoundary) {
+                flushContentBuffer();
+              } else {
+                scheduleFlush(BUFFER_TIME);
+              }
+            }
+            
+            if (continueChunk.choices[0]?.finish_reason === 'stop') {
+              break;
+            }
+          }
+        } catch (toolError) {
+          flushContentBuffer();
+          res.write(`data: ${JSON.stringify({
+            type: 'error',
+            error: 'Tool execution failed: ' + toolError.message,
+            sessionId
+          })}\n\n`);
+        }
+        break;
+      }
+
+      if (chunk.choices[0]?.finish_reason === 'stop') {
+        flushContentBuffer();
+        break;
+      }
+    }
+
+    // Final flush and completion
+    flushContentBuffer();
+    
+    const completionData = {
+      type: mode === 'analyze' ? 'analysis_complete' : 'stream_complete',
+      sessionId,
+      summary: mode === 'analyze' ? {
+        message: fullResponse,
+        hasVisualization: plotResults.length > 0,
+        visualizationCount: plotResults.length,
+        codeExecuted: !!pythonCode,
+        timestamp: new Date().toISOString()
+      } : undefined
+    };
+    
+    res.write(`data: ${JSON.stringify(completionData)}\n\n`);
+    res.end();
+    responsesService.closeSession(sessionId);
+
+  } catch (error) {
+    console.error('Unified endpoint error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    } else {
+      res.write(`data: ${JSON.stringify({
+        type: 'error',
+        error: error.message || 'Internal server error'
+      })}\n\n`);
+      res.end();
+    }
+  }
+});
+
 // CONVERSATION HISTORY MANAGEMENT ENDPOINTS
 router.get('/conversation/:conversationId', (req, res) => {
   try {

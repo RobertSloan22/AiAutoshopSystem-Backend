@@ -276,7 +276,7 @@ export const deleteReport = async (req, res) => {
 // GET /api/obd2/reports/all - Get all comprehensive reports from database
 export const getAllComprehensiveReports = async (req, res) => {
   try {
-    const { limit = 20, offset = 0, sortBy = 'createdAt', order = 'desc' } = req.query;
+    const { limit = 20, offset = 0, sortBy = 'createdAt', order = 'desc', vin } = req.query;
 
     const limitNum = parseInt(limit);
     const offsetNum = parseInt(offset);
@@ -298,19 +298,25 @@ export const getAllComprehensiveReports = async (req, res) => {
       });
     }
 
+    // Build query filter - filter by VIN if provided
+    const queryFilter = {};
+    if (vin) {
+      queryFilter.vin = vin;
+    }
+
     // Build sort object
     const sortOrder = order === 'desc' ? -1 : 1;
     const sortObj = { [sortBy]: sortOrder };
 
-    // Get all reports with pagination and sorting
-    const reports = await ComprehensiveReport.find({})
+    // Get reports with pagination, sorting, and VIN filtering
+    const reports = await ComprehensiveReport.find(queryFilter)
       .sort(sortObj)
       .skip(offsetNum)
       .limit(limitNum)
       .lean(); // Use lean() for better performance when not modifying documents
 
-    // Get total count for pagination info
-    const total = await ComprehensiveReport.countDocuments({});
+    // Get total count for pagination info (with same filter)
+    const total = await ComprehensiveReport.countDocuments(queryFilter);
 
     res.status(200).json({
       success: true,
