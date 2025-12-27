@@ -452,7 +452,8 @@ router.post('/chat/stream', async (req, res) => {
           })}\n\n`);
 
           // Extract and send image search results if any tool calls were image searches
-          console.log(`📊 CHAT/STREAM: Processing ${toolCalls.length} tool calls for image extraction`);
+          // Also handle diagnostic steps generation results
+          console.log(`📊 CHAT/STREAM: Processing ${toolCalls.length} tool calls for image extraction and diagnostic steps`);
           for (let i = 0; i < toolCalls.length; i++) {
             const toolCall = toolCalls[i];
             console.log(`📊 CHAT/STREAM: Tool ${i}: ${toolCall.function.name}`);
@@ -494,6 +495,43 @@ router.post('/chat/stream', async (req, res) => {
                 }
               } catch (e) {
                 console.error('Error parsing image search tool results in chat/stream:', e);
+              }
+            } else if (toolCall.function.name === 'generate_diagnostic_steps') {
+              try {
+                const resultContent = JSON.parse(toolResults[i].content);
+                console.log(`📊 CHAT/STREAM: Diagnostic steps generation result success: ${resultContent.success}`);
+                
+                if (resultContent.success && resultContent.diagnosticSteps && Array.isArray(resultContent.diagnosticSteps)) {
+                  const diagnosticSteps = resultContent.diagnosticSteps;
+                  console.log(`📊 CHAT/STREAM: Generated ${diagnosticSteps.length} diagnostic steps`);
+                  
+                  // Get vehicle context from session
+                  const session = responsesService.getSession(sessionId);
+                  const vehicleContext = session?.vehicleContext || {};
+                  
+                  // Extract DTC codes from tool call arguments
+                  let dtcCodes = [];
+                  try {
+                    const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+                    dtcCodes = toolArgs.dtcCodes || [];
+                  } catch (e) {
+                    console.warn('Could not parse tool arguments for DTC codes:', e);
+                  }
+                  
+                  // Send diagnostic steps to frontend via event
+                  const diagnosticStepsData = {
+                    type: 'diagnostic_steps_generated',
+                    diagnosticSteps: diagnosticSteps,
+                    sessionId: sessionId,
+                    vehicleContext: vehicleContext,
+                    dtcCodes: dtcCodes
+                  };
+                  
+                  res.write(`data: ${JSON.stringify(diagnosticStepsData)}\n\n`);
+                  console.log(`📊 CHAT/STREAM: Sent diagnostic_steps_generated event with ${diagnosticSteps.length} steps to frontend`);
+                }
+              } catch (e) {
+                console.error('Error parsing diagnostic steps tool results in chat/stream:', e);
               }
             }
           }
@@ -1224,6 +1262,43 @@ router.post('/chat/analyze/stream', async (req, res) => {
             } catch (e) {
               console.error('Error parsing image search tool results in stream:', e);
             }
+          } else if (toolCall.function.name === 'generate_diagnostic_steps') {
+            try {
+              const resultContent = JSON.parse(toolResults[i].content);
+              console.log(`📊 STREAM: Diagnostic steps generation result success: ${resultContent.success}`);
+              
+              if (resultContent.success && resultContent.diagnosticSteps && Array.isArray(resultContent.diagnosticSteps)) {
+                const diagnosticSteps = resultContent.diagnosticSteps;
+                console.log(`📊 STREAM: Generated ${diagnosticSteps.length} diagnostic steps`);
+                
+                // Get vehicle context from session
+                const session = responsesService.getSession(sessionId);
+                const vehicleContext = session?.vehicleContext || {};
+                
+                // Extract DTC codes from tool call arguments
+                let dtcCodes = [];
+                try {
+                  const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+                  dtcCodes = toolArgs.dtcCodes || [];
+                } catch (e) {
+                  console.warn('Could not parse tool arguments for DTC codes:', e);
+                }
+                
+                // Send diagnostic steps to frontend via event
+                const diagnosticStepsData = {
+                  type: 'diagnostic_steps_generated',
+                  diagnosticSteps: diagnosticSteps,
+                  sessionId: sessionId,
+                  vehicleContext: vehicleContext,
+                  dtcCodes: dtcCodes
+                };
+                
+                res.write(`data: ${JSON.stringify(diagnosticStepsData)}\n\n`);
+                console.log(`📊 STREAM: Sent diagnostic_steps_generated event with ${diagnosticSteps.length} steps to frontend`);
+              }
+            } catch (e) {
+              console.error('Error parsing diagnostic steps tool results in stream:', e);
+            }
           }
         }
 
@@ -1632,6 +1707,30 @@ router.post('/chat/unified', async (req, res) => {
                     images: normalizedImages,
                     query: resultContent.query || 'Technical images',
                     sessionId
+                  })}\n\n`);
+                }
+              } else if (toolCall.function.name === 'generate_diagnostic_steps' && resultContent.success) {
+                const diagnosticSteps = resultContent.diagnosticSteps || [];
+                if (diagnosticSteps.length > 0) {
+                  // Get vehicle context from session
+                  const session = responsesService.getSession(sessionId);
+                  const vehicleContext = session?.vehicleContext || {};
+                  
+                  // Extract DTC codes from tool call arguments
+                  let dtcCodes = [];
+                  try {
+                    const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+                    dtcCodes = toolArgs.dtcCodes || [];
+                  } catch (e) {
+                    console.warn('Could not parse tool arguments for DTC codes:', e);
+                  }
+                  
+                  res.write(`data: ${JSON.stringify({
+                    type: 'diagnostic_steps_generated',
+                    diagnosticSteps: diagnosticSteps,
+                    sessionId: sessionId,
+                    vehicleContext: vehicleContext,
+                    dtcCodes: dtcCodes
                   })}\n\n`);
                 }
               }

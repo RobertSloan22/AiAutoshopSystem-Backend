@@ -430,6 +430,74 @@ Be thorough, accurate, and helpful in your automotive diagnostic assistance. Use
           // Handle PDF processing tool
           console.log(`Executing PDF processing tool: ${toolCall.function.name}`);
           result = await this.pdfService.executeTool(toolCall.function.name, parameters);
+        } else if (toolCall.function.name === 'generate_diagnostic_steps') {
+          // Handle diagnostic steps generation tool
+          console.log(`Executing generate_diagnostic_steps tool`);
+          
+          try {
+            // Collect vehicle context from session
+            const vehicleContext = session.vehicleContext || {};
+            
+            // Extract parameters
+            const problem = parameters.problem || '';
+            const dtcCodes = parameters.dtcCodes || [];
+            const sessionId = parameters.sessionId || session.obd2SessionId || null;
+            const stageContext = parameters.stageContext || null;
+            
+            // Build request payload
+            const requestPayload = {
+              year: vehicleContext.year || parameters.year || '',
+              make: vehicleContext.make || parameters.make || '',
+              model: vehicleContext.model || parameters.model || '',
+              vin: vehicleContext.vin || parameters.vin || '',
+              trim: vehicleContext.trim || parameters.trim || '',
+              engine: vehicleContext.engine || parameters.engine || '',
+              transmission: vehicleContext.transmission || parameters.transmission || '',
+              mileage: vehicleContext.mileage || parameters.mileage || '',
+              problem: problem,
+              dtcCodes: dtcCodes,
+              userId: session.userId || null,
+              skipCache: parameters.skipCache || false,
+              sessionId: sessionId,
+              stageContext: stageContext
+            };
+            
+            // Add liveData if available from session
+            if (session.liveData && Array.isArray(session.liveData)) {
+              requestPayload.liveData = session.liveData.slice(-10); // Last 10 data points
+            }
+            
+            console.log(`[Generate Diagnostic Steps] Calling research/steps endpoint with:`, {
+              vehicle: `${requestPayload.year} ${requestPayload.make} ${requestPayload.model}`,
+              problemLength: problem.length,
+              dtcCodesCount: dtcCodes.length,
+              hasSessionId: !!sessionId,
+              hasStageContext: !!stageContext
+            });
+            
+            // Call the research/steps endpoint
+            const axios = require('axios');
+            const baseUrl = process.env.API_BASE_URL || 'http://localhost:5000';
+            const response = await axios.post(`${baseUrl}/api/research/steps`, requestPayload);
+            
+            const diagnosticSteps = response.data.diagnosticSteps || [];
+            
+            console.log(`[Generate Diagnostic Steps] Received ${diagnosticSteps.length} diagnostic steps`);
+            
+            result = {
+              success: true,
+              diagnosticSteps: diagnosticSteps,
+              fromCache: response.data.fromCache || false,
+              message: `Generated ${diagnosticSteps.length} diagnostic steps successfully`
+            };
+          } catch (error) {
+            console.error(`[Generate Diagnostic Steps] Error:`, error);
+            result = {
+              success: false,
+              error: error.message || 'Failed to generate diagnostic steps',
+              diagnosticSteps: []
+            };
+          }
         } else {
           // Handle MCP tools (from any connected MCP server)
           result = await this.multiMCPService.callTool(toolCall.function.name, parameters);

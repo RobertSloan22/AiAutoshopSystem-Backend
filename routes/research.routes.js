@@ -598,6 +598,241 @@ Never use placeholder values like "Refer to manufacturer specifications" or "Che
 });
 
 /**
+ * POST /api/research/steps
+ * 
+ * Generate diagnostic steps for AI Steps panel using the same detailed prompt template
+ * Returns only diagnosticSteps array formatted for the frontend
+ */
+router.post('/steps', async (req, res) => {
+  const { 
+    vin, year, make, model, problem, trim, engine, transmission, 
+    mileage, dtcCodes, userId, skipCache = false,
+    sessionId, liveData, stageContext
+  } = req.body;
+
+  // Validate required fields
+  if (!year || !make || !model || !problem) {
+    return res.status(400).json({ error: 'Missing required fields. Year, make, model, and problem are required.' });
+  }
+
+  try {
+    console.log(`[Research Steps] Processing diagnostic steps request for ${year} ${make} ${model}`);
+    console.log(`[Research Steps] Problem: ${problem}`);
+    if (dtcCodes && dtcCodes.length > 0) {
+      console.log(`[Research Steps] DTC Codes: ${dtcCodes.join(', ')}`);
+    }
+    
+    // Build enhanced problem description with session and stage context if available
+    let enhancedProblem = problem;
+    if (stageContext) {
+      enhancedProblem += `\n\nStage Context: ${JSON.stringify(stageContext)}`;
+    }
+    if (liveData && Array.isArray(liveData) && liveData.length > 0) {
+      const recentData = liveData.slice(-5);
+      enhancedProblem += `\n\nRecent Live Data: ${JSON.stringify(recentData)}`;
+    }
+    
+    // If skipCache is false, check for existing cached research
+    if (!skipCache) {
+      console.log('[Research Steps] Checking cache for existing research...');
+      
+      // Create query for finding cached research
+      const cacheQuery = {
+        'vehicleInfo.year': year,
+        'vehicleInfo.make': make,
+        'vehicleInfo.model': model,
+        problem: problem // Use original problem for cache lookup
+      };
+      
+      // Add DTC codes to query if provided (any match)
+      if (dtcCodes && dtcCodes.length > 0) {
+        cacheQuery.dtcCodes = { $in: dtcCodes };
+      }
+      
+      // Check for recent cached research (less than 30 days old)
+      const cachedResearch = await ResearchCache.findOne(cacheQuery)
+        .sort({ createdAt: -1 })
+        .exec();
+        
+      // If we have a recent analysis (less than 30 days old), return just diagnosticSteps
+      if (cachedResearch && 
+          (new Date() - new Date(cachedResearch.createdAt)) < 30 * 24 * 60 * 60 * 1000) {
+        console.log(`[Research Steps] Using cached research with ID: ${cachedResearch._id}`);
+        
+        // Extract only diagnosticSteps from cached result
+        const diagnosticSteps = cachedResearch.result?.diagnosticSteps || [];
+        
+        return res.status(200).json({
+          diagnosticSteps,
+          fromCache: true,
+          cachedAt: cachedResearch.createdAt
+        });
+      }
+      
+      console.log('[Research Steps] No recent cached research found. Generating new steps...');
+    } else {
+      console.log('[Research Steps] Cache lookup skipped by request.');
+    }
+    
+    // Use the same detailed prompt template as the main research endpoint
+    // Modified to focus on diagnosticSteps generation only
+    const stepsPrompt = PromptTemplate.fromTemplate(`
+You are a master diagnostic technician with 30 years of experience working specifically with {make} vehicles. 
+You have extensive knowledge of the {year} {make} {model} including its technical specifications, common failure points, 
+and manufacturer-specific diagnostic procedures. Provide an extremely detailed and technical analysis focusing on 
+diagnostic steps for the following problem.
+
+Vehicle Details:
+VIN: {vin}
+Year: {year}
+Make: {make}
+Model: {model}
+Trim: {trim}
+Engine: {engine}
+Transmission: {transmission}
+Mileage: {mileage}
+DTC Codes: {dtcCodes}
+
+Problem Description: {problem}
+
+Include these critical elements in your response:
+1. EXACT component locations (e.g., "Located at the rear of cylinder head, 15cm from firewall, underneath the EGR tube, accessible after removing the upper intake plenum. Reference point: 8cm above cylinder #4 spark plug, offset 12cm towards passenger side from centerline. Requires removal of heat shield P/N TD73-1234 for access.")
+2. SPECIFIC connector details (e.g., "C113 connector (black 16-pin, P/N TD73-14489-BA), PIN 6 (BRN/YEL - sensor ground) and PIN 7 (GRN/WHT - 5V reference). Connector is indexed with primary lock tab on top side. Secondary CPA lock must be removed using special tool 310-123.")
+3. PRECISE testing procedures (e.g., "Measure resistance between PIN 2 and ground with KOEO, specification is 4.5-5.5 kΩ at 20°C with a tolerance of ±0.5 kΩ. Test conditions: ambient temperature 15-25°C, battery voltage >12.4V, key in ON position for >2 seconds. Use DMM with minimum 10MΩ impedance. Verify zero offset before testing.")
+4. ACTUAL part numbers (e.g., "OEM part #TD73-12K910-AC (2019-2020) superseded by #TD73-12K910-AD (2021+). Includes O-rings P/N: TD73-9229-A (upper) and TD73-9229-B (lower). Kit components: sensor assembly, gasket P/N TD73-9229-C, mounting bolts P/N N804192-S426.")
+5. EXACT diagnostic values (e.g., "MAP sensor voltage should be 0.45V ± 0.05V at idle (650-750 RPM, engine at operating temperature 85-95°C), increasing linearly to 4.5V ± 0.2V at WOT. Barometric pressure compensation: add 0.02V per 1000ft above sea level. Response time must be <50ms from 0.5V to 4.0V.")
+6. FACTORY SERVICE MANUAL references (e.g., "Refer to FSM section 303-14a, pages 27-32, procedure 'Fuel Injector Circuit Testing and Diagnosis'. Supplemental procedures: TSB 21-2345 'Updated Fuel Injector Testing Parameters', Workshop Manual section W12-303-14, Wiring Diagram 23456-A, Sheet 2 of 4.")
+
+Your response MUST be in this JSON format with ONLY diagnosticSteps:
+{{
+  "diagnosticSteps": [
+    {{
+      "step": "string",
+      "details": "string",
+      "componentLocation": "string",
+      "connectorInfo": "string",
+      "tools": ["string"],
+      "expectedReadings": "string",
+      "normalValueRanges": "string",
+      "factoryServiceManualRef": "string", 
+      "notes": "string",
+      "specialPrecautions": "string"
+    }}
+  ]
+}}
+
+Never use placeholder values like "Refer to manufacturer specifications" or "Check the service manual" - provide the EXACT values, specifications, and procedures that would be found in those sources.
+`);
+
+    const chatModel = new ChatOpenAI({
+      modelName: 'o3-mini',
+      openAIApiKey: process.env.OPENAI_API_KEY,
+      configuration: {
+        timeout: 120000,  // 2 minute timeout
+        maxRetries: 3,
+        retryDelay: 1000,
+      }
+    });
+
+    // Create a chain using RunnableSequence
+    const chain = RunnableSequence.from([
+      stepsPrompt,
+      chatModel,
+      new StringOutputParser()
+    ]);
+
+    const vehicleData = {
+      vin: vin || 'Not provided',
+      year,
+      make,
+      model,
+      problem: enhancedProblem,
+      trim: trim || 'Not specified',
+      engine: engine || 'Not specified',
+      transmission: transmission || 'Not specified',
+      mileage: mileage || 'Not specified',
+      dtcCodes: dtcCodes ? dtcCodes.join(', ') : 'None reported'
+    };
+
+    console.log('[Research Steps] Invoking AI with vehicle data');
+    // Process the response with retries and error handling
+    const parsedResult = await processAIResponse(chain, vehicleData);
+    
+    console.log('[Research Steps] ========== RAW AI RESPONSE ==========');
+    console.log(JSON.stringify(parsedResult, null, 2).slice(0, 500) + '...');
+    console.log('[Research Steps] =====================================');
+    
+    // Extract and format only diagnosticSteps
+    const diagnosticSteps = parsedResult.diagnosticSteps?.map(step => ({
+      step: step.step || '',
+      details: step.details || '',
+      componentLocation: step.componentLocation || '',
+      connectorInfo: step.connectorInfo || '',
+      tools: step.tools || [],
+      expectedReadings: step.expectedReadings || '',
+      normalValueRanges: step.normalValueRanges || '',
+      factoryServiceManualRef: step.factoryServiceManualRef || '',
+      notes: step.notes || '',
+      specialPrecautions: step.specialPrecautions || ''
+    })) || [];
+    
+    console.log('[Research Steps] ========== FORMATTED STEPS ==========');
+    console.log(`Generated ${diagnosticSteps.length} diagnostic steps`);
+    if (diagnosticSteps.length > 0) {
+      console.log('Sample step:', JSON.stringify(diagnosticSteps[0], null, 2));
+    }
+    console.log('[Research Steps] =====================================');
+    
+    // Store in MongoDB cache (save full structure for potential future use)
+    try {
+      const newCacheEntry = new ResearchCache({
+        vehicleInfo: {
+          vin,
+          year,
+          make,
+          model,
+          trim,
+          engine,
+          transmission,
+          mileage
+        },
+        problem, // Store original problem, not enhanced
+        dtcCodes: dtcCodes || [],
+        result: {
+          diagnosticSteps: diagnosticSteps,
+          // Store minimal structure for cache lookup
+        },
+        userId: userId || null,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          source: 'research_steps_endpoint',
+          sessionId: sessionId || null
+        }
+      });
+      
+      await newCacheEntry.save();
+      console.log(`[Research Steps] Saved research to database cache with ID: ${newCacheEntry._id}`);
+    } catch (cacheError) {
+      console.error('[Research Steps] Error storing in research cache:', cacheError);
+      // Continue with response even if cache storage fails
+    }
+
+    // Return only diagnosticSteps array
+    return res.status(200).json({ 
+      diagnosticSteps,
+      fromCache: false
+    });
+
+  } catch (error) {
+    console.error('[Research Steps] Error processing diagnostic steps request:', error);
+    return res.status(500).json({ 
+      error: 'Failed to process diagnostic steps request',
+      details: process.env.NODE_ENV === 'development' ? error.message : 'An internal server error occurred'
+    });
+  }
+});
+
+/**
  * POST /api/research/technical-details
  * 
  * Get in-depth technical details about a specific vehicle component or system
