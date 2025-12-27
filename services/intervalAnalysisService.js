@@ -562,6 +562,90 @@ Provide actionable insights and recommendations with system health scores.`
   }
 
   /**
+   * Get latest interval analysis results for active session (for live queries)
+   * Returns most recent analysis from each interval type
+   */
+  async getLatestIntervalResults(sessionId) {
+    const session = await this.DiagnosticSession.findById(sessionId).lean();
+    if (!session) {
+      return { error: 'Session not found' };
+    }
+
+    const intervalAnalysis = session.intervalAnalysis || {};
+    const latestResults = {};
+
+    // Extract latest results from each interval type
+    for (const [intervalKey, intervalData] of Object.entries(intervalAnalysis)) {
+      if (intervalData && intervalData.timestamp) {
+        // Check if we have analysis results (not just error state)
+        if (intervalData.analysisId || intervalData.result) {
+          // Get full analysis from Analysis collection if analysisId exists
+          if (intervalData.analysisId) {
+            try {
+              const analysisDoc = await this.Analysis.findOne({ 
+                analysisId: intervalData.analysisId,
+                isDeleted: false
+              }).lean();
+
+              if (analysisDoc) {
+                latestResults[intervalKey] = {
+                  timestamp: analysisDoc.timestamp,
+                  analysisType: analysisDoc.analysisType,
+                  duration: analysisDoc.duration,
+                  dataPointCount: analysisDoc.context?.dataPointCount || intervalData.dataPointCount || 0,
+                  result: analysisDoc.result,
+                  plots: analysisDoc.plots || [],
+                  analysisId: analysisDoc.analysisId,
+                  status: 'completed'
+                };
+              } else {
+                // Fallback to session data if Analysis doc not found
+                latestResults[intervalKey] = {
+                  timestamp: intervalData.timestamp,
+                  analysisType: intervalData.analysisType,
+                  duration: intervalData.duration,
+                  dataPointCount: intervalData.dataPointCount || 0,
+                  result: intervalData.result,
+                  plots: intervalData.plots || [],
+                  status: intervalData.status || 'completed'
+                };
+              }
+            } catch (error) {
+              console.error(`Error fetching analysis ${intervalData.analysisId}:`, error);
+              // Fallback to session data
+              latestResults[intervalKey] = {
+                timestamp: intervalData.timestamp,
+                analysisType: intervalData.analysisType,
+                duration: intervalData.duration,
+                dataPointCount: intervalData.dataPointCount || 0,
+                result: intervalData.result,
+                plots: intervalData.plots || [],
+                status: intervalData.status || 'completed'
+              };
+            }
+          } else {
+            // Use session data directly if no analysisId
+            latestResults[intervalKey] = {
+              timestamp: intervalData.timestamp,
+              analysisType: intervalData.analysisType,
+              duration: intervalData.duration,
+              dataPointCount: intervalData.dataPointCount || 0,
+              result: intervalData.result,
+              plots: intervalData.plots || [],
+              status: intervalData.status || 'completed'
+            };
+          }
+        }
+      }
+    }
+
+    return {
+      sessionId: session._id,
+      intervalAnalysis: latestResults
+    };
+  }
+
+  /**
    * Check if session needs interval analysis triggered
    * (Called from data ingestion endpoint)
    */

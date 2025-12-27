@@ -1025,6 +1025,260 @@ router.get('/sessions/:sessionId/interval-analysis', async (req, res) => {
   }
 });
 
+// Get latest interval analysis results for active session (live query)
+router.get('/sessions/:sessionId/interval-analysis/live', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/interval-analysis/live`, { sessionId }, req.body, req.query);
+
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID format' });
+    }
+
+    const intervalService = initializeIntervalAnalysisService();
+    const results = await intervalService.getLatestIntervalResults(sessionId);
+
+    if (results.error) {
+      return res.status(404).json({ success: false, error: results.error });
+    }
+
+    // Get session duration
+    const session = await DiagnosticSession.findById(sessionId).lean();
+    const sessionDuration = session ? Date.now() - new Date(session.startTime).getTime() : 0;
+
+    res.json({
+      success: true,
+      sessionId,
+      intervalAnalysis: results.intervalAnalysis || {},
+      availableIntervals: Object.keys(results.intervalAnalysis || {}),
+      sessionDuration,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Failed to fetch live interval analysis:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch live interval analysis results' });
+  }
+});
+
+// Get parameter variation for Quick Stationary monitoring
+router.get('/sessions/:sessionId/parameters/variation', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    logRouteRequest('GET', `/sessions/${sessionId}/parameters/variation`, { sessionId }, req.body, req.query);
+
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ success: false, error: 'Invalid session ID format' });
+    }
+
+    // Get session info
+    const session = await DiagnosticSession.findById(sessionId).lean();
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+
+    const sessionDuration = Date.now() - new Date(session.startTime).getTime();
+    const lookbackTime = new Date(Date.now() - 30000); // Last 30 seconds
+
+    // Get recent data points
+    const recentDataPoints = await OBD2DataPoint.find({
+      sessionId: new mongoose.Types.ObjectId(sessionId),
+      timestamp: { $gte: lookbackTime }
+    })
+      .sort({ timestamp: -1 })
+      .limit(100)
+      .lean();
+
+    if (recentDataPoints.length === 0) {
+      return res.json({
+        success: true,
+        parameters: {},
+        sufficiency: {
+          allCriteriaMet: false,
+          dataPointCount: 0,
+          minDataPoints: 60
+        },
+        sessionDuration,
+        guidance: {
+          action: 'wait',
+          message: 'Waiting for data points to be collected...'
+        }
+      });
+    }
+
+    // Calculate parameter variation
+    const rpmValues = recentDataPoints.map(p => p.rpm).filter(v => v != null && !isNaN(v));
+    const throttleValues = recentDataPoints.map(p => p.throttlePosition).filter(v => v != null && !isNaN(v));
+    const engineLoadValues = recentDataPoints.map(p => p.engineLoad).filter(v => v != null && !isNaN(v));
+
+    const parameters = {};
+    if (rpmValues.length > 0) {
+      parameters.rpm = {
+        current: rpmValues[rpmValues.length - 1],
+        min: Math.min(...rpmValues),
+        max: Math.max(...rpmValues),
+        variation: Math.max(...rpmValues) - Math.min(...rpmValues),
+        average: rpmValues.reduce((a, b) => a + b, 0) / rpmValues.length
+      };
+    }
+    if (throttleValues.length > 0) {
+      parameters.throttlePosition = {
+        current: throttleValues[throttleValues.length - 1],
+        min: Math.min(...throttleValues),
+        max: Math.max(...throttleValues),
+        variation: Math.max(...throttleValues) - Math.min(...throttleValues),
+        average: throttleValues.reduce((a, b) => a + b, 0) / throttleValues.length
+      };
+    }
+    if (engineLoadValues.length > 0) {
+      parameters.engineLoad = {
+        current: engineLoadValues[engineLoadValues.length - 1],
+        min: Math.min(...engineLoadValues),
+        max: Math.max(...engineLoadValues),
+        variation: Math.max(...engineLoadValues) - Math.min(...engineLoadValues),
+        average: engineLoadValues.reduce((a, b) => a + b, 0) / engineLoadValues.length
+      };
+    }
+
+    // Check sufficiency criteria
+    const rpmVariationThreshold = 200; // RPM
+    const throttleVariationThreshold = 10; // %
+    const engineLoadVariationThreshold = 15; // %
+    const minDataPoints = 60; // 1 minute at 1Hz
+    const minTimeThreshold = 90000; // 90 seconds (as per plan)
+
+    const rpmVariation = parameters.rpm ? parameters.rpm.variation >= rpmVariationThreshold : false;
+    const throttleVariation = parameters.throttlePosition ? parameters.throttlePosition.variation >= throttleVariationThreshold : false;
+    const engineLoadVariation = parameters.engineLoad ? parameters.engineLoad.variation >= engineLoadVariationThreshold : false;
+    const minTimeMet = sessionDuration >= minTimeThreshold;
+    const dataPointCount = recentDataPoints.length;
+
+    const allCriteriaMet = rpmVariation && throttleVariation && engineLoadVariation && minTimeMet && dataPointCount >= minDataPoints;
+
+    // Generate guidance
+    let guidance = { action: 'continue', message: '' };
+    
+    if (allCriteriaMet) {
+      guidance = { action: 'stop', message: 'Sufficient data collected. Ready to stop session.' };
+    } else if (!rpmVariation && sessionDuration < minTimeThreshold) {
+      guidance = { action: 'raise_idle', message: 'Please raise the idle (press accelerator slightly) to increase RPM variation.' };
+    } else if (rpmVariation && !throttleVariation) {
+      guidance = { action: 'vary_throttle', message: 'Good RPM variation. Now vary the throttle position more to increase throttle variation.' };
+    } else if (rpmVariation && throttleVariation && !engineLoadVariation) {
+      guidance = { action: 'hold_load', message: 'Good RPM and throttle variation. Hold different throttle positions to increase engine load variation.' };
+    } else if (minTimeMet && !allCriteriaMet) {
+      guidance = { action: 'continue', message: 'Time threshold met. Continue varying parameters to meet all criteria.' };
+    } else {
+      guidance = { action: 'continue', message: 'Continue monitoring. Collecting data...' };
+    }
+
+    res.json({
+      success: true,
+      parameters,
+      sufficiency: {
+        allCriteriaMet,
+        rpmVariation,
+        throttleVariation,
+        engineLoadVariation,
+        minTimeMet,
+        dataPointCount,
+        minDataPoints,
+        rpmVariationThreshold,
+        throttleVariationThreshold,
+        engineLoadVariationThreshold,
+        minTimeThreshold
+      },
+      sessionDuration,
+      guidance
+    });
+  } catch (error) {
+    console.error('❌ Failed to get parameter variation:', error);
+    res.status(500).json({ success: false, error: 'Failed to get parameter variation' });
+  }
+});
+
+// Trigger ad-hoc analysis during active session
+router.post('/sessions/:sessionId/analyze/ad-hoc', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    logRouteRequest('POST', `/sessions/${sessionId}/analyze/ad-hoc`, { sessionId }, req.body, req.query);
+    const { question, reasoningEffort = 'medium' } = req.body;
+
+    if (!question) {
+      return res.status(400).json({
+        success: false,
+        error: 'question is required'
+      });
+    }
+
+    console.log(`🔍 [AD-HOC] Analysis for active session ${sessionId}`);
+    console.log(`🔍 [AD-HOC] Question: ${question}`);
+
+    // Verify session exists (can be active or completed)
+    const session = await DiagnosticSession.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    const startTime = Date.now();
+
+    // Force flush any buffered data before analysis
+    await dataAggregator.forceFlush(sessionId);
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Load data into Docker container
+    const dataAccessTool = new OBD2DataAccessTool(OBD2DataPoint, DiagnosticSession);
+    const dataContextRaw = await dataAccessTool.run({ sessionId });
+
+    // Parse the result to check for errors
+    let dataContext;
+    try {
+      const dataResult = JSON.parse(dataContextRaw);
+      if (!dataResult.success) {
+        throw new Error(dataResult.error || 'Failed to load OBD2 data');
+      }
+      dataContext = dataContextRaw;
+    } catch (parseError) {
+      if (dataContextRaw.startsWith('Error:')) {
+        throw new Error(dataContextRaw);
+      }
+      dataContext = dataContextRaw;
+    }
+
+    // Run analysis with OBD2AnalysisAgent
+    const analysisAgent = new OBD2AnalysisAgent(secureOpenAIInterface, reasoningEffort);
+    analysisAgent.addContext(dataContext);
+
+    const analysisResult = await analysisAgent.task(question);
+
+    // Extract plots
+    const plots = extractPlotsFromAgent(analysisAgent);
+    console.log(`📊 [AD-HOC] Generated ${plots.length} visualization(s)`);
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    res.json({
+      success: true,
+      sessionId,
+      question,
+      analysis: analysisResult,
+      plots: plots,
+      reasoningEffort,
+      duration: `${duration}s`,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('🔍 [AD-HOC] ❌ Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Get session data points with filtering and aggregation
 router.get('/sessions/:sessionId/data', async (req, res) => {
   try {
