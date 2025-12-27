@@ -59,19 +59,28 @@ router.post('/', async (req, res) => {
     const mostRecentIDS = await IntelligentDiagnosticSession.findOne({ vin })
       .sort({ createdAt: -1 });
     
-    // If most recent exists and is active, return it
-    if (mostRecentIDS && mostRecentIDS.overallStatus === 'active') {
-      logRequest('GET', '/api/ids', { message: 'Returning existing active IDS', idsId: mostRecentIDS.idsId });
-      return res.json({
-        success: true,
-        ids: mostRecentIDS,
-        isNew: false
-      });
-    }
-
-    // If most recent is completed (or paused), create a new one
-    if (mostRecentIDS && (mostRecentIDS.overallStatus === 'completed' || mostRecentIDS.overallStatus === 'paused')) {
-      console.log(`🆕 Most recent IDS is ${mostRecentIDS.overallStatus}, creating new IDS for VIN: ${vin}`);
+    // If most recent exists, check if it's truly active (not completed)
+    if (mostRecentIDS) {
+      // Check both overallStatus and actual stage completion state for consistency
+      const allStagesCompleted = mostRecentIDS.areAllStagesCompleted();
+      const isActuallyCompleted = mostRecentIDS.overallStatus === 'completed' || allStagesCompleted;
+      
+      // If IDS is active and not all stages are completed, return it
+      if (mostRecentIDS.overallStatus === 'active' && !allStagesCompleted) {
+        // Ensure state consistency before returning
+        await mostRecentIDS.ensureConsistentState();
+        logRequest('GET', '/api/ids', { message: 'Returning existing active IDS', idsId: mostRecentIDS.idsId });
+        return res.json({
+          success: true,
+          ids: mostRecentIDS,
+          isNew: false
+        });
+      }
+      
+      // If IDS is marked as completed or all stages are completed, create a new one
+      if (isActuallyCompleted || mostRecentIDS.overallStatus === 'paused') {
+        console.log(`🆕 Most recent IDS is ${mostRecentIDS.overallStatus}${allStagesCompleted ? ' (all stages completed)' : ''}, creating new IDS for VIN: ${vin}`);
+      }
     }
 
     // Create new IDS with initial inspection stage
@@ -333,7 +342,8 @@ router.get('/vehicle/:vin/all', async (req, res) => {
 router.put('/:idsId/stage/:stageName/start', async (req, res) => {
   try {
     const { idsId, stageName } = req.params;
-    logRequest('PUT', `/api/ids/${idsId}/stage/${stageName}/start`);
+    const { allowSkipStages } = req.query;
+    logRequest('PUT', `/api/ids/${idsId}/stage/${stageName}/start`, { allowSkipStages });
 
     const validStages = ['inspection', 'analysis-repair', 'verification-testdriving'];
     if (!validStages.includes(stageName)) {
@@ -345,15 +355,12 @@ router.put('/:idsId/stage/:stageName/start', async (req, res) => {
       return res.status(404).json({ error: 'IDS not found' });
     }
 
-    // Update or create stage
-    await ids.updateStage(stageName, {
-      status: 'in-progress',
-      startTime: new Date()
-    });
+    // Use the new startStage method which handles validation and single-stage enforcement atomically
+    const allowSkip = allowSkipStages === 'true' || allowSkipStages === true;
+    await ids.startStage(stageName, allowSkip);
 
-    // Update current stage
-    ids.currentStage = stageName;
-    await ids.save();
+    // Ensure state consistency
+    await ids.ensureConsistentState();
 
     res.json({
       success: true,
@@ -362,6 +369,10 @@ router.put('/:idsId/stage/:stageName/start', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Failed to start stage:', error);
+    // Check if it's a validation error
+    if (error.message && error.message.includes('Cannot start')) {
+      return res.status(400).json({ error: error.message });
+    }
     res.status(500).json({ error: 'Failed to start stage', message: error.message });
   }
 });
@@ -456,11 +467,11 @@ router.put('/:idsId/stage/:stageName/complete', async (req, res) => {
 
     await ids.updateStage(stageName, updates);
     
-    // Check if all stages are now completed and mark IDS as completed
-    await ids.save();
-    if (ids.areAllStagesCompleted() && ids.overallStatus !== 'completed') {
-      ids.overallStatus = 'completed';
-      await ids.save();
+    // Ensure state consistency (this will check if all stages are completed and update overallStatus)
+    await ids.ensureConsistentState();
+    
+    // Log if IDS was marked as completed
+    if (ids.overallStatus === 'completed') {
       console.log(`✅ IDS ${idsId} marked as completed - all stages finished`);
     }
 
@@ -472,6 +483,55 @@ router.put('/:idsId/stage/:stageName/complete', async (req, res) => {
   } catch (error) {
     console.error('❌ Failed to complete stage:', error);
     res.status(500).json({ error: 'Failed to complete stage', message: error.message });
+  }
+});
+
+// Explicitly close/complete an IDS (for edge cases or manual closure)
+router.put('/:idsId/close', async (req, res) => {
+  try {
+    const { idsId } = req.params;
+    logRequest('PUT', `/api/ids/${idsId}/close`);
+
+    const ids = await IntelligentDiagnosticSession.findOne({ idsId });
+    if (!ids) {
+      return res.status(404).json({ error: 'IDS not found' });
+    }
+
+    // Mark as completed
+    ids.overallStatus = 'completed';
+    
+    // Ensure all stages are marked as completed if they're not already
+    const stageOrder = ['inspection', 'analysis-repair', 'verification-testdriving'];
+    let needsSave = false;
+    
+    stageOrder.forEach(stageName => {
+      const stage = ids.getStage(stageName);
+      if (stage && stage.status !== 'completed') {
+        stage.status = 'completed';
+        if (!stage.endTime) {
+          stage.endTime = new Date();
+        }
+        needsSave = true;
+      }
+    });
+    
+    if (needsSave || ids.overallStatus !== 'completed') {
+      await ids.save();
+    }
+    
+    // Ensure state consistency
+    await ids.ensureConsistentState();
+
+    console.log(`✅ IDS ${idsId} explicitly closed/completed`);
+
+    res.json({
+      success: true,
+      ids,
+      message: 'IDS has been closed and marked as completed'
+    });
+  } catch (error) {
+    console.error('❌ Failed to close IDS:', error);
+    res.status(500).json({ error: 'Failed to close IDS', message: error.message });
   }
 });
 
